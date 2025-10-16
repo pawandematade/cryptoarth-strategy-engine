@@ -1,0 +1,60 @@
+from django.urls import path,include
+from rest_framework.routers import DefaultRouter
+from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails
+
+router = DefaultRouter()
+router.register(r'highlow-strategies', HighLowStrategyViewSet, basename='highlow-strategy')
+router.register(r'highlow-strategies1', HighLowStrategyViewSet1, basename='highlow-strategy')
+# router.register('seller/auth', SellerAuthViewSet, basename='seller-auth')
+
+
+
+urlpatterns = [
+    # Endpoint to send OTP to user's phone/email (used for both login and signup)
+    path('send-otp/', SendOTPView.as_view(), name='send-otp'),
+    
+    # Endpoint for user signup with OTP or social login (Google, Facebook, Apple)
+    path('signup/', SignupView.as_view(), name='signup'),
+
+    # Endpoint for OTP-based login (returns JWT access and refresh token)
+    path('login/', OTPLoginView.as_view(), name='otp-login'),
+
+     path('signal/', ProcessSignal.as_view(), name='ProcessSignal'),
+
+    path('user/', UserDetailView.as_view(), name='user-detail'),
+    path('setSignal/',setSignal.as_view(),name="setSignal"),
+    path('deleteSignal/',deleteSignal.as_view(),name="deleteSignal"),
+    path('editActiveSignal/',editActiveSignal.as_view(),name="editActiveSignal"),
+    path('edidPendingSignal/',editPendingSignal.as_view(),name="edidPendingSignal"),
+    path('closeSignal/',closeSignal.as_view(),name="closeSignal"),
+    path("broker/connect/", BrokerConnectView.as_view(), name="broker-connect"),
+    
+    path("get_tutorial/", get_tutorial.as_view(), name="get_tutorial"),
+    path("get_strategy_data/", get_strategy_data.as_view(), name="get_strategy_data"),
+    path("orders/", OrderDetailsView.as_view(), name="orders"),
+    path("trades/", TradeDetailsView.as_view(), name="trades"),
+    path("dashboard/", dashboard_count.as_view(), name="dashboard_count"),
+    path("watchlist/", WatchlistView.as_view(), name="watchlist"),
+    path('users/phone/<str:phone>/', UserByPhoneView.as_view(), name='user-by-phone'),
+    # Endpoint to check if a user exists by phone number
+    path('check-phone/', PhoneCheckView.as_view(), name='check-phone'),
+
+    
+    path('userOrderDetails/', userOrderDetails.as_view(), name='userOrderDetails'),
+    path('adminPositionDetails/', adminPositionDetails.as_view(), name='adminPositionDetails'),
+    path('adminOrderDetails/', adminOrderDetails.as_view(), name='adminOrderDetails'),
+    path('adminTradeDetails/', adminTradeDetails.as_view(), name='adminTradeDetails'),
+    path('user/add_strategy/', add_strategy.as_view(), name='add_strategy'),
+    path('user/user_strategy/', user_strategy.as_view(), name='user_strategy'),
+    path('user/admin_user_strategy/', admin_user_strategy.as_view(), name='admin_user_strategy'),
+    path('user/strategies/', user_strategy_portfolio.as_view(), name='user-strategies'),
+    
+    # Deploy a strategy
+    path('user/strategies/deploy/', deploy_strategy_portfolio.as_view(), name='deploy-strategy'),
+
+
+    path('user/strategies/undeploy/', UndeployStrategyAPIView.as_view(), name='undeploy-strategy'),
+
+    path('', include(router.urls)),
+]
+

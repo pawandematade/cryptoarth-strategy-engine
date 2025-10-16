@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+  web:
+    build: .
+    command: ./entrypoint.sh
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/code
+    environment:
+      - DJANGO_SETTINGS_MODULE=delta_backend.settings

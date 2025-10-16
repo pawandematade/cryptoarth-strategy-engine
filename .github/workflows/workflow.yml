@@ -1,0 +1,45 @@
+
+
+name: CryptoArth-Bankend-Release
+
+on:
+  push:
+    branches:
+      - main  # Change to your deployment branch if needed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build --no-cache -t sanketb81/cryptoarth-backend:latest .
+          docker push sanketb81/cryptoarth-backend:latest
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            docker pull sanketb81/cryptoarth-backend:latest
+            docker stop django-container || true
+            docker rm django-container || true
+            
+            docker run -d --name django-container -p 80:8000 sanketb81/cryptoarth-backend:latest
+
+
