@@ -72,3 +72,4 @@ paytmchecksum
 reportlab
 kafka-python
 confluent-kafka
+django-filter
