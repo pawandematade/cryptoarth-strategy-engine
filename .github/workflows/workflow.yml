@@ -51,7 +51,7 @@ jobs:
             docker stop django-container || true
             docker rm django-container || true
             
-            docker run -d --name django-container -p 80:8000 sanketb81/cryptoarth-backend:latest
+            docker run -d --name django-container -p 80:8000 -p 443:8443 sanketb81/cryptoarth-backend:latest
 
 
       - name: Deploy to Server1

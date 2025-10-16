@@ -12,6 +12,6 @@ gunicorn delta_backend.asgi:application \
   --threads 4 \
   -k uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000 \
-  # --bind 0.0.0.0:8443 \
-  # --certfile /etc/ssl/certs/tradearth.pem \
-  # --keyfile /etc/ssl/certs/tradearth.key
+  --bind 0.0.0.0:8443 \
+  --certfile /etc/ssl/certs/tradearth.pem \
+  --keyfile /etc/ssl/certs/tradearth.key

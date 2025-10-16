@@ -5,8 +5,8 @@ WORKDIR /code
 # Allows docker to cache installed dependencies between builds
 COPY requirements.txt /code/requirements.txt
 
-# COPY certificates/tradearth/fullchain.pem /etc/ssl/certs/tradearth.pem
-# COPY certificates/tradearth/privkey.pem /etc/ssl/certs/tradearth.key
+COPY ssl/fullchain.pem /etc/ssl/certs/tradearth.pem
+COPY ssl/privkey.pem /etc/ssl/certs/tradearth.key
 
 #RUN pip3 install --upgrade pip
 RUN pip3 install \
