@@ -521,7 +521,11 @@ class ProcessSignal(APIView):
 
                     return Response({'message':'Signal Process Successfully.'})
                 else:
-                    process_entry_order()
+                    client12 = process_entry_order(symbolid,side,leverage,capital,strategy_id,strat.name)
+                    client12.process()
+                    
+
+                    return Response({'message':'Signal Process Successfully.'})
             else:
                 client12 = process_exit_order(strategy_id,symbolid,side,strat.name)
                 client12.process()
