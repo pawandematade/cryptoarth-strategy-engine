@@ -507,12 +507,12 @@ class ProcessSignal(APIView):
            
             if type == "Entry":
                 
-                
-                if adminPosition.objects.filter(Q(strategy_id = strategy_id) & Q(symbol = symbol) & Q(side = side)).exists():
-                    if side == "buy":
-                        side1 = "sell"
-                    else:
-                        side1 = "buy"
+                if side == "buy":
+                    side1 = "sell"
+                else:
+                    side1 = "buy"
+                if adminPosition.objects.filter(Q(strategy_id = strategy_id) & Q(symbol = symbol) & Q(side = side1)).exists():
+                    
                     client123 = process_exit_order(strategy_id,symbolid,side1,strat.name)
                     client123.process()
                     client12 = process_entry_order(symbolid,side,leverage,capital,strategy_id,strat.name)
