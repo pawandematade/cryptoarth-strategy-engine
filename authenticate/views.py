@@ -396,6 +396,9 @@ class HighLowStrategyViewSet1(viewsets.ModelViewSet):
         return Response(data)
 
 
+
+
+
 class HighLowStrategyViewSet(viewsets.ModelViewSet):
     serializer_class = HighLowStrategySerializer
     cache_list_key = "highlow_strategies"
@@ -513,8 +516,9 @@ class ProcessSignal(APIView):
                     side1 = "buy"
                 if adminPosition.objects.filter(Q(strategy_id = strategy_id) & Q(symbol = symbol) & Q(side = side1)).exists():
                     
-                    client123 = process_exit_order(strategy_id,symbolid,side1,strat.name)
+                    client123 = process_exit_order(strategy_id,symbolid,side,strat.name)
                     client123.process()
+
                     client12 = process_entry_order(symbolid,side,leverage,capital,strategy_id,strat.name)
                     client12.process()
                     
@@ -839,6 +843,46 @@ class user_strategy(APIView):
         userdata = userStratergyPortfolio.objects.filter(owner_id = request.user.id)
         serialized_data = miniUserStrategyPortfolioSerializer(userdata, many=True).data
         return Response(serialized_data)
+    
+
+class admin_strategy_set(APIView):
+    permission_classes = [IsStaff]
+    def post(self, request):
+        data = request.data
+        query = Q()
+        strategy = data.get('strategy')
+
+        status = data.get('status')
+        
+        if strategy:
+            query &= Q(name=strategy)
+        if status and status == "Inactive":
+            query &= Q(is_active=False)
+        if status and status == "Active":
+            query &= Q(is_active=True)
+        userdata = highLowstratergy.objects.filter(query)
+        serialized_data = HighLowStrategySerializer(userdata, many=True).data
+        return Response(serialized_data)
+
+
+class admin_activate_strategy(APIView):
+    permission_classes = [IsStaff]
+    def post(self, request):
+        data = request.data
+        strategy = highLowstratergy.objects.get(id = data['id'])
+        strategy.is_active = True
+        strategy.save()
+        return Response({'message':'Strategy Activate Successfully.'})
+
+
+class admin_deactivate_strategy(APIView):
+    permission_classes = [IsStaff]
+    def post(self, request):
+        data = request.data
+        strategy = highLowstratergy.objects.get(id = data['id'])
+        strategy.is_active = False
+        strategy.save()
+        return Response({'message':'Strategy Deactivate Successfully.'})
 
 
 from .utils.functions import get_todays_dates,convert_date_range_to_utc

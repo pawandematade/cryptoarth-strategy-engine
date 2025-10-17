@@ -127,8 +127,9 @@ class highLowstratergy(models.Model):
     sl = models.TextField(default="NA")
     risk = models.CharField(max_length = 25,default = "Low")
     overallReturn = models.DecimalField(max_digits = 13,decimal_places = 3, default=0)
+    strategy_allow = models.CharField(max_length = 25,default = "All")
 
-    
+
 
 class userStratergyPortfolio(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="strategy")  
