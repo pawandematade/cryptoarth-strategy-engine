@@ -370,7 +370,8 @@ class process_entry_order:
     def caclulate_quantity(self,fund):
         data = self.symbol_d
         margin = fund * int(self.leverage) * float(self.capital)
-        liveprice = float(cache.get(f"DELTA-{self.symbol_d['symbol']}"))
+        
+        liveprice = float(get_live_price(self.symbol_d['symbol']))
         qty = int((margin / liveprice)/float(data['contract_value']))
         if qty >= 1:
             return qty
@@ -531,6 +532,15 @@ def convert_date_range_to_utc(start_date_str, end_date_str):
     end_of_day_utc = end_of_day_kolkata.astimezone(pytz.UTC)
 
     return start_of_day_utc, end_of_day_utc
+
+
+
+def get_live_price(symbol):
+    price = cache.get(f'DELTA-{symbol}')
+    if not price:
+        data = requests.get(f"https://api.india.delta.exchange/v2/tickers/{symbol}").json()
+        price = float(data['result']['mark_price'])
+    return price
 
 
 

@@ -640,7 +640,7 @@ class UndeployStrategyAPIView(APIView):
         
 
 import requests
-
+from .utils.functions import get_live_price
 
 
 class setSignal(APIView):
@@ -674,7 +674,7 @@ class setSignal(APIView):
             final_string2 = "|".join(parts2) + "|"
             print(final_string2,data['url'])
             response = requests.post(data['url'], data=final_string2.encode("utf-8"), headers=headers)
-            price1 = cache.get(f"DELTA-{data['symbol']}")
+            price1 = get_live_price(data['symbol'])
             if data['side'] == "buy":
                 tpprice = float(price1) + float(data['trailingpoints'])
             else:
@@ -748,7 +748,7 @@ class editPendingSignal(APIView):
             final_string2 = "|".join(parts2) + "|"
 
             response = requests.post(signal.url, data=final_string2.encode("utf-8"), headers=headers)
-            price1 = cache.get(f"DELTA-{signal.symbol}")
+            price1 =  get_live_price(signal.symbol)
             signal.target = data['target']
             signal.stoploss = data['stoploss']
             signal.entry = float(price1) 
@@ -799,7 +799,7 @@ class editActiveSignal(APIView):
         signal.stoploss = data['stoploss']
         signal.trailingpoints = data['trailingpoints']
 
-        price1 = cache.get(f"DELTA-{signal.symbol}")
+        price1 =  get_live_price(signal.symbol)
         if signal.side == "buy":
             tpprice = float(price1) +float(data['trailingpoints'])
         else:

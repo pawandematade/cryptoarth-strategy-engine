@@ -156,8 +156,9 @@ def process_token_tp12(token):
     from django.db.models import Q,F
     from concurrent.futures import ThreadPoolExecutor
     from authenticate.models import copysignal
+    from authenticate.utils.functions import get_live_price
     
-    price = cache.get(f"DELTA-{token}")
+    price =  float(get_live_price(token))
 
     copysignal.objects.filter(Q(status = "Active") &  Q(side = "buy") & (Q(target__lt=price) | Q(stoploss__gt=price)) & Q(symbol = token)).update(status = "Processing")
 
@@ -176,7 +177,9 @@ def process_token_sell_tp23(token):
     from django.db.models import Q,F
     from concurrent.futures import ThreadPoolExecutor
     from authenticate.models import copysignal
-    price = cache.get(f"DELTA-{token}")
+    from authenticate.utils.functions import get_live_price
+    
+    price =  float(get_live_price(token))
 
     copysignal.objects.filter(Q(status = "Active") &  Q(side = "sell") & (Q(target__gt=price) | Q(stoploss__lt=price)) & Q(symbol = token)).update(status = "Processing")
 
@@ -192,7 +195,9 @@ def process_buy_limit(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
     from authenticate.models import copysignal
-    price = cache.get(f"DELTA-{token}")
+    from authenticate.utils.functions import get_live_price
+    
+    price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "buy", typeq = "limit",symbol = token,entry__gt =price).update(status = "Processing")
     userdata_set = copysignal.objects.filter(status = "Processing", side = "buy", typeq = "limit",symbol = token,entry__gt =price)
 
@@ -204,7 +209,9 @@ def process_buy_limit1(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
     from authenticate.models import copysignal
-    price = cache.get(f"DELTA-{token}")
+    from authenticate.utils.functions import get_live_price
+    
+    price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "buy", typeq = "sllimit",symbol = token,entry__lt =price).update(status = "Processing")
     userdata_set = copysignal.objects.filter(status = "Processing", side = "buy", typeq = "sllimit",symbol = token,entry__lt =price)
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -214,7 +221,9 @@ def process_sell_limit(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
     from authenticate.models import copysignal
-    price = cache.get(f"DELTA-{token}")
+    from authenticate.utils.functions import get_live_price
+    
+    price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "sell", typeq = "limit",symbol = token , entry__lt =price).update(status = "Processing")
     userdata_set = copysignal.objects.filter(status = "Processing", side = "sell", typeq = "limit",symbol = token , entry__lt =price)
 
@@ -226,7 +235,9 @@ def process_sell_limit1(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
     from authenticate.models import copysignal
-    price = cache.get(f"DELTA-{token}")
+    from authenticate.utils.functions import get_live_price
+    
+    price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "sell", typeq = "sllimit",symbol = token , entry__gt =price).update(status = "Processing")
     userdata_set = copysignal.objects.filter(status = "Processing", side = "sell", typeq = "sllimit",symbol = token , entry__gt =price)
 
@@ -253,7 +264,7 @@ def process_task(signal):
         
         parts2 = [
                 signal.symbol,
-                str(signal.symbolid),"0","0","0",str(signal.strategy.id),"DELTA",side,formatted_datetime,str(signal.leverage),str(signal.capital),"Exit"
+                str(signal.symbolid),"0","0","0",str(signal.strategy.id),str(signal.strategy.stratergy_code),"DELTA",side,formatted_datetime,str(signal.leverage),str(signal.capital),"Exit"
             ]
         final_string2 = "|".join(parts2) + "|"
         response = requests.post(signal.url, data=final_string2.encode("utf-8"), headers=headers)
@@ -274,9 +285,10 @@ def process_task1(signal):
     headers = {
         "Content-Type": "text/plain"
     }
+    
     parts2 = [
                 signal.symbol,
-                str(signal.symbolid),"0","0","0",str(signal.strategy.id),"DELTA",signal.side,formatted_datetime,str(signal.leverage),str(signal.capital),"Entry"
+                str(signal.symbolid),"0","0","0",str(signal.strategy.id),str(signal.strategy.stratergy_code),"DELTA",signal.side,formatted_datetime,str(signal.leverage),str(signal.capital),"Entry"
             ]
     final_string2 = "|".join(parts2) + "|"
     response = requests.post(signal.url, data=final_string2.encode("utf-8"), headers=headers)
