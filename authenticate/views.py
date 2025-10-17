@@ -1065,4 +1065,14 @@ class add_strategy(APIView):
         # email_body ="strategyname :"+ strategyname +"\n"+"\n"+ "strategycategory :"+ strategycategory +"\n"+"\n"+ "segment :"+ segment +"\n"+"\n" + "timeframe :"+ str(timeframe) +"\n"+"\n" + "tradeperday :"+ str(tradeperday) +"\n"+"\n" + "indicators :"+ str(indicators) +"\n"+"\n"+ "entryconditions :"+ str(entryconditions) +"\n"+"\n"+ "exitconditions :"+ str(exitconditions) +"\n"+"\n"+ "stoploss :"+ str(stoploss) +"\n"+"\n"+ "target :"+ str(target) +"\n"+"\n"+ "additionalnotes :"+ str(additionalnotes) +"\n"+"\n"+ "ownername :"+ str(ownername) +"\n"+"\n"+ "whatsappnumber :"+ str(whatsappnumber) +"\n"+"\n"+ "email :"+ str(email) +"\n"+"\n"
         # send_mail('Strategy create request',email_body,"contact@tradearth.in",[email1],)
         return Response({'message':'Strategy Saved Successfully'},status=status.HTTP_200_OK)
-        
+
+
+from .models import customer_failorder
+from .serializers import NotificationSerializer
+class userNotifications(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self,request):
+        userdata = customer_failorder.objects.filter(owner=request.user.id)
+        data = NotificationSerializer(userdata,many=True).data
+        return Response(data)

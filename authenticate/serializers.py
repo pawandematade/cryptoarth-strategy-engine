@@ -3,7 +3,7 @@ from django.core.cache import cache  # ✅ This is correct
 from rest_framework import serializers
 from django.utils import timezone
 from datetime import timedelta
-from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial
+from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial,customer_failorder
 from rest_framework.exceptions import AuthenticationFailed
 import random
 from .utils.otp_service import OTPService
@@ -398,3 +398,11 @@ class adminOrderDetailsSerializer(serializers.ModelSerializer):
             local_time = utc_time.astimezone(ist_timezone)
             return local_time.strftime("%Y-%m-%d %H:%M:%S")
         return None
+
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    
+    class Meta:
+        model = customer_failorder
+        fields = '__all__'
