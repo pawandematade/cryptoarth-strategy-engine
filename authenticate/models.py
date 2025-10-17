@@ -106,7 +106,7 @@ class Watchlist(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('user', 'symbol')   # prevent duplicate symbols in same user's watchlist
+        unique_together = ('user', 'symbol')  
 
     def __str__(self):
         return f"{self.user.username} - {self.symbol.symbol}"
@@ -116,6 +116,7 @@ class highLowstratergy(models.Model):
     stratergy_code = models.CharField(max_length = 55,default = "NA")
     name = models.CharField(max_length = 25,default = "NA")
     full_name  = models.CharField(max_length = 25,default = "NA")
+    is_active = models.BooleanField(default=False)
     stratergy_description = models.CharField(max_length = 500,default = "NA")
     tag = models.JSONField(blank=True, null = True)
     captial_requirement = models.TextField(default="NA")
@@ -126,6 +127,8 @@ class highLowstratergy(models.Model):
     sl = models.TextField(default="NA")
     risk = models.CharField(max_length = 25,default = "Low")
     overallReturn = models.DecimalField(max_digits = 13,decimal_places = 3, default=0)
+
+    
 
 class userStratergyPortfolio(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="strategy")  

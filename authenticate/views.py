@@ -506,13 +506,22 @@ class ProcessSignal(APIView):
                 return Response({'message':'Strategy is Inactive. Ignored.'})
            
             if type == "Entry":
-                client12 = process_entry_order(symbolid,side,leverage,capital,strategy_id,strat.name)
-                client12.process()
-                return Response({'message':'Signal Process Successfully.'})
-                # if adminPosition.objects.filter(Q(strategy_id = strategy_id) & Q(symbol = symbol) & Q(side = side)).exists():
-                #     process_avergaing()
-                # else:
-                #     process_entry_order()
+                
+                
+                if adminPosition.objects.filter(Q(strategy_id = strategy_id) & Q(symbol = symbol) & Q(side = side)).exists():
+                    if side == "buy":
+                        side1 = "sell"
+                    else:
+                        side1 = "buy"
+                    client123 = process_exit_order(strategy_id,symbolid,side1,strat.name)
+                    client123.process()
+                    client12 = process_entry_order(symbolid,side,leverage,capital,strategy_id,strat.name)
+                    client12.process()
+                    
+
+                    return Response({'message':'Signal Process Successfully.'})
+                else:
+                    process_entry_order()
             else:
                 client12 = process_exit_order(strategy_id,symbolid,side,strat.name)
                 client12.process()
