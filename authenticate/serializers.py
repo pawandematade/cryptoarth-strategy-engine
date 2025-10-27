@@ -268,12 +268,14 @@ class HighLowStrategyLimitedSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Force strategy_allow to be "limited" for non-admin users
         validated_data['strategy_allow'] = 'limited'
-        
+        request = self.context.get('request')
+        if request:
+            validated_data['owner'] = request.user.phone
         # If you want to automatically add the creating user to allowed_users
         strategy = super().create(validated_data)
         
         # Add the current user to allowed_users
-        request = self.context.get('request')
+        
         if request:
             strategy.allowed_users.add(request.user)
         
@@ -301,7 +303,7 @@ class TradeSerializer(serializers.ModelSerializer):
 
 class OrderDetailsSerializer(serializers.ModelSerializer):
     local_date = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = OrderDetails
         fields = '__all__'
@@ -444,3 +446,13 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = customer_failorder
         fields = '__all__'
+
+
+
+
+
+class UserStratSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'phone', 'first_name', 'last_name']
+

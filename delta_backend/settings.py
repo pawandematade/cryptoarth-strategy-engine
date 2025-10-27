@@ -206,6 +206,17 @@ USE_I18N = True
 
 USE_TZ = True
 
+EMAIL_HOST = 'smtp.gmail.com'
+#EMAIL_HOST = 'smtp.hostinger.com'
+EMAIL_PORT = 587
+
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
+
+EMAIL_HOST_USER = "contact@tradearth.in"
+#EMAIL_HOST_PASSWORD = "kyrjtemjjfciqpwi"
+EMAIL_HOST_PASSWORD = "pcjiqwboongqlkcf"
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/

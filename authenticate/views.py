@@ -346,11 +346,13 @@ class TradeDetailsView(APIView):
 
     def get(self,request):
         cache_key = f"trade_details_{request.user.id}"
-        today = timezone.now().date()
+        s,p = get_todays_dates()
         data = cache.get(cache_key)
         if not data:
             trades = tradeDetails.objects.filter(
                 owner=request.user,
+                date__gte = s,
+                date__lte = p
                 # date__date=today
             ).order_by("-date")
             serializer = TradeDetailsSerializer(trades, many=True)
@@ -365,12 +367,13 @@ class OrderDetailsView(APIView):
 
     def get(self,request):
         cache_key = f"order_details_{request.user.id}"
-        today = timezone.now().date()
+        s,p = get_todays_dates()
         data = cache.get(cache_key)
         if not data:
             trades = OrderDetails.objects.filter(
                 owner=request.user,
-                # date__date=today
+                date__gte = s,
+                date__lte = p
             ).order_by("-date")
             serializer = OrderDetailsSerializer(trades, many=True)
             data = serializer.data
@@ -379,7 +382,7 @@ class OrderDetailsView(APIView):
 
 class HighLowStrategyViewSet1(viewsets.ModelViewSet):
     serializer_class = HighLowStrategySerializer
-    cache_list_key = "highlow_strategies"
+    
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
@@ -387,12 +390,14 @@ class HighLowStrategyViewSet1(viewsets.ModelViewSet):
     
     # List with cache
     def list(self, request, *args, **kwargs):
-        data = cache.get(self.cache_list_key)
+        cache_list_key = f"highlow_strategies_{request.user.id}"
+        data = cache.get(cache_list_key)
         if not data:
-            objs = highLowstratergy.objects.all().order_by("-created_date")
+            dataset = highLowstratergy.objects.filter(is_active = True)
+            objs = dataset.filter(Q(allowed_users__isnull=True) | Q(allowed_users=self.request.user)).order_by("-created_date")
             serializer = self.get_serializer(objs, many=True)
             data = serializer.data
-            cache.set(self.cache_list_key, data, timeout=300)  # cache for 5 min
+            cache.set(cache_list_key, data, timeout=300)  # cache for 5 min
         return Response(data)
 
 
@@ -437,7 +442,10 @@ class HighLowStrategyViewSet(viewsets.ModelViewSet):
     # Create
     def perform_create(self, serializer):
         instance = serializer.save()
-        cache.delete(self.cache_list_key)  # invalidate list cache
+        try:
+            cache.delete_pattern("highlow_strategies_*")
+        except:
+            pass
         return instance
 
     # Update
@@ -456,11 +464,15 @@ class HighLowStrategyViewSet(viewsets.ModelViewSet):
 from .serializers import HighLowStrategyLimitedSerializer
 class HighLowStrategyLimitedCreateView(viewsets.ModelViewSet):
     serializer_class = HighLowStrategyLimitedSerializer
-    permission_classes = [IsStaff]
+    permission_classes = [permissions.IsAuthenticated]
     
     def perform_create(self, serializer):
         # You can also set the owner to current user if needed
         instance = serializer.save()
+        try:
+            cache.delete_pattern("highlow_strategies_*")
+        except:
+            pass
         return instance
 
 
@@ -677,30 +689,34 @@ class Close_all_Positions(APIView):
     def post(self,request):
         data = request.data
         strategy_id = data['strategy_id']
-        adminposition = adminPosition.objects.get(strategy_id = strategy_id)
-        symbol = adminposition.symbol
-        symbolid = SymbolMaster.objects.get(symbol = symbol).symbolid
-        side = adminposition.side
-        stratergycode = adminposition.strategy.stratergy_code
-        url = "https://api.cryptoarth.in/auth/signal/"
-        tz = pytz.timezone('Asia/Kolkata')
-        now = datetime.now(tz)
-        formatted_datetime = now.strftime("%m/%d/%Y %I:%M:%S %p")
-        headers = {
-            "Content-Type": "text/plain"
-        }
-        if side == "buy":
-            side1 = "sell"
+        
+        if adminPosition.objects.filter(strategy_id = strategy_id).exists():
+            adminposition = adminPosition.objects.get(strategy_id = strategy_id)
+            symbol = adminposition.symbol
+            symbolid = SymbolMaster.objects.get(symbol = symbol).symbolid
+            side = adminposition.side
+            stratergycode = adminposition.strategy.stratergy_code
+            url = "https://trade-api.cryptoarth.in/auth/signal/"
+            tz = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(tz)
+            formatted_datetime = now.strftime("%m/%d/%Y %I:%M:%S %p")
+            headers = {
+                "Content-Type": "text/plain"
+            }
+            if side == "buy":
+                side1 = "sell"
+            else:
+                side1 = "buy"
+            parts2 = [
+                    symbol,
+                    str(symbolid),"0","0","0",str(strategy_id),str(stratergycode),"DELTA",side1,formatted_datetime,"0","0","Exit"
+                ]
+            final_string2 = "|".join(parts2) + "|"
+                
+            response = requests.post(url, data=final_string2.encode("utf-8"), headers=headers)
+            return Response({'message':'All Positions closed Successfully.'},status = status.HTTP_200_OK)
         else:
-            side1 = "buy"
-        parts2 = [
-                symbol,
-                str(symbolid),"0","0","0",str(strategy_id),str(stratergycode),"DELTA",side1,formatted_datetime,"0","0","Exit"
-            ]
-        final_string2 = "|".join(parts2) + "|"
-            
-        response = requests.post(url, data=final_string2.encode("utf-8"), headers=headers)
-        return Response({'message':'All Positions closed Successfully.'},status = status.HTTP_200_OK)
+            return Response({'message':'No Active Positions found for this Strategy.'},status = status.HTTP_400_BAD_REQUEST)
 
 class setSignal(APIView):
 
@@ -905,6 +921,29 @@ class admin_strategy_set(APIView):
         userdata = highLowstratergy.objects.filter(query)
         serialized_data = HighLowStrategySerializer(userdata, many=True).data
         return Response(serialized_data)
+    
+
+class user_strategy_set(APIView):
+    permission_classes = [IsStaff]
+    def post(self, request):
+        data = request.data
+        query = Q(owner = request.user.phone)
+        strategy = data.get('strategy')
+        
+
+        status = data.get('status')
+        
+        if strategy:
+            query &= Q(name=strategy)
+        if status and status == "Inactive":
+            query &= Q(is_active=False)
+        if status and status == "Active":
+            query &= Q(is_active=True)
+        userdata = highLowstratergy.objects.filter(query)
+        serialized_data = HighLowStrategySerializer(userdata, many=True).data
+        return Response(serialized_data)
+
+
 
 from django.shortcuts import get_object_or_404   
 
@@ -972,6 +1011,28 @@ class remove_user_to_strategy(APIView):
         
         return Response(response_data, status=status.HTTP_200_OK)
 
+
+from .serializers import UserStratSerializer
+class StrategyUsersDetailView(APIView):
+    permission_classes = [IsStaff]
+    
+    def get(self, request, strategy_id):
+        strategy = get_object_or_404(highLowstratergy, id=strategy_id)
+        
+        users = strategy.allowed_users.all()
+        
+        
+        serializer = UserStratSerializer(users, many=True)
+        
+        response_data = {
+            "strategy_id": strategy.id,
+            "strategy_name": strategy.name,
+            "total_users": users.count(),
+            "users": serializer.data
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+
 class admin_activate_strategy(APIView):
     permission_classes = [IsStaff]
     def post(self, request):
@@ -979,6 +1040,10 @@ class admin_activate_strategy(APIView):
         strategy = highLowstratergy.objects.get(id = data['id'])
         strategy.is_active = True
         strategy.save()
+        try:
+            cache.delete_pattern("highlow_strategies_*")
+        except:
+            pass
         return Response({'message':'Strategy Activate Successfully.'})
 
 
@@ -989,6 +1054,10 @@ class admin_deactivate_strategy(APIView):
         strategy = highLowstratergy.objects.get(id = data['id'])
         strategy.is_active = False
         strategy.save()
+        try:
+            cache.delete_pattern("highlow_strategies_*")
+        except:
+            pass
         return Response({'message':'Strategy Deactivate Successfully.'})
 
 
@@ -1151,7 +1220,7 @@ class get_tutorial(APIView):
         
 
 
-
+from django.core.mail import send_mail
 class add_strategy(APIView):
   
     def post(self, request):
@@ -1168,14 +1237,16 @@ class add_strategy(APIView):
         entry_condition = data['entry_condition']
         exit_condition = data['exit_condition']
         
-        # email1 = "strategy@tradearth.in"
-        # email_body ="strategyname :"+ strategyname +"\n"+"\n"+ "strategycategory :"+ strategycategory +"\n"+"\n"+ "segment :"+ segment +"\n"+"\n" + "timeframe :"+ str(timeframe) +"\n"+"\n" + "tradeperday :"+ str(tradeperday) +"\n"+"\n" + "indicators :"+ str(indicators) +"\n"+"\n"+ "entryconditions :"+ str(entryconditions) +"\n"+"\n"+ "exitconditions :"+ str(exitconditions) +"\n"+"\n"+ "stoploss :"+ str(stoploss) +"\n"+"\n"+ "target :"+ str(target) +"\n"+"\n"+ "additionalnotes :"+ str(additionalnotes) +"\n"+"\n"+ "ownername :"+ str(ownername) +"\n"+"\n"+ "whatsappnumber :"+ str(whatsappnumber) +"\n"+"\n"+ "email :"+ str(email) +"\n"+"\n"
-        # send_mail('Strategy create request',email_body,"contact@tradearth.in",[email1],)
+        email1 = "strategy@tradearth.in"
+        email_body ="strategyname :"+ strategy_name +"\n"+"\n" + "timeframe :"+ str(timeframe) +"\n"+"\n" + "tradeperday :"+ str(trades_per_day) +"\n"+"\n" + "indicators :"+ str(indicator_name) +"\n"+"\n"+ "entryconditions :"+ str(entry_condition) +"\n"+"\n"+ "exitconditions :"+ str(exit_condition) +"\n"+"\n"+ "stoploss :"+ str(sl) +"\n"+"\n"+ "target :"+ str(target) +"\n"+"\n"+ "ownername :"+ str(owner) +"\n"+"\n"+ "whatsappnumber :"+ str(phone) +"\n"+"\n"+ "email :"+ str(email) +"\n"+"\n"
+        send_mail('Strategy create request',email_body,"contact@tradearth.in",[email1],)
         return Response({'message':'Strategy Saved Successfully'},status=status.HTTP_200_OK)
 
 
 from .models import customer_failorder
 from .serializers import NotificationSerializer
+
+
 class userNotifications(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

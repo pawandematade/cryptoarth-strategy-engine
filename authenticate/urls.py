@@ -1,6 +1,6 @@
 from django.urls import path,include
 from rest_framework.routers import DefaultRouter
-from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications,HighLowStrategyLimitedCreateView,Close_all_Positions
+from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications,HighLowStrategyLimitedCreateView,Close_all_Positions,add_user_to_strategy,StrategyUsersDetailView,remove_user_to_strategy,user_strategy_set
 
 router = DefaultRouter()
 router.register(r'highlow-strategies', HighLowStrategyViewSet, basename='highlow-strategy')
@@ -55,14 +55,16 @@ urlpatterns = [
     # Deploy a strategy
     path('user/strategies/deploy/', deploy_strategy_portfolio.as_view(), name='deploy-strategy'),
 
-
     
+    path('user_strategy_set/', user_strategy_set.as_view(), name='user_strategy_set'),
+    path('add_user_to_strategy/', add_user_to_strategy.as_view(), name='add_user_to_strategy'),
+    path('remove_user_to_strategy/', remove_user_to_strategy.as_view(), name='remove_user_to_strategy'),
     path('userNotifications/', userNotifications.as_view(), name='userNotifications'),
     path('admin_deactivate_strategy/', admin_deactivate_strategy.as_view(), name='admin_deactivate_strategy'),
     path('admin_activate_strategy/', admin_activate_strategy.as_view(), name='admin_activate_strategy'),
     path('admin_strategy_set/', admin_strategy_set.as_view(), name='admin_strategy_set'),
     path('user/strategies/undeploy/', UndeployStrategyAPIView.as_view(), name='undeploy-strategy'),
-
+    path('strategy/users/<int:strategy_id>/detailed/', StrategyUsersDetailView.as_view(), name='strategy-users-detailed'),
     path('', include(router.urls)),
 ]
 
