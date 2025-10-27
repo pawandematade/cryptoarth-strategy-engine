@@ -1,6 +1,6 @@
 from django.urls import path,include
 from rest_framework.routers import DefaultRouter
-from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications,HighLowStrategyLimitedCreateView
+from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications,HighLowStrategyLimitedCreateView,Close_all_Positions
 
 router = DefaultRouter()
 router.register(r'highlow-strategies', HighLowStrategyViewSet, basename='highlow-strategy')
@@ -42,6 +42,7 @@ urlpatterns = [
     path('check-phone/', PhoneCheckView.as_view(), name='check-phone'),
 
     
+    path('Close_all_Positions/', Close_all_Positions.as_view(), name='Close_all_Positions'),
     path('userOrderDetails/', userOrderDetails.as_view(), name='userOrderDetails'),
     path('adminPositionDetails/', adminPositionDetails.as_view(), name='adminPositionDetails'),
     path('adminOrderDetails/', adminOrderDetails.as_view(), name='adminOrderDetails'),

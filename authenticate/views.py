@@ -671,6 +671,37 @@ import requests
 from .utils.functions import get_live_price
 
 
+class Close_all_Positions(APIView):
+    permission_classes = [IsStaff]
+
+    def post(self,request):
+        data = request.data
+        strategy_id = data['strategy_id']
+        adminposition = adminPosition.objects.get(strategy_id = strategy_id)
+        symbol = adminposition.symbol
+        symbolid = SymbolMaster.objects.get(symbol = symbol).symbolid
+        side = adminposition.side
+        stratergycode = adminposition.strategy.stratergy_code
+        url = "https://api.cryptoarth.in/auth/signal/"
+        tz = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(tz)
+        formatted_datetime = now.strftime("%m/%d/%Y %I:%M:%S %p")
+        headers = {
+            "Content-Type": "text/plain"
+        }
+        if side == "buy":
+            side1 = "sell"
+        else:
+            side1 = "buy"
+        parts2 = [
+                symbol,
+                str(symbolid),"0","0","0",str(strategy_id),str(stratergycode),"DELTA",side1,formatted_datetime,"0","0","Exit"
+            ]
+        final_string2 = "|".join(parts2) + "|"
+            
+        response = requests.post(url, data=final_string2.encode("utf-8"), headers=headers)
+        return Response({'message':'All Positions closed Successfully.'},status = status.HTTP_200_OK)
+
 class setSignal(APIView):
 
     permission_classes = [IsStaff]
@@ -1149,6 +1180,7 @@ class userNotifications(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self,request):
-        userdata = customer_failorder.objects.filter(owner=request.user.id)
+        s,p = get_todays_dates()
+        userdata = customer_failorder.objects.filter(Q(owner=request.user.id) & Q(date__gte=s) & Q(date__lte=p))
         data = NotificationSerializer(userdata,many=True).data
         return Response(data)
