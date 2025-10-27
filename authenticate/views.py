@@ -453,6 +453,17 @@ class HighLowStrategyViewSet(viewsets.ModelViewSet):
         cache.delete(f"highlow_strategy_{instance.id}")
         instance.delete()
 
+from .serializers import HighLowStrategyLimitedSerializer
+class HighLowStrategyLimitedCreateView(viewsets.ModelViewSet):
+    serializer_class = HighLowStrategyLimitedSerializer
+    permission_classes = [IsStaff]
+    
+    def perform_create(self, serializer):
+        # You can also set the owner to current user if needed
+        instance = serializer.save()
+        return instance
+
+
 
 
 from datetime import timedelta,datetime
@@ -624,7 +635,7 @@ class deploy_strategy_portfolio(APIView):
             # Strategy already exists, activate it
             existing_deployment.is_active = True
             existing_deployment.save()
-            message = "Strategy reactivated"
+            message = "Strategy is already activated."
         else:
             message = "Strategy deployed successfully"
         response_serializer = UserStrategyPortfolioSerializer(existing_deployment,many=False)
@@ -864,6 +875,71 @@ class admin_strategy_set(APIView):
         serialized_data = HighLowStrategySerializer(userdata, many=True).data
         return Response(serialized_data)
 
+from django.shortcuts import get_object_or_404   
+
+class add_user_to_strategy(APIView):
+    permission_classes = [IsStaff]
+    def post(self, request):
+        data = request.data
+        strategy_id = data.get('strategy_id')
+        phone_numbers_str = data.get('phone_numbers')
+        strategy = get_object_or_404(highLowstratergy, id=strategy_id)
+        phone_numbers = [phone.strip() for phone in phone_numbers_str.split(',') if phone.strip()]
+        if not phone_numbers:
+            return Response(
+                {"error": "No valid phone numbers provided"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        users = User.objects.filter(phone__in=phone_numbers)
+        found_phones = set(users.values_list('phone', flat=True))
+        
+        # Check for non-existent phone numbers
+        not_found_phones = set(phone_numbers) - found_phones
+        
+        # Add users to strategy
+        strategy.allowed_users.add(*users)
+        
+        response_data = {
+            "message": f"Successfully added {len(users)} users to strategy",
+            "strategy_id": strategy.id,
+            "strategy_name": strategy.name,
+            "added_users": list(found_phones),
+            "users_not_found": list(not_found_phones) if not_found_phones else None
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+    
+
+class remove_user_to_strategy(APIView):
+    permission_classes = [IsStaff]
+    def post(self, request):
+        data = request.data
+        strategy_id = data.get('strategy_id')
+        phone_numbers_str = data.get('phone_numbers')
+        strategy = get_object_or_404(highLowstratergy, id=strategy_id)
+        phone_numbers = [phone.strip() for phone in phone_numbers_str.split(',') if phone.strip()]
+        if not phone_numbers:
+            return Response(
+                {"error": "No valid phone numbers provided"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        users = User.objects.filter(phone__in=phone_numbers)
+        found_phones = set(users.values_list('phone', flat=True))
+        
+        # Check for non-existent phone numbers
+        not_found_phones = set(phone_numbers) - found_phones
+        
+        # Add users to strategy
+        strategy.allowed_users.remove(*users)
+        response_data = {
+            "message": f"Successfully removed {len(users)} users from strategy",
+            "strategy_id": strategy.id,
+            "strategy_name": strategy.name,
+            "removed_users": list(found_phones),
+            "users_not_found": list(not_found_phones) if not_found_phones else None
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
 
 class admin_activate_strategy(APIView):
     permission_classes = [IsStaff]

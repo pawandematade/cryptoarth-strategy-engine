@@ -1,10 +1,12 @@
 from django.urls import path,include
 from rest_framework.routers import DefaultRouter
-from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications
+from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications,HighLowStrategyLimitedCreateView
 
 router = DefaultRouter()
 router.register(r'highlow-strategies', HighLowStrategyViewSet, basename='highlow-strategy')
 router.register(r'highlow-strategies1', HighLowStrategyViewSet1, basename='highlow-strategy')
+router.register(r'highlow-strategies-limited', HighLowStrategyLimitedCreateView, basename='highlow-strategy-limited')
+
 # router.register('seller/auth', SellerAuthViewSet, basename='seller-auth')
 
 

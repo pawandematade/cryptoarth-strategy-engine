@@ -260,6 +260,34 @@ class HighLowStrategySerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class HighLowStrategyLimitedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = highLowstratergy
+        fields = '__all__'
+    
+    def create(self, validated_data):
+        # Force strategy_allow to be "limited" for non-admin users
+        validated_data['strategy_allow'] = 'limited'
+        
+        # If you want to automatically add the creating user to allowed_users
+        strategy = super().create(validated_data)
+        
+        # Add the current user to allowed_users
+        request = self.context.get('request')
+        if request:
+            strategy.allowed_users.add(request.user)
+        
+        return strategy
+    
+    def update(self, instance, validated_data):
+        # Prevent non-admin users from changing strategy_allow to anything other than "limited"
+        if 'strategy_allow' in validated_data:
+            if validated_data['strategy_allow'] != 'limited':
+                validated_data['strategy_allow'] = 'limited'
+        
+        return super().update(instance, validated_data)
+
+
 class HighLowStrategySerializer1(serializers.ModelSerializer):
     class Meta:
         model = highLowstratergy
@@ -272,9 +300,19 @@ class TradeSerializer(serializers.ModelSerializer):
 
 
 class OrderDetailsSerializer(serializers.ModelSerializer):
+    local_date = serializers.SerializerMethodField()
+    
     class Meta:
         model = OrderDetails
         fields = '__all__'
+
+    def get_local_date(self, obj):
+        if obj.date:
+            utc_time = obj.date
+            ist_timezone = pytz.timezone("Asia/Kolkata")
+            local_time = utc_time.astimezone(ist_timezone)
+            return local_time.strftime("%Y-%m-%d %H:%M:%S")
+        return None
 
 
 class UserStrategyPortfolioSerializer(serializers.ModelSerializer):

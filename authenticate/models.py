@@ -129,6 +129,13 @@ class highLowstratergy(models.Model):
     overallReturn = models.DecimalField(max_digits = 13,decimal_places = 3, default=0)
     strategy_allow = models.CharField(max_length = 25,default = "All")
 
+    allowed_users = models.ManyToManyField(
+        'User', 
+        blank=True,
+        related_name='allowed_strategies',
+        help_text="Users who are allowed to access this strategy"
+    )
+
 
 
 class userStratergyPortfolio(models.Model):
