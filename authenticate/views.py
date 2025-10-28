@@ -976,6 +976,7 @@ class add_user_to_strategy(APIView):
             "added_users": list(found_phones),
             "users_not_found": list(not_found_phones) if not_found_phones else None
         }
+        cache.delete_pattern("highlow_strategies_*")
         
         return Response(response_data, status=status.HTTP_200_OK)
     
@@ -1008,7 +1009,7 @@ class remove_user_to_strategy(APIView):
             "removed_users": list(found_phones),
             "users_not_found": list(not_found_phones) if not_found_phones else None
         }
-        
+        cache.delete_pattern("highlow_strategies_*")
         return Response(response_data, status=status.HTTP_200_OK)
 
 
