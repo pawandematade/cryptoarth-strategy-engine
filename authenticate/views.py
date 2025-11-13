@@ -482,6 +482,18 @@ from datetime import timedelta,datetime
 import pytz
 import random
 
+class change_margin_moode(APIView):
+    permission_classes = [IsStaff]
+    def get(self,request):
+        userdata = User.objects.filter(is_login = True)
+        for user in userdata:
+            try:
+                apikey,apisecret = user.get_api_credentials()
+                client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+                client.set_margin_type_portfolio()
+            except:
+                pass
+        return Response({'message':'margin Updated successfully.'})
 
 from .utils.functions import process_entry_order,process_exit_order
 
@@ -524,7 +536,8 @@ class ProcessSignal(APIView):
             capital = capital,
             unique = 111111,
             timestamp = specific_datetime,
-            status = "pending"
+            status = "pending",
+            type = type
         )
         if tradingbridgecode == "DELTA" and  highLowstratergy.objects.filter( stratergy_code = stratergycode).exists():
             strat = highLowstratergy.objects.get( stratergy_code = stratergycode)

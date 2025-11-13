@@ -362,6 +362,228 @@ class DeltaExchangeClient:
         
         return self._make_authenticated_request('GET', path, params)
     
+    def _make_authenticated_request1(self, method: str, path: str, params: Dict = None, payload: Dict = None) -> Dict:
+        """Make an authenticated request to Delta Exchange API"""
+        timestamp = str(int(time.time()))
+        url = f'{self.base_url}{path}'
+        
+        # Build query string for GET requests
+        query_string = ''
+        if method == 'GET' and params:
+            query_params = []
+            for key, value in params.items():
+                if value is not None:
+                    if isinstance(value, list):
+                        query_params.append(f"{key}={','.join(map(str, value))}")
+                    else:
+                        query_params.append(f"{key}={value}")
+            if query_params:
+                query_string = '?' + '&'.join(query_params)
+        
+        # Handle payload for POST requests
+        payload_str = ''
+        if method == 'POST' and payload:
+            payload_str = json.dumps(payload)
+        
+        signature_data = method + timestamp + path + query_string + payload_str
+        signature = self.generate_signature(self.api_secret, signature_data)
+        
+        headers = {
+            'api-key': self.api_key,
+            'timestamp': timestamp,
+            'signature': signature,
+            'User-Agent': 'python-rest-client',
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            if method == 'GET':
+                response = requests.request(
+                    method, url, params=params,
+                    timeout=(3, 27), headers=headers
+                )
+            else:  # POST
+                response = requests.request(
+                    method, url, data=payload_str,
+                    timeout=(3, 27), headers=headers
+                )
+            
+            response_data = response.json()
+            if response.status_code == 200 and response_data.get('success'):
+                return response_data
+            else:
+                print(f"API Error: {response_data}")
+                return response_data
+                
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            return {'success': False, 'error': str(e)}
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            return {'success': False, 'error': str(e)}
+        
+    def _make_authenticated_request1(self, method: str, path: str, params: Dict = None, payload: Dict = None) -> Dict:
+        """Make an authenticated request to Delta Exchange API"""
+        timestamp = str(int(time.time()))
+        url = f'{self.base_url}{path}'
+        
+        # Build query string for GET requests
+        query_string = ''
+        if method == 'GET' and params:
+            query_params = []
+            for key, value in params.items():
+                if value is not None:
+                    if isinstance(value, list):
+                        query_params.append(f"{key}={','.join(map(str, value))}")
+                    else:
+                        query_params.append(f"{key}={value}")
+            if query_params:
+                query_string = '?' + '&'.join(query_params)
+        
+        # Handle payload for POST/PUT requests
+        payload_str = ''
+        if method in ['POST', 'PUT'] and payload:
+            payload_str = json.dumps(payload)
+        
+        signature_data = method + timestamp + path + query_string + payload_str
+        signature = self.generate_signature(self.api_secret, signature_data)
+        
+        headers = {
+            'api-key': self.api_key,
+            'timestamp': timestamp,
+            'signature': signature,
+            'User-Agent': 'python-rest-client',
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            if method == 'GET':
+                response = requests.request(
+                    method, url, params=params,
+                    timeout=(3, 27), headers=headers
+                )
+            else:  # POST/PUT
+                response = requests.request(
+                    method, url, data=payload_str,
+                    timeout=(3, 27), headers=headers
+                )
+            
+            # Handle empty response
+            if response.text.strip() == '':
+                return {'success': False, 'error': 'Empty response from server'}
+            
+            response_data = response.json()
+            if response.status_code == 200 and response_data.get('success'):
+                return response_data
+            else:
+                print(f"API Error: {response_data}")
+                return response_data
+                
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            return {'success': False, 'error': str(e)}
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse response: {response.text}")
+            return {'success': False, 'error': f'JSON decode error: {e}'}
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_user_id(self) -> str:
+        """
+        Get the current user's ID from profile
+        
+        Returns:
+            str: User ID or None if failed
+        """
+        try:
+            profile_data = self.get_account_info()
+            if profile_data.get('success') and 'result' in profile_data:
+                user_id = profile_data['result'].get('id')
+                return str(user_id) if user_id else None
+            return None
+        except Exception as e:
+            print(f"Failed to get user ID: {e}")
+            return None
+
+    def set_margin_type_portfolio(self, subaccount_user_id: str = None) -> Dict:
+        """
+        Set margin type to portfolio (cross margin equivalent)
+        
+        Args:
+            subaccount_user_id: User ID (if None, will fetch automatically)
+        
+        Returns:
+            Dict containing API response
+        """
+        if not subaccount_user_id:
+            subaccount_user_id = self.get_user_id()
+            if not subaccount_user_id:
+                return {'success': False, 'error': 'Could not retrieve user ID'}
+        
+        path = '/v2/users/margin_mode'
+        payload = {
+            "margin_mode": "cross",
+            "subaccount_user_id": str(subaccount_user_id)
+        }
+        
+        try:
+            response_data = self._make_authenticated_request1('PUT', path, payload=payload)
+            
+            if response_data.get('success'):
+                print(f"Margin type set to portfolio (cross) successfully!")
+            else:
+                print(f"Error setting margin type: {response_data}")
+            
+            return response_data
+            
+        except Exception as e:
+            print(f"Failed to set margin type: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def set_margin_type_isolated(self, subaccount_user_id: str = None) -> Dict:
+        """
+        Set margin type to isolated
+        
+        Args:
+            subaccount_user_id: User ID (if None, will fetch automatically)
+        
+        Returns:
+            Dict containing API response
+        """
+        if not subaccount_user_id:
+            subaccount_user_id = self.get_user_id()
+            if not subaccount_user_id:
+                return {'success': False, 'error': 'Could not retrieve user ID'}
+        
+        path = '/v2/users/margin_mode'
+        payload = {
+            "margin_mode": "isolated",
+            "subaccount_user_id": str(subaccount_user_id)
+        }
+        
+        try:
+            response_data = self._make_authenticated_request1('PUT', path, payload=payload)
+            
+            if response_data.get('success'):
+                print(f"Margin type set to isolated successfully!")
+            else:
+                print(f"Error setting margin type: {response_data}")
+            
+            return response_data
+            
+        except Exception as e:
+            print(f"Failed to set margin type: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # For backward compatibility, you can keep this method name
+    def set_margin_type_cross(self, subaccount_user_id: str = None) -> Dict:
+        """
+        Set margin type to cross (portfolio mode)
+        This is an alias for set_margin_type_portfolio
+        """
+        return self.set_margin_type_portfolio(subaccount_user_id)
+
 
     def get_positions(self, product_id: Optional[str] = None, underlying_asset: Optional[str] = None) -> Dict:
         
