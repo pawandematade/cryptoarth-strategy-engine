@@ -448,7 +448,8 @@ class process_entry_order:
                             unique=position.order_id,
                             leverage=self.leverage,
                             stratergy=self.strategy_id,
-                            date=order['datetime']
+                            date=order['datetime'],
+                            stratergy_name = self.strategy_name
                         )
                         for order in self.order_set
                     ]

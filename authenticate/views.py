@@ -410,7 +410,7 @@ class get_today_dashboard_count(APIView):
         total_profit = OrderDetails.objects.aggregate(total=Sum('profit'))['total'] or 0
         return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
      
-
+from .serializers import SignalMasterSerializer
 class signalmasterView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = SignalMasterSerializer
@@ -426,7 +426,7 @@ class signalmasterView(APIView):
         )
         signals = SignalMaster.objects.filter(stratergy_id__in=strategy_ids,timestamp__gte = s,timestamp__lte=p)
         
-        serializer = TradeDetailsSerializer(signals, many=True)
+        serializer = SignalMasterSerializer(signals, many=True)
         data = serializer.data
 
         return Response(data)
