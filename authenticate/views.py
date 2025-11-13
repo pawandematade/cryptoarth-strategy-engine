@@ -4,7 +4,7 @@ from rest_framework import status , permissions,viewsets
 from django.db import transaction, connection
 
 from django.core.cache import cache
-from .models import User,Watchlist, SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,SignalMaster,Position,adminPosition,userStratergyPortfolio,copysignal
+from .models import User,Watchlist, SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,SignalMaster,Position,adminPosition,userStratergyPortfolio,copysignal,SignalMaster
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.exceptions import APIException
@@ -358,6 +358,77 @@ class TradeDetailsView(APIView):
             serializer = TradeDetailsSerializer(trades, many=True)
             data = serializer.data
             cache.set(cache_key, data, timeout=300)  # Cache for 5 minutes
+        return Response(data)
+    
+from .serializers import SignalMasterSerializer
+from django.db.models import F, Sum, DecimalField, ExpressionWrapper
+
+class get_dashboard_count(APIView):
+    permission_classes = [IsStaff]
+    def post(self,request):
+        data = request.data
+        startDate = data['startDate']
+        endDate = data['endDate']
+        sdate, edate = convert_date_range_to_utc(startDate, endDate)
+        total_volume = (
+            OrderDetails.objects
+            .filter(date__range=[sdate, edate])
+            .aggregate(
+                total=Sum(
+                    ExpressionWrapper(
+                        F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
+                        output_field=DecimalField(max_digits=20, decimal_places=3)
+                    )
+                )
+            )
+        )['total'] or 0
+        total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
+        total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
+        total_profit = OrderDetails.objects.aggregate(total=Sum('profit'))['total'] or 0
+        return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+
+
+class get_today_dashboard_count(APIView):
+    permission_classes = [IsStaff]
+    def get(self,request):
+        sdate, edate =get_todays_dates()
+
+        total_volume = (
+            OrderDetails.objects
+            .filter(date__range=[sdate, edate])
+            .aggregate(
+                total=Sum(
+                    ExpressionWrapper(
+                        F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
+                        output_field=DecimalField(max_digits=20, decimal_places=3)
+                    )
+                )
+            )
+        )['total'] or 0
+        total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
+        total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
+        total_profit = OrderDetails.objects.aggregate(total=Sum('profit'))['total'] or 0
+        return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+     
+
+class signalmasterView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = SignalMasterSerializer
+
+    def get(self,request):
+        
+        s,p = get_todays_dates()
+        strategy_ids = (
+            userStratergyPortfolio.objects
+            .filter(owner=request.user)
+            .values_list('stratergy_id', flat=True)
+            .distinct()
+        )
+        signals = SignalMaster.objects.filter(stratergy_id__in=strategy_ids,timestamp__gte = s,timestamp__lte=p)
+        
+        serializer = TradeDetailsSerializer(signals, many=True)
+        data = serializer.data
+
         return Response(data)
     
 

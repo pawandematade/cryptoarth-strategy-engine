@@ -3,7 +3,7 @@ from django.core.cache import cache  # ✅ This is correct
 from rest_framework import serializers
 from django.utils import timezone
 from datetime import timedelta
-from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial,customer_failorder
+from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial,customer_failorder,SignalMaster
 from rest_framework.exceptions import AuthenticationFailed
 import random
 from .utils.otp_service import OTPService
@@ -298,6 +298,11 @@ class HighLowStrategySerializer1(serializers.ModelSerializer):
 class TradeSerializer(serializers.ModelSerializer):
     class Meta:
         model = tradeDetails
+        fields = '__all__'
+
+class SignalMasterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SignalMaster
         fields = '__all__'
 
 
