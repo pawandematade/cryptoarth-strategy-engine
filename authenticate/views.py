@@ -384,7 +384,7 @@ class get_dashboard_count(APIView):
         )['total'] or 0
         total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
         total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
-        total_profit = OrderDetails.objects.filter(date_joined__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
+        total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
         return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
 
 
@@ -407,7 +407,7 @@ class get_today_dashboard_count(APIView):
         )['total'] or 0
         total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
         total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
-        total_profit = OrderDetails.objects.filter(date_joined__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
+        total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
         return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
      
 from .serializers import SignalMasterSerializer
