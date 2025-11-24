@@ -237,10 +237,10 @@ class process_exit_order:
         if adminPosition.objects.filter(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) ).exists():
             
             adminposition = adminPosition.objects.get(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) )
-            print(adminposition)
+     
             positions = Position.objects.filter(unique = adminposition.order_id)
             dataset = PositionSerializer(positions,many = True).data
-            print(dataset)
+         
             with ThreadPoolExecutor(max_workers=150) as executor:
                 loop_logic = [executor.submit(self.process_customer_position,user,symbol_data) for user in dataset]
                 wait(loop_logic)

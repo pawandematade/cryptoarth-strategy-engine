@@ -186,7 +186,55 @@ class DeltaExchangeClient:
             print(f"Unexpected error: {e}")
             return {'success': False, 'error': str(e)}
         
-
+    def get_orders_history(self, 
+                    product_ids: Optional[List[int]] = None,
+                    states: Optional[List[str]] = None,
+                    contract_types: Optional[List[str]] = None,
+                    order_types: Optional[List[str]] = None,
+                    start_time: Optional[int] = None,
+                    end_time: Optional[int] = None,
+                    after: Optional[str] = None,
+                    before: Optional[str] = None,
+                    page_size: int = 10) -> Dict:
+        """
+        Get active orders with various filtering options
+        
+        Args:
+            product_ids: List of product IDs to filter by
+            states: List of order states ('open', 'pending', 'closed', 'cancelled')
+            contract_types: List of contract types ('futures', 'perpetual_futures', 'call_options', 'put_options')
+            order_types: List of order types ('market', 'limit', 'stop_market', 'stop_limit', 'all_stop')
+            start_time: Start time in microseconds (epoch)
+            end_time: End time in microseconds (epoch)
+            after: Cursor for pagination (next page)
+            before: Cursor for pagination (previous page)
+            page_size: Number of records per page (default: 10)
+        
+        Returns:
+            Dict containing order list and pagination metadata
+        """
+        params = {}
+        
+        if product_ids:
+            params['product_ids'] = product_ids
+        if states:
+            params['states'] = states
+        if contract_types:
+            params['contract_types'] = contract_types
+        if order_types:
+            params['order_types'] = order_types
+        if start_time:
+            params['start_time'] = start_time
+        if end_time:
+            params['end_time'] = end_time
+        if after:
+            params['after'] = after
+        if before:
+            params['before'] = before
+        if page_size:
+            params['page_size'] = page_size
+        
+        return self._make_authenticated_request('GET', '/v2/orders/history', params)
 
     def get_orders(self, 
                    product_ids: Optional[List[int]] = None,
@@ -362,65 +410,65 @@ class DeltaExchangeClient:
         
         return self._make_authenticated_request('GET', path, params)
     
-    def _make_authenticated_request1(self, method: str, path: str, params: Dict = None, payload: Dict = None) -> Dict:
-        """Make an authenticated request to Delta Exchange API"""
-        timestamp = str(int(time.time()))
-        url = f'{self.base_url}{path}'
+    # def _make_authenticated_request1(self, method: str, path: str, params: Dict = None, payload: Dict = None) -> Dict:
+    #     """Make an authenticated request to Delta Exchange API"""
+    #     timestamp = str(int(time.time()))
+    #     url = f'{self.base_url}{path}'
         
-        # Build query string for GET requests
-        query_string = ''
-        if method == 'GET' and params:
-            query_params = []
-            for key, value in params.items():
-                if value is not None:
-                    if isinstance(value, list):
-                        query_params.append(f"{key}={','.join(map(str, value))}")
-                    else:
-                        query_params.append(f"{key}={value}")
-            if query_params:
-                query_string = '?' + '&'.join(query_params)
+    #     # Build query string for GET requests
+    #     query_string = ''
+    #     if method == 'GET' and params:
+    #         query_params = []
+    #         for key, value in params.items():
+    #             if value is not None:
+    #                 if isinstance(value, list):
+    #                     query_params.append(f"{key}={','.join(map(str, value))}")
+    #                 else:
+    #                     query_params.append(f"{key}={value}")
+    #         if query_params:
+    #             query_string = '?' + '&'.join(query_params)
         
-        # Handle payload for POST requests
-        payload_str = ''
-        if method == 'POST' and payload:
-            payload_str = json.dumps(payload)
+    #     # Handle payload for POST requests
+    #     payload_str = ''
+    #     if method == 'POST' and payload:
+    #         payload_str = json.dumps(payload)
         
-        signature_data = method + timestamp + path + query_string + payload_str
-        signature = self.generate_signature(self.api_secret, signature_data)
+    #     signature_data = method + timestamp + path + query_string + payload_str
+    #     signature = self.generate_signature(self.api_secret, signature_data)
         
-        headers = {
-            'api-key': self.api_key,
-            'timestamp': timestamp,
-            'signature': signature,
-            'User-Agent': 'python-rest-client',
-            'Content-Type': 'application/json'
-        }
+    #     headers = {
+    #         'api-key': self.api_key,
+    #         'timestamp': timestamp,
+    #         'signature': signature,
+    #         'User-Agent': 'python-rest-client',
+    #         'Content-Type': 'application/json'
+    #     }
         
-        try:
-            if method == 'GET':
-                response = requests.request(
-                    method, url, params=params,
-                    timeout=(3, 27), headers=headers
-                )
-            else:  # POST
-                response = requests.request(
-                    method, url, data=payload_str,
-                    timeout=(3, 27), headers=headers
-                )
+    #     try:
+    #         if method == 'GET':
+    #             response = requests.request(
+    #                 method, url, params=params,
+    #                 timeout=(3, 27), headers=headers
+    #             )
+    #         else:  # POST
+    #             response = requests.request(
+    #                 method, url, data=payload_str,
+    #                 timeout=(3, 27), headers=headers
+    #             )
             
-            response_data = response.json()
-            if response.status_code == 200 and response_data.get('success'):
-                return response_data
-            else:
-                print(f"API Error: {response_data}")
-                return response_data
+    #         response_data = response.json()
+    #         if response.status_code == 200 and response_data.get('success'):
+    #             return response_data
+    #         else:
+    #             print(f"API Error: {response_data}")
+    #             return response_data
                 
-        except requests.exceptions.RequestException as e:
-            print(f"Request failed: {e}")
-            return {'success': False, 'error': str(e)}
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            return {'success': False, 'error': str(e)}
+    #     except requests.exceptions.RequestException as e:
+    #         print(f"Request failed: {e}")
+    #         return {'success': False, 'error': str(e)}
+    #     except Exception as e:
+    #         print(f"Unexpected error: {e}")
+    #         return {'success': False, 'error': str(e)}
         
     def _make_authenticated_request1(self, method: str, path: str, params: Dict = None, payload: Dict = None) -> Dict:
         """Make an authenticated request to Delta Exchange API"""
