@@ -234,7 +234,11 @@ class process_exit_order:
 
     def process(self):
         symbol_data = self.get_symbol_data()
-        if adminPosition.objects.filter(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) ).exists():
+        if self.side == "buy":
+            side50 = "sell"
+        else:
+            side50 = "buy"
+        if adminPosition.objects.filter(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) & Q(side = side50)).exists():
             
             adminposition = adminPosition.objects.get(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) )
      
