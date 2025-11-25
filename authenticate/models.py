@@ -48,7 +48,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     api_key = models.CharField(max_length=255, blank=True, null=True)
     api_secret = models.CharField(max_length=255, blank=True, null=True)
     is_login = models.BooleanField(default=False)
-    
+    broker = models.CharField(max_length=100, default="DeltaExchange")
 
 
     USERNAME_FIELD = 'phone'

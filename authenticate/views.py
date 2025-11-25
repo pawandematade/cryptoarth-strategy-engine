@@ -211,6 +211,42 @@ class UserDetailView(APIView):
 
 
 from .utils.deltaexchange import DeltaExchangeClient  # ✅ your client import
+from .utils.coindcx import coindcxclient  # ✅ your client import
+class BrokerConnectCoindcx(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        api_key = request.data.get("api_key")
+        api_secret = request.data.get("api_secret")
+        print(api_key,api_secret)
+        if not api_key or not api_secret:
+            return Response({"error": "api_key and api_secret are required"}, status=400)
+        try:
+            client = coindcxclient(api_key, api_secret)
+            account_info = client.get_account_info()
+            
+            if account_info['success'] == True:
+                user: User = request.user
+                user.set_api_credentials(api_key, api_secret)
+                user.is_login = True
+                user.broker = "Coindcx"
+                user.save(update_fields=["api_key", "api_secret", "is_login","broker"])
+                cache.delete(f"user_profile_{user.id}")
+                cache.delete(f"user_jwt_{user.id}")
+
+                return Response(
+                    {
+                        "message": "Broker connected successfully ✅"
+                    },
+                    status=200,
+                )
+
+            else:
+                return Response({"error": "Invalid credentials"}, status=400)
+        except Exception as e:
+            return Response({"error": f"Connection failed: {str(e)}"}, status=400)
+
+
 
 class BrokerConnectView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -255,7 +291,8 @@ class BrokerConnectView(APIView):
         user: User = request.user
         user.set_api_credentials(api_key, api_secret)
         user.is_login = True
-        user.save(update_fields=["api_key", "api_secret", "is_login"])
+        user.broker = "DeltaExchange"
+        user.save(update_fields=["api_key", "api_secret", "is_login","broker"])
         cache.delete(f"user_profile_{user.id}")
         cache.delete(f"user_jwt_{user.id}")
 

@@ -6,7 +6,9 @@ import uuid
 from django.db.models import Q
 from concurrent.futures import ThreadPoolExecutor,wait
 from authenticate.serializers import UserStrategyPortfolioSerializer,PositionSerializer
+from .coindcx import coindcxclient
 from .deltaexchange import DeltaExchangeClient
+import math
 
 def save_products_to_db(products):
     """
@@ -163,6 +165,24 @@ class process_exit_order:
         self.symbol_d = []
         self.order_set = []
         self.failure = []
+        self.symbol_coindcx = ""
+        self.leverage = 0
+
+    def convert_symbol(self,symbol):
+        # Remove 'USD' and add 'B-' prefix and '_USDT' suffix
+        base_currency = symbol.replace('USD', '')
+        return f"B-{base_currency}_USDT"
+    
+    def convert_ms_to_kolkata_datetime(self,timestamp_ms: int):
+        """
+        Converts a Unix timestamp in milliseconds to a datetime object
+        in Kolkata timezone (Asia/Kolkata).
+        """
+        try:
+            kolkata_tz = pytz.timezone('Asia/Kolkata')
+            return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=kolkata_tz)
+        except (ValueError, TypeError):
+            return None
 
     def decrypt_api(self,user):
         from cryptography.fernet import Fernet, InvalidToken
@@ -197,37 +217,77 @@ class process_exit_order:
                 print(f"Symbol with ID {self.symbol} not found in database.")
                 return None
         self.symbol_d = data
+        self.symbol_coindcx = self.convert_symbol(data['symbol'])
         return data
+    
+
+    def get_open_position(self,positions, symbol):
+        """
+        Returns the open quantity for a given trading symbol.
+        If no active position, returns 0.
+        """
+        if not positions:  # handles [] or None
+            return 0
+        
+        for pos in positions:
+            if pos.get('pair') == symbol:
+                return pos.get('active_pos', 0)  # return active position size
+        
+        return 0
 
 
     def process_customer_position(self,user,symbol_data):
         apikey,apisecret = self.decrypt_api(user)
+        if user['owner']['broker'] == "Coindcx":
+            client = coindcxclient(api_key=apikey, api_secret=apisecret)
+            try:
+                print(self.symbol_coindcx)
+                position = client.get_positions_coindcx(symbol=self.symbol_coindcx)
+                quantity_balance = self.get_open_position(position, self.symbol_coindcx)
+                user_qty = float(user['quantity'])
+                if (user['side'] == "buy" and quantity_balance > 0) or (user['side'] == "sell" and quantity_balance < 0):
         
-        client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
-        position = client.get_positions(product_id=self.symbol)
-        
-        if position['success'] == True:
-         
-            quantity_balance = int(position['result']['size'])
-       
-            user_qty = int(float(user['quantity']))
-        
-            if (user['side'] == "buy" and quantity_balance > 0) or (user['side'] == "sell" and quantity_balance < 0):
-       
-                qty = min(user_qty, abs(quantity_balance))
-            
-                order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=qty)
-                if order['success'] == True:      
-                    self.order_set.append({'owner':user['owner']['id'],'exit_price':float(order['result']['average_fill_price']),'exit_orderid':order['result']['id'],'exit_status':order['result']['state'],'exit_quantity':order['result']['size'],'exit_datetime':order['result']['created_at'],'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                    qty = min(user_qty, abs(quantity_balance))
+                    order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=qty,leverage=self.leverage)
+                    print(order)
+                    if order['success'] == True:
+                        self.order_set.append({'owner':user['owner']['id'],'exit_price':float(order['result'][0]['price']),'exit_orderid':order['result'][0]['id'],'exit_status':'completed','exit_quantity':order['result'][0]['total_quantity'],'exit_datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                    else:
+                        remarks = order['error'].args[0]['message']
+                        self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
                 else:
-                    remarks = order['error']['code']
+                    remarks = f'Quantity is not available to close order. Quantity size - {str(quantity_balance)}'
+                    self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
+            except:
+                remarks = "Not able to fetch position."
+                self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
+
+        else:
+            client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+            position = client.get_positions(product_id=self.symbol)
+            
+            if position['success'] == True:
+            
+                quantity_balance = int(position['result']['size'])
+        
+                user_qty = int(float(user['quantity']))
+            
+                if (user['side'] == "buy" and quantity_balance > 0) or (user['side'] == "sell" and quantity_balance < 0):
+        
+                    qty = min(user_qty, abs(quantity_balance))
+                
+                    order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=qty)
+                    if order['success'] == True:      
+                        self.order_set.append({'owner':user['owner']['id'],'exit_price':float(order['result']['average_fill_price']),'exit_orderid':order['result']['id'],'exit_status':order['result']['state'],'exit_quantity':order['result']['size'],'exit_datetime':order['result']['created_at'],'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                    else:
+                        remarks = order['error']['code']
+                        self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
+                else:
+                    remarks = f'Quantity is not available to close order. Quantity size - {str(quantity_balance)}'
                     self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
             else:
-                remarks = f'Quantity is not available to close order. Quantity size - {str(quantity_balance)}'
+                remarks = f"Not able to fetch position. Error - {str(position['error']['code'])}"
                 self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
-        else:
-            remarks = f"Not able to fetch position. Error - {str(position['error']['code'])}"
-            self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
 
 
 
@@ -241,7 +301,7 @@ class process_exit_order:
         if adminPosition.objects.filter(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) & Q(side = side50)).exists():
             
             adminposition = adminPosition.objects.get(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol']) )
-     
+            self.leverage = adminposition.leverage
             positions = Position.objects.filter(unique = adminposition.order_id)
             dataset = PositionSerializer(positions,many = True).data
          
@@ -314,9 +374,15 @@ class process_entry_order:
         self.capital = capital
         self.strategy_id = strategy_id
         self.strategy_name = strategy_name
+        self.symbol_coindcx = ""
         self.order_set = []
         self.symbol_d = []
         self.failure = []
+
+    def convert_symbol(self,symbol):
+        # Remove 'USD' and add 'B-' prefix and '_USDT' suffix
+        base_currency = symbol.replace('USD', '')
+        return f"B-{base_currency}_USDT"
 
     def get_symbol_data(self):
         cache_key = f"symbol_data_{self.symbol}"
@@ -332,11 +398,13 @@ class process_entry_order:
                     "Type": symboldata.Type,
                     "contract_value": float(symboldata.contract_value) if symboldata.contract_value else 1
                 }
+                
                 cache.set(cache_key, data, timeout=86400)  # Cache for 1 day
                 
             else:
                 print(f"Symbol with ID {self.symbol} not found in database.")
                 return None
+        self.symbol_coindcx = self.convert_symbol(data['symbol'])
         self.symbol_d = data
         return data
     
@@ -369,7 +437,29 @@ class process_entry_order:
         except (InvalidToken, AttributeError):
             return None, None
         
+    def adjust_quantity(self,quantity, contract_value):
+        # Determine decimal places from contract value
+        contract_str = str(contract_value)
+        if '.' in contract_str:
+            decimal_places = len(contract_str.split('.')[1])
+        else:
+            decimal_places = 0
+        
+        # Adjust quantity to match contract precision
+        adjusted = math.floor(quantity * (10 ** decimal_places)) / (10 ** decimal_places)
+        return adjusted
     
+    def caclulate_quantity1(self,fund):
+        data = self.symbol_d
+        margin = fund * int(self.leverage) * float(self.capital)
+        
+        liveprice = float(get_live_price(self.symbol_d['symbol']))
+        qty = margin / liveprice
+        qty = self.adjust_quantity(qty, float(data['contract_value']))
+        if qty >= float(data['contract_value']):
+            return qty
+        else:
+            return None
         
     def caclulate_quantity(self,fund):
         data = self.symbol_d
@@ -382,48 +472,83 @@ class process_entry_order:
         else:
             return None
         
+    def convert_ms_to_kolkata_datetime(self,timestamp_ms: int):
+        """
+        Converts a Unix timestamp in milliseconds to a datetime object
+        in Kolkata timezone (Asia/Kolkata).
+        """
+        try:
+            kolkata_tz = pytz.timezone('Asia/Kolkata')
+            return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=kolkata_tz)
+        except (ValueError, TypeError):
+            return None
+        
     
     
     def process_customer_position(self,user,symbol_data):
-        
         apikey,apisecret = self.decrypt_api(user)
-        
-        if apikey and apisecret and user['is_active']:
-            client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
-            balance_data = client.get_balances()
-            fund = float(balance_data['result'][0]['available_balance'])
-            quantity = self.caclulate_quantity(fund)
-            if quantity:
-                try:
-                    leverage_status = client.set_leverage1(product_id=self.symbol,leverage=self.leverage)
-                    
-                    if leverage_status['success'] == True:
-                        
-                        order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=quantity)
-                        
-                        if order['success'] == True:
-                            
-                            self.order_set.append({'owner':user['owner']['id'],'price':float(order['result']['average_fill_price']),'orderid':order['result']['id'],'status':order['result']['state'],'quantity':order['result']['size'],'datetime':order['result']['created_at']})
-                     
-                        else:
-                            remarks = order['error']['code']
-                            self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
+        print(user['owner']['broker'])
+        if user['owner']['broker'] == "Coindcx":
+            if apikey and apisecret and user['is_active']:
+                client = coindcxclient(api_key=apikey,api_secret=apisecret)
+                balance_data = client.get_wallet_info()
+                print(balance_data,"sanke")
+                quantity = self.caclulate_quantity1(balance_data)
+                print(quantity,"sds")
+                if quantity:
+                    order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=quantity,leverage=self.leverage)
+                    print(order)
+                    if order['success'] == True:
+                        self.order_set.append({'owner':user['owner']['id'],'price':float(order['result'][0]['price']),'orderid':order['result'][0]['id'],'status':'completed','quantity':order['result'][0]['total_quantity'],'datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at']))})
                     else:
-                        remarks = leverage_status['error']['code']
+                        remarks = order['error'].args[0]['message']
                         self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
-                except Exception as e:
-                    remarks = str(e)
+                else:
+                    try:
+                        remarks = f"You dont have sufficient funds to process {self.symbol_d['symbol']} order"
+                    except:
+                        remarks = f"You dont have sufficient funds to process order"
                     self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
             else:
-                try:
-                    remarks = f"You dont have sufficient funds to process {self.symbol_d['symbol']} order"
-                except:
-                    remarks = f"You dont have sufficient funds to process order"
+                remarks = "apikey is not correctly binded"
                 self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
         else:
-            remarks = "apikey is not correctly binded"
-            self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
-            
+            if apikey and apisecret and user['is_active']:
+                client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+                balance_data = client.get_balances()
+                fund = float(balance_data['result'][0]['available_balance'])
+                quantity = self.caclulate_quantity(fund)
+                if quantity:
+                    try:
+                        leverage_status = client.set_leverage1(product_id=self.symbol,leverage=self.leverage)
+                        
+                        if leverage_status['success'] == True:
+                            
+                            order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=quantity)
+                            
+                            if order['success'] == True:
+                                
+                                self.order_set.append({'owner':user['owner']['id'],'price':float(order['result']['average_fill_price']),'orderid':order['result']['id'],'status':order['result']['state'],'quantity':order['result']['size'],'datetime':order['result']['created_at']})
+                        
+                            else:
+                                remarks = order['error']['code']
+                                self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
+                        else:
+                            remarks = leverage_status['error']['code']
+                            self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
+                    except Exception as e:
+                        remarks = str(e)
+                        self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
+                else:
+                    try:
+                        remarks = f"You dont have sufficient funds to process {self.symbol_d['symbol']} order"
+                    except:
+                        remarks = f"You dont have sufficient funds to process order"
+                    self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
+            else:
+                remarks = "apikey is not correctly binded"
+                self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
+                
             
 
     
