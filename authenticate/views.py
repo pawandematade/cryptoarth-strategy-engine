@@ -675,9 +675,14 @@ class ProcessSignal(APIView):
 
                     return Response({'message':'Signal Process Successfully.'})
             else:
-                client12 = process_exit_order(strategy_id,symbolid,side,strat.name)
-                client12.process()
-                return Response({'message':'Signal Process Successfully.'})
+                if side == "buy":
+                    side1 = "sell"
+                else:
+                    side1 = "buy"
+                if adminPosition.objects.filter(Q(strategy_id = strategy_id) & Q(symbol = symbol) & Q(side = side1)).exists():
+                    client12 = process_exit_order(strategy_id,symbolid,side,strat.name)
+                    client12.process()
+                    return Response({'message':'Signal Process Successfully.'})
         else:
             return Response({'message':'Strategy is Inactive. Ignored.'})
         
