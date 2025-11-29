@@ -467,6 +467,75 @@ class signalmasterView(APIView):
         data = serializer.data
 
         return Response(data)
+
+
+class get_open_position(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self,request):
+        data =request.data
+        strategy_id = data['strategy_id']
+        symbol = data['symbol']
+        symbolmaster = SymbolMaster.objects.get(symbol = symbol)
+        users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner_broker = "Coindcx")
+        users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner_broker = "DeltaExchange")
+        dataset = []
+        for user in users_coindcx:
+            apikey,apisecret = user.owner.get_api_credentials()
+            client = coindcxclient(api_key=apikey,api_secret=apisecret)
+            position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
+            quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
+            dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'Coindcx','open_quantity':quantity_balance})
+        for user in users_delta:
+            apikey,apisecret = user.owner.get_api_credentials()
+            client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+            position = client.get_positions(product_id=symbolmaster.symbolid)
+            if position['success'] == True:
+                quantity_balance = int(position['result']['size'])
+            else:
+                quantity_balance = 0
+            dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'DeltaExchange','open_quantity':quantity_balance})
+        return Response(dataset)
+
+    def convert_symbol(self,symbol):
+        # Remove 'USD' and add 'B-' prefix and '_USDT' suffix
+        base_currency = symbol.replace('USD', '')
+        return f"B-{base_currency}_USDT"
+    
+
+    def get_open_position(self,positions, symbol):
+        """
+        Returns the open quantity for a given trading symbol.
+        If no active position, returns 0.
+        """
+        if not positions:  # handles [] or None
+            return 0
+        
+        for pos in positions:
+            if pos.get('pair') == symbol:
+                return pos.get('active_pos', 0)  # return active position size
+        
+        return 0
+
+
+class close_coindcx_position(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self,request):
+        data = request.data
+        symbol = data['symbol']
+        quantity = abs(float(data['quantity']))
+        userid = data['user_id']
+        user = User.objects.get(id=userid)
+        apikey,apisecret = user.get_api_credentials()
+        client = coindcxclient(api_key=apikey,api_secret=apisecret)
+        side = data['side']
+        order = client.place_order_coindcx(side = side,symbol = symbol,qty=quantity,leverage=20)
+        if order['success'] == True:
+            return Response({'message':'Position Closed Successfully.'})
+        else:
+            return Response({'error':'Error Closing Position.'},status=400)
+
+
+
     
 
 class OrderDetailsView(APIView):

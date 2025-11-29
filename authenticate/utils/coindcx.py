@@ -125,6 +125,7 @@ class coindcxclient:
                 "total_quantity": qty, 
                 "leverage": leverage, 
                 "time_in_force": "good_till_cancel", 
+                "margin_currency_short_name":"INR"
                 }
             }
             return {'success': True, 'result': self._make_authenticated_request('POST', '/derivatives/futures/orders/create',body)} 
