@@ -76,6 +76,7 @@ class coindcxclient:
                 "timestamp": timeStamp,  # EPOCH timestamp in seconds
             
                 "pairs": symbol,
+                "margin_currency_short_name": ["INR"]
 
             }
             return self._make_authenticated_request('POST', '/derivatives/futures/positions',body)
