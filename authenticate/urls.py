@@ -1,6 +1,6 @@
 from django.urls import path,include
 from rest_framework.routers import DefaultRouter
-from .views import SendOTPView, SignupView, OTPLoginView,  PhoneCheckView,UserDetailView,BrokerConnectView, WatchlistView,HighLowStrategyViewSet,dashboard_count,UserByPhoneView,user_strategy_portfolio,deploy_strategy_portfolio,UndeployStrategyAPIView,ProcessSignal,TradeDetailsView,OrderDetailsView,setSignal,deleteSignal,editActiveSignal,editPendingSignal,closeSignal,get_strategy_data,HighLowStrategyViewSet1,admin_user_strategy,user_strategy,add_strategy,get_tutorial,adminTradeDetails,adminOrderDetails,adminPositionDetails,userOrderDetails,admin_strategy_set,admin_activate_strategy,admin_deactivate_strategy,userNotifications,HighLowStrategyLimitedCreateView,Close_all_Positions,add_user_to_strategy,StrategyUsersDetailView,remove_user_to_strategy,user_strategy_set,change_margin_moode,signalmasterView,get_dashboard_count,get_today_dashboard_count,BrokerConnectCoindcx
+from .views import *
 
 router = DefaultRouter()
 router.register(r'highlow-strategies', HighLowStrategyViewSet, basename='highlow-strategy')
@@ -31,6 +31,8 @@ urlpatterns = [
     path('closeSignal/',closeSignal.as_view(),name="closeSignal"),
     path("broker/connect/", BrokerConnectView.as_view(), name="broker-connect"),
     
+    
+    path("edit_user/", Edit_admin_user.as_view(), name="Edit_admin_user"),
     path("change_margin_moode/", change_margin_moode.as_view(), name="change_margin_moode"),
     path("get_tutorial/", get_tutorial.as_view(), name="get_tutorial"),
     path("get_strategy_data/", get_strategy_data.as_view(), name="get_strategy_data"),
@@ -42,6 +44,7 @@ urlpatterns = [
     # Endpoint to check if a user exists by phone number
     path('check-phone/', PhoneCheckView.as_view(), name='check-phone'),
 
+    path('connect1/', BrokerConnect.as_view(), name='BrokerConnect'),
     path('connect/coindcx/', BrokerConnectCoindcx.as_view(), name='broker-connect-coindcx'),
     path('signal-list/', signalmasterView.as_view(), name='signalmasterView'),
     path('Close_all_Positions/', Close_all_Positions.as_view(), name='Close_all_Positions'),
@@ -55,6 +58,8 @@ urlpatterns = [
     path('user/strategies/', user_strategy_portfolio.as_view(), name='user-strategies'),
     
     # Deploy a strategy
+    
+    path('user/open_position/', get_open_position.as_view(), name='get_open_position'),
     path('user/strategies/deploy/', deploy_strategy_portfolio.as_view(), name='deploy-strategy'),
      path('today_dashboardcount/', get_today_dashboard_count.as_view(), name='get_today_dashboard_count'),
      path('dashboardcount/', get_dashboard_count.as_view(), name='get_today_dashboard_count'),

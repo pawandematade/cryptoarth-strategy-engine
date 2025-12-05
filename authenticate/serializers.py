@@ -9,8 +9,7 @@ import random
 from .utils.otp_service import OTPService
 from django.db import transaction, connection
 
-
-
+import string
 class UserSignupSerializer(serializers.ModelSerializer):
     """
     Serializer for user signup process.
@@ -76,6 +75,24 @@ class UserSignupSerializer(serializers.ModelSerializer):
         
         return attrs
     
+
+    def generate_unique_refercode(self):
+        """
+        Generate a unique refercode that doesn't exist in the database.
+        Format: 6-8 characters alphanumeric (uppercase letters and digits)
+        """
+        while True:
+            # Generate refercode with 6-8 characters
+            length = random.randint(6, 8)
+            refercode = ''.join(random.choices(
+                string.ascii_uppercase + string.digits, 
+                k=length
+            ))
+            
+            # Check if refercode already exists in database
+            if not User.objects.filter(refercode=refercode).exists():
+                return refercode
+    
     def create(self, validated_data):
         """
         Create a new user with the validated data.
@@ -86,6 +103,8 @@ class UserSignupSerializer(serializers.ModelSerializer):
             # Start atomic transaction to ensure all operations complete successfully
             with transaction.atomic():
                 # Create user with the provided validated data
+                refercode = self.generate_unique_refercode()
+                validated_data['username'] = refercode
                 user = User.objects.create_user(**validated_data)
                 # Generate JWT tokens for the new user
                 tokens = user.get_tokens()

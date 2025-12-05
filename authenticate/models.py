@@ -49,6 +49,23 @@ class User(AbstractBaseUser, PermissionsMixin):
     api_secret = models.CharField(max_length=255, blank=True, null=True)
     is_login = models.BooleanField(default=False)
     broker = models.CharField(max_length=100, default="DeltaExchange")
+    username = models.CharField(max_length=100, blank=True, null=True)
+    refercode = models.CharField(max_length=100, blank=True, null=True)
+    is_vendor = models.BooleanField(default=False)
+
+    is_user_edit = models.BooleanField(default=False)
+    is_user_view = models.BooleanField(default=False)
+    is_strategydetails_view =  models.BooleanField(default=False)
+    is_open_position_view =  models.BooleanField(default=False)
+    is_close_position_view =  models.BooleanField(default=False)
+    is_order_book =  models.BooleanField(default=False)
+    is_pl_report =  models.BooleanField(default=False)
+    is_create_strategy =  models.BooleanField(default=False)
+    is_watchlist =  models.BooleanField(default=False)
+    is_admin_strategy =  models.BooleanField(default=False)
+
+    coindcx_link = models.TextField(default = "NA")
+    deltaexchange_link = models.TextField(default = "NA")
 
 
     USERNAME_FIELD = 'phone'
@@ -89,6 +106,37 @@ class User(AbstractBaseUser, PermissionsMixin):
             return None, None
         
 
+class BrokerModels(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="brokers")
+    broker = models.CharField(max_length=100, default="DeltaExchange")
+    name = models.CharField(max_length=100, blank=True, null=True)
+    api_key = models.CharField(max_length=255, blank=True, null=True)
+    api_secret = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return self.name if self.name else self.broker
+    
+    def set_api_credentials(self, api_key: str, api_secret: str):
+        """Encrypt and store API credentials"""
+        FERNET_KEY = config('FERNET_KEY', default=None)
+        f = Fernet(FERNET_KEY)
+        
+        self.api_key = f.encrypt(api_key.encode()).decode()
+        self.api_secret = f.encrypt(api_secret.encode()).decode()
+        self.save(update_fields=["api_key", "api_secret"])
+
+    def get_api_credentials(self):
+        """Decrypt and return API credentials"""
+        FERNET_KEY = config('FERNET_KEY', default=None)
+        f = Fernet(FERNET_KEY)
+        try:
+            key = f.decrypt(self.api_key.encode()).decode() if self.api_key else None
+            secret = f.decrypt(self.api_secret.encode()).decode() if self.api_secret else None
+            return key, secret
+        except (InvalidToken, AttributeError):
+            return None, None
+
+
 class SymbolMaster(models.Model):
     symbol = models.CharField(max_length=50)
     symbolid = models.IntegerField()
@@ -128,7 +176,8 @@ class highLowstratergy(models.Model):
     risk = models.CharField(max_length = 25,default = "Low")
     overallReturn = models.DecimalField(max_digits = 13,decimal_places = 3, default=0)
     strategy_allow = models.CharField(max_length = 25,default = "All")
-
+    symbol = models.CharField(max_length = 25,blank=True, null = True)
+    trading_type = models.CharField(max_length = 25,default = "Automatic")
     allowed_users = models.ManyToManyField(
         'User', 
         blank=True,
@@ -143,6 +192,8 @@ class userStratergyPortfolio(models.Model):
     stratergy = models.ForeignKey(highLowstratergy, on_delete=models.CASCADE)
     is_active = models.BooleanField(default=False)
     date = models.DateTimeField(default=date.today)
+
+    broker = models.ForeignKey(BrokerModels, on_delete=models.CASCADE, related_name="user_strategies", null=True, blank=True)
 
 
 class Position(models.Model):
@@ -178,6 +229,7 @@ class tradeDetails(models.Model):
     status = models.CharField(max_length = 15,default = "NA")
     orderid = models.CharField(max_length = 35,default = "NA")
     stratergy = models.CharField(max_length = 15,default = "NA")
+    margin = models.DecimalField(max_digits=13,decimal_places=3,default = 0)
     remark = models.CharField(max_length = 85,default = "NA")
     stratergy_name = models.CharField(max_length = 25,default = "NA")
 

@@ -191,8 +191,8 @@ class process_exit_order:
         FERNET_KEY = config('FERNET_KEY', default=None)
         f = Fernet(FERNET_KEY)
         try:
-            key = f.decrypt(user['owner']['api_key'].encode()).decode() 
-            secret = f.decrypt(user['owner']['api_secret'].encode()).decode() 
+            key = f.decrypt(user['broker']['api_key'].encode()).decode() 
+            secret = f.decrypt(user['broker']['api_secret'].encode()).decode() 
             return key, secret
         except (InvalidToken, AttributeError):
             return None, None
@@ -241,7 +241,7 @@ class process_exit_order:
         if user['owner']['broker'] == "Coindcx":
             client = coindcxclient(api_key=apikey, api_secret=apisecret)
             try:
-                print(self.symbol_coindcx)
+                
                 position = client.get_positions_coindcx(symbol=self.symbol_coindcx)
                 quantity_balance = self.get_open_position(position, self.symbol_coindcx)
                 user_qty = float(user['quantity'])
@@ -249,9 +249,10 @@ class process_exit_order:
         
                     qty = min(user_qty, abs(quantity_balance))
                     order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=qty,leverage=self.leverage)
-                    print(order)
+                    
                     if order['success'] == True:
-                        self.order_set.append({'owner':user['owner']['id'],'exit_price':float(order['result'][0]['price']),'exit_orderid':order['result'][0]['id'],'exit_status':'completed','exit_quantity':order['result'][0]['total_quantity'],'exit_datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                        margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) * float(self.symbol_d['contract_value'])
+                        self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'exit_price':float(order['result'][0]['price']),'exit_orderid':order['result'][0]['id'],'exit_status':'completed','exit_quantity':order['result'][0]['total_quantity'],'exit_datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
                     else:
                         remarks = order['error'].args[0]['message']
                         self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
@@ -277,8 +278,9 @@ class process_exit_order:
                     qty = min(user_qty, abs(quantity_balance))
                 
                     order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=qty)
-                    if order['success'] == True:      
-                        self.order_set.append({'owner':user['owner']['id'],'exit_price':float(order['result']['average_fill_price']),'exit_orderid':order['result']['id'],'exit_status':order['result']['state'],'exit_quantity':order['result']['size'],'exit_datetime':order['result']['created_at'],'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                    if order['success'] == True:  
+                        margin_used = float(order['result']['average_fill_price']) * float(order['result']['size']) * float(self.symbol_d['contract_value'])     
+                        self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'exit_price':float(order['result']['average_fill_price']),'exit_orderid':order['result']['id'],'exit_status':order['result']['state'],'exit_quantity':order['result']['size'],'exit_datetime':order['result']['created_at'],'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
                     else:
                         remarks = order['error']['code']
                         self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
@@ -343,7 +345,8 @@ class process_exit_order:
                         orderid=order['entry_orderid'],
                         stratergy=self.strategy_id,
                         remark="Order Placed Successfully.",
-                        stratergy_name = self.strategy_name
+                        stratergy_name = self.strategy_name,
+                        margin=order['margin']
                     )
                     for order in self.order_set
                     
@@ -431,8 +434,8 @@ class process_entry_order:
         FERNET_KEY = config('FERNET_KEY', default=None)
         f = Fernet(FERNET_KEY)
         try:
-            key = f.decrypt(user['owner']['api_key'].encode()).decode() 
-            secret = f.decrypt(user['owner']['api_secret'].encode()).decode() 
+            key = f.decrypt(user['broker']['api_key'].encode()).decode() 
+            secret = f.decrypt(user['broker']['api_secret'].encode()).decode() 
             return key, secret
         except (InvalidToken, AttributeError):
             return None, None
@@ -492,14 +495,15 @@ class process_entry_order:
             if apikey and apisecret and user['is_active']:
                 client = coindcxclient(api_key=apikey,api_secret=apisecret)
                 balance_data = client.get_wallet_info()
-                print(balance_data,"sanke")
+   
                 quantity = self.caclulate_quantity1(balance_data)
-                print(quantity,"sds")
+      
                 if quantity:
                     order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=quantity,leverage=self.leverage)
                     print(order)
                     if order['success'] == True:
-                        self.order_set.append({'owner':user['owner']['id'],'price':float(order['result'][0]['price']),'orderid':order['result'][0]['id'],'status':'completed','quantity':order['result'][0]['total_quantity'],'datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at']))})
+                        margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) * float(self.symbol_d['contract_value'])
+                        self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'price':float(order['result'][0]['price']),'orderid':order['result'][0]['id'],'status':'completed','quantity':order['result'][0]['total_quantity'],'datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at']))})
                     else:
                         remarks = order['error'].args[0]['message']
                         self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
@@ -527,8 +531,8 @@ class process_entry_order:
                             order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=quantity)
                             
                             if order['success'] == True:
-                                
-                                self.order_set.append({'owner':user['owner']['id'],'price':float(order['result']['average_fill_price']),'orderid':order['result']['id'],'status':order['result']['state'],'quantity':order['result']['size'],'datetime':order['result']['created_at']})
+                                margin_used = float(order['result']['average_fill_price']) * float(order['result']['size']) * float(self.symbol_d['contract_value']) 
+                                self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'price':float(order['result']['average_fill_price']),'orderid':order['result']['id'],'status':order['result']['state'],'quantity':order['result']['size'],'datetime':order['result']['created_at']})
                         
                             else:
                                 remarks = order['error']['code']
@@ -596,7 +600,8 @@ class process_entry_order:
                             orderid=order['orderid'],
                             stratergy=self.strategy_id,
                             remark="Order Placed Successfully.",
-                            stratergy_name = self.strategy_name
+                            stratergy_name = self.strategy_name,
+                            margin=order['margin']
                         )
                         for order in self.order_set
                         

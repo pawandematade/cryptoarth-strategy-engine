@@ -4,7 +4,7 @@ from rest_framework import status , permissions,viewsets
 from django.db import transaction, connection
 
 from django.core.cache import cache
-from .models import User,Watchlist, SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,SignalMaster,Position,adminPosition,userStratergyPortfolio,copysignal,SignalMaster
+from .models import BrokerModels, User,Watchlist, SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,SignalMaster,Position,adminPosition,userStratergyPortfolio,copysignal,SignalMaster
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.exceptions import APIException
@@ -120,6 +120,7 @@ class PhoneCheckView(APIView):
     
 
 class UserByPhoneView(APIView):
+    permission_classes = [IsStaff]
     def get(self, request, phone):
         try:
             cache_key = f"admin_user_profile_{phone}"
@@ -136,30 +137,76 @@ class UserByPhoneView(APIView):
                 {"error": "User with this phone number does not exist."},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class Edit_admin_user(APIView):
+    permission_classes = [IsStaff]
     
     def put(self, request):
-        user_id = request.data.get('user_id')
+        user_id = request.data.get('id')
+        
+        if not user_id:
+            return Response({"error": "User ID is required"}, status=400)
         
         # Create update dictionary with only provided fields
         update_data = {}
         
-        if request.data.get('first_name'):
+        # Text fields (only update if provided and not empty)
+        if request.data.get('first_name') is not None:
             update_data['first_name'] = request.data.get('first_name')
-        if request.data.get('last_name'):
+        if request.data.get('last_name') is not None:
             update_data['last_name'] = request.data.get('last_name')
-        if request.data.get('email'):
+        if request.data.get('email') is not None:
             update_data['email'] = request.data.get('email')
-        if request.data.get('phone'):
+        if request.data.get('phone') is not None:
             update_data['phone'] = request.data.get('phone')
+        if request.data.get('username') is not None:
+            update_data['username'] = request.data.get('username')
+        
+        # Boolean fields (check if key exists in request, regardless of value)
+        # Fixed: using 'is_vendor' instead of 'vendor'
+        if 'is_vendor' in request.data:
+            update_data['is_vendor'] = request.data.get('is_vendor')
+        
+        if 'is_user_edit' in request.data:
+            update_data['is_user_edit'] = request.data.get('is_user_edit')
+        if 'is_user_view' in request.data:
+            update_data['is_user_view'] = request.data.get('is_user_view')
+        if 'is_strategydetails_view' in request.data:
+            update_data['is_strategydetails_view'] = request.data.get('is_strategydetails_view')
+        if 'is_open_position_view' in request.data:
+            update_data['is_open_position_view'] = request.data.get('is_open_position_view')
+        if 'is_close_position_view' in request.data:
+            update_data['is_close_position_view'] = request.data.get('is_close_position_view')
+        if 'is_order_book' in request.data:
+            update_data['is_order_book'] = request.data.get('is_order_book')
+        if 'is_pl_report' in request.data:
+            update_data['is_pl_report'] = request.data.get('is_pl_report')
+        if 'is_create_strategy' in request.data:
+            update_data['is_create_strategy'] = request.data.get('is_create_strategy')
+        if 'is_watchlist' in request.data:
+            update_data['is_watchlist'] = request.data.get('is_watchlist')
+        if 'is_admin_strategy' in request.data:
+            update_data['is_admin_strategy'] = request.data.get('is_admin_strategy')
+        
+        # Debug: Print what we're trying to update
+        print(f"Updating user {user_id} with data: {update_data}")
         
         # Single database query
         if update_data:
-            User.objects.filter(id=user_id).update(**update_data)
-        
-        
+            try:
+                updated_count = User.objects.filter(id=user_id).update(**update_data)
+                print(f"Updated {updated_count} user(s)")
+                
+                if updated_count == 0:
+                    return Response({"error": "User not found or no changes made"}, status=404)
+            except Exception as e:
+                print(f"Error updating user: {str(e)}")
+                return Response({"error": str(e)}, status=500)
+        cache.delete_pattern('admin_user_profile_*')
+        cache.delete(f'user_profile_{user_id}')
+        cache.delete(f'user_jwt_{user_id}')
         return Response({"message": "User updated successfully"})
-
-
 
 class UserDetailView(APIView):
     # Only authenticated users can access this view
@@ -212,13 +259,111 @@ class UserDetailView(APIView):
 
 from .utils.deltaexchange import DeltaExchangeClient  # ✅ your client import
 from .utils.coindcx import coindcxclient  # ✅ your client import
+
+
+class BrokerConnect(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        api_key = request.data.get("api_key")
+        api_secret = request.data.get("api_secret")
+        broker = request.data.get("broker")
+        name = request.data.get("name","")
+        if not api_key or not api_secret:
+            return Response({"error": "api_key and api_secret are required"}, status=400)
+        if broker == "Coindcx":
+            if BrokerModels.objects.filter(api_key =api_key,api_secret=api_secret ).exists():
+                return Response({"error": "Broker already connected"}, status=400)
+            else:
+                try:
+                    client = coindcxclient(api_key, api_secret)
+                    account_info = client.get_account_info()
+                   
+                    if account_info['success'] == True:
+                        user: User = request.user
+                        broker = BrokerModels.objects.create(
+                            user=user,
+                            name = name,
+                            broker=broker
+                        )
+                        broker.set_api_credentials(api_key, api_secret)
+                        user.is_login = True
+                        user.save()
+                        cache.delete(f"user_profile_{user.id}")
+                        cache.delete(f"user_jwt_{user.id}")
+
+                        return Response(
+                            {
+                                "message": "Broker connected successfully ✅"
+                            },
+                            status=200,
+                        )
+                    else:
+                        return Response({"error": "Invalid credentials"}, status=400)
+                except Exception as e:
+                    return Response({"error": f"Connection failed: {str(e)}"}, status=400)
+        else:
+            if BrokerModels.objects.filter(api_key =api_key,api_secret=api_secret ).exists():
+                return Response({"error": "Broker already connected"}, status=400) 
+            else:
+                try:
+                    client = DeltaExchangeClient(api_key, api_secret)
+                    account_info = client.get_account_info()
+                except Exception as e:
+                    return Response({"error": f"Connection failed: {str(e)}"}, status=400)
+                if not account_info.get("success", False):
+                    return Response(
+                        {"error": account_info.get("error", {}).get("code", "Invalid credentials")},
+                        status=400
+                    )
+
+                # 3️⃣ Extract result
+                result = account_info.get("result", {})
+                is_kyc_done = result.get("is_kyc_done", False)
+                is_login_enabled = result.get("is_login_enabled", False)
+
+                if not is_kyc_done or not is_login_enabled:
+                    return Response(
+                        {
+                            "error": "KYC not completed or login disabled.",
+                            "kyc_status": is_kyc_done,
+                            "login_enabled": is_login_enabled,
+                        },
+                        status=400
+                    )
+                user: User = request.user
+                broker = BrokerModels.objects.create(
+                    user=user,
+                    name = name,
+                    broker=broker
+                )
+                broker.set_api_credentials(api_key, api_secret)
+                user.is_login = True
+                user.save()
+                cache.delete(f"user_profile_{user.id}")
+                cache.delete(f"user_jwt_{user.id}")
+
+                return Response(
+                    {
+                        "message": "Broker connected successfully ✅"
+                    },
+                    status=200,
+                )
+                
+
+      
+
+
+
+
+
+
 class BrokerConnectCoindcx(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         api_key = request.data.get("api_key")
         api_secret = request.data.get("api_secret")
-        print(api_key,api_secret)
+        
         if not api_key or not api_secret:
             return Response({"error": "api_key and api_secret are required"}, status=400)
         try:
@@ -404,48 +549,69 @@ class get_dashboard_count(APIView):
     permission_classes = [IsStaff]
     def post(self,request):
         data = request.data
-        startDate = data['startDate']
-        endDate = data['endDate']
-        sdate, edate = convert_date_range_to_utc(startDate, endDate)
-        total_volume = (
-            OrderDetails.objects
-            .filter(date__range=[sdate, edate])
-            .aggregate(
-                total=Sum(
-                    ExpressionWrapper(
-                       ( F('buyquantity') * F('buyprice') )+ (F('sellquantity') * F('sellprice')),
-                        output_field=DecimalField(max_digits=20, decimal_places=3)
+        if request.user.is_staff == True:
+            startDate = data['startDate']
+            endDate = data['endDate']
+            sdate, edate = convert_date_range_to_utc(startDate, endDate)
+            total_volume = (
+                OrderDetails.objects
+                .filter(date__range=[sdate, edate],owner__refercode=request.user.username)
+                .aggregate(
+                    total=Sum(
+                        ExpressionWrapper(
+                        ( F('buyquantity') * F('buyprice') )+ (F('sellquantity') * F('sellprice')),
+                            output_field=DecimalField(max_digits=20, decimal_places=3)
+                        )
                     )
                 )
-            )
-        )['total'] or 0
-        total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
-        total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
-        total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
-        return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+            )['total'] or 0
+            total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
+            total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode =request.user.username ).count()
+            total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+        else:
+            pass
 
 
 class get_today_dashboard_count(APIView):
     permission_classes = [IsStaff]
     def get(self,request):
-        sdate, edate =get_todays_dates()
 
-        total_volume = (
-            OrderDetails.objects
-            .filter(date__range=[sdate, edate])
-            .aggregate(
-                total=Sum(
-                    ExpressionWrapper(
-                        F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
-                        output_field=DecimalField(max_digits=20, decimal_places=3)
+        sdate, edate =get_todays_dates()
+        if request.user.is_staff == True:
+            total_volume = (
+                OrderDetails.objects
+                .filter(date__range=[sdate, edate])
+                .aggregate(
+                    total=Sum(
+                        ExpressionWrapper(
+                            F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
+                            output_field=DecimalField(max_digits=20, decimal_places=3)
+                        )
                     )
                 )
-            )
-        )['total'] or 0
-        total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
-        total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
-        total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
-        return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+            )['total'] or 0
+            total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
+            total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
+            total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+        else:
+            total_volume = (
+                OrderDetails.objects
+                .filter(date__range=[sdate, edate],owner__refercode=request.user.username)
+                .aggregate(
+                    total=Sum(
+                        ExpressionWrapper(
+                            F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
+                            output_field=DecimalField(max_digits=20, decimal_places=3)
+                        )
+                    )
+                )
+            )['total'] or 0
+            total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
+            total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode=request.user.username).count()
+            total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
      
 from .serializers import SignalMasterSerializer
 class signalmasterView(APIView):
@@ -476,8 +642,8 @@ class get_open_position(APIView):
         strategy_id = data['strategy_id']
         symbol = data['symbol']
         symbolmaster = SymbolMaster.objects.get(symbol = symbol)
-        users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner_broker = "Coindcx")
-        users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner_broker = "DeltaExchange")
+        users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "Coindcx")
+        users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "DeltaExchange")
         dataset = []
         for user in users_coindcx:
             apikey,apisecret = user.owner.get_api_credentials()
@@ -486,14 +652,17 @@ class get_open_position(APIView):
             quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
             dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'Coindcx','open_quantity':quantity_balance})
         for user in users_delta:
-            apikey,apisecret = user.owner.get_api_credentials()
-            client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
-            position = client.get_positions(product_id=symbolmaster.symbolid)
-            if position['success'] == True:
-                quantity_balance = int(position['result']['size'])
-            else:
-                quantity_balance = 0
-            dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'DeltaExchange','open_quantity':quantity_balance})
+            try:
+                apikey,apisecret = user.owner.get_api_credentials()
+                client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+                position = client.get_positions(product_id=symbolmaster.symbolid)
+                if position['success'] == True:
+                    quantity_balance = int(position['result']['size'])
+                else:
+                    quantity_balance = 0
+                dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'DeltaExchange','open_quantity':quantity_balance})
+            except Exception as e:
+                print(str(e))
         return Response(dataset)
 
     def convert_symbol(self,symbol):
@@ -765,7 +934,10 @@ class dashboard_count(APIView):
 
     def post(self, request):
         data = request.data
-        userdata = User.objects.all()
+        if request.user.is_staff == True:
+            userdata = User.objects.all()
+        else:
+            userdata = User.objects.all(refercode = request.user.username)
         
         # For date range queries
         total_customer = userdata.filter(
@@ -831,11 +1003,33 @@ class deploy_strategy_portfolio(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self,request):
         data = request.data
-        strategyid = data['strategyid']     
+        strategyid = data['strategyid']  
+        try:
+            strategy = highLowstratergy.objects.get(id=strategyid)
+        except highLowstratergy.DoesNotExist:
+            return Response(
+                {"error": "Strategy not found", "status": False},
+                status=status.HTTP_404_NOT_FOUND
+            ) 
+        
+        existing_symbol_deployments = userStratergyPortfolio.objects.filter(
+                owner_id=request.user.id,
+                stratergy__symbol=strategy.symbol,  # Assuming strategy has a 'symbol' field
+                is_active=True
+            ).exclude(stratergy_id=strategyid)
+        
+        if existing_symbol_deployments.exists():
+            return Response({
+                "error": f"You already have an active deployment for symbol '{strategy.symbol}'",
+           
+                "status": False
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         existing_deployment, created = userStratergyPortfolio.objects.get_or_create(
             owner_id=request.user.id,
             stratergy_id=strategyid,
-            defaults={'is_active': True}
+            defaults={'is_active': True},
+            broker_id = data.get('broker_id','')
         )
         
         if not created:
