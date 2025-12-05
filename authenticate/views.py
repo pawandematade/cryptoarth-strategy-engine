@@ -308,6 +308,7 @@ class BrokerConnect(APIView):
                 try:
                     client = DeltaExchangeClient(api_key, api_secret)
                     account_info = client.get_account_info()
+                    print(account_info)
                 except Exception as e:
                     return Response({"error": f"Connection failed: {str(e)}"}, status=400)
                 if not account_info.get("success", False):

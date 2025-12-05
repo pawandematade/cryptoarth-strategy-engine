@@ -41,7 +41,7 @@ jobs:
           docker push sanketb81/cryptoarth-beat:latest
 
       - name: Deploy to Server
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
@@ -55,7 +55,7 @@ jobs:
 
 
       - name: Deploy to Server1
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP1 }}
           username: ${{ secrets.SERVER_USER }}
@@ -68,7 +68,7 @@ jobs:
 
 
       - name: Deploy to Server2
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_IP1 }}
           username: ${{ secrets.SERVER_USER }}
