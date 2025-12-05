@@ -238,7 +238,7 @@ class process_exit_order:
 
     def process_customer_position(self,user,symbol_data):
         apikey,apisecret = self.decrypt_api(user)
-        if user['owner']['broker'] == "Coindcx":
+        if user['broker']['broker'] == "Coindcx":
             client = coindcxclient(api_key=apikey, api_secret=apisecret)
             try:
                 
@@ -252,7 +252,7 @@ class process_exit_order:
                     
                     if order['success'] == True:
                         margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) * float(self.symbol_d['contract_value'])
-                        self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'exit_price':float(order['result'][0]['price']),'exit_orderid':order['result'][0]['id'],'exit_status':'completed','exit_quantity':order['result'][0]['total_quantity'],'exit_datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                        self.order_set.append({'owner':user['owner']['id'],'broker_id':user['broker']['id'],'margin':margin_used,'exit_price':float(order['result'][0]['price']),'exit_orderid':order['result'][0]['id'],'exit_status':'completed','exit_quantity':order['result'][0]['total_quantity'],'exit_datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
                     else:
                         remarks = order['error'].args[0]['message']
                         self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
@@ -280,7 +280,7 @@ class process_exit_order:
                     order = client.place_order(product_symbol = symbol_data['symbol'],side = self.side,size=qty)
                     if order['success'] == True:  
                         margin_used = float(order['result']['average_fill_price']) * float(order['result']['size']) * float(self.symbol_d['contract_value'])     
-                        self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'exit_price':float(order['result']['average_fill_price']),'exit_orderid':order['result']['id'],'exit_status':order['result']['state'],'exit_quantity':order['result']['size'],'exit_datetime':order['result']['created_at'],'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
+                        self.order_set.append({'owner':user['owner']['id'],'broker_id':user['broker']['id'],'margin':margin_used,'exit_price':float(order['result']['average_fill_price']),'exit_orderid':order['result']['id'],'exit_status':order['result']['state'],'exit_quantity':order['result']['size'],'exit_datetime':order['result']['created_at'],'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
                     else:
                         remarks = order['error']['code']
                         self.failure.append({'owner':user['owner']['id'],'orderid':user['order_id'],'remarks':remarks})
@@ -326,7 +326,8 @@ class process_exit_order:
                         sellquantity = order['entry_quantity'] if order['side'] == "sell" else order['exit_quantity'],
                         status = "Completed",
                         profit = ((order['exit_price'] * order['exit_quantity'] * symbol_data['contract_value']) - (order['entry_price'] * order['entry_quantity'] * symbol_data['contract_value'])) if order['side'] == "buy" else ((order['entry_price'] * order['entry_quantity'] * symbol_data['contract_value']) - (order['exit_price'] * order['exit_quantity'] * symbol_data['contract_value'])),
-                        stratergy_name = self.strategy_name
+                        stratergy_name = self.strategy_name,
+                        broker_id = order['broker_id']
 
                     )
                     for order in self.order_set
@@ -346,7 +347,8 @@ class process_exit_order:
                         stratergy=self.strategy_id,
                         remark="Order Placed Successfully.",
                         stratergy_name = self.strategy_name,
-                        margin=order['margin']
+                        margin=order['margin'],
+                        broker_id = order['broker_id']
                     )
                     for order in self.order_set
                     
@@ -490,8 +492,8 @@ class process_entry_order:
     
     def process_customer_position(self,user,symbol_data):
         apikey,apisecret = self.decrypt_api(user)
-        print(user['owner']['broker'])
-        if user['owner']['broker'] == "Coindcx":
+        # print(user['broker']['broker'])
+        if user['broker']['broker'] == "Coindcx":
             if apikey and apisecret and user['is_active']:
                 client = coindcxclient(api_key=apikey,api_secret=apisecret)
                 balance_data = client.get_wallet_info()
@@ -503,7 +505,7 @@ class process_entry_order:
                     print(order)
                     if order['success'] == True:
                         margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) * float(self.symbol_d['contract_value'])
-                        self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'price':float(order['result'][0]['price']),'orderid':order['result'][0]['id'],'status':'completed','quantity':order['result'][0]['total_quantity'],'datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at']))})
+                        self.order_set.append({'owner':user['owner']['id'],'broker_id':user['broker']['id'],'margin':margin_used,'price':float(order['result'][0]['price']),'orderid':order['result'][0]['id'],'status':'completed','quantity':order['result'][0]['total_quantity'],'datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at']))})
                     else:
                         remarks = order['error'].args[0]['message']
                         self.failure.append({'owner':user['owner']['id'],'orderid':"NA",'remarks':remarks})
@@ -532,7 +534,7 @@ class process_entry_order:
                             
                             if order['success'] == True:
                                 margin_used = float(order['result']['average_fill_price']) * float(order['result']['size']) * float(self.symbol_d['contract_value']) 
-                                self.order_set.append({'owner':user['owner']['id'],'margin':margin_used,'price':float(order['result']['average_fill_price']),'orderid':order['result']['id'],'status':order['result']['state'],'quantity':order['result']['size'],'datetime':order['result']['created_at']})
+                                self.order_set.append({'owner':user['owner']['id'],'broker_id':user['broker']['id'],'margin':margin_used,'price':float(order['result']['average_fill_price']),'orderid':order['result']['id'],'status':order['result']['state'],'quantity':order['result']['size'],'datetime':order['result']['created_at']})
                         
                             else:
                                 remarks = order['error']['code']
@@ -582,7 +584,8 @@ class process_entry_order:
                             leverage=self.leverage,
                             stratergy=self.strategy_id,
                             date=order['datetime'],
-                            stratergy_name = self.strategy_name
+                            stratergy_name = self.strategy_name,
+                            broker_id = order['broker_id']
                         )
                         for order in self.order_set
                     ]
@@ -601,7 +604,8 @@ class process_entry_order:
                             stratergy=self.strategy_id,
                             remark="Order Placed Successfully.",
                             stratergy_name = self.strategy_name,
-                            margin=order['margin']
+                            margin=order['margin'],
+                            broker_id = order['broker_id']
                         )
                         for order in self.order_set
                         

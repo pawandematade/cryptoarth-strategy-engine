@@ -9,7 +9,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.exceptions import APIException
 from rest_framework.decorators import action
-from .serializers import SendOTPSerializer,UserSignupSerializer,OTPLoginSerializer,UserSerializer,WatchlistSerializer,HighLowStrategySerializer,TradeSerializer,OrderDetailsSerializer,UserStrategyPortfolioSerializer,TradeDetailsSerializer,copySignalSerializers,HighLowStrategySerializer1,adminTradeSerializer,adminOrderDetailsSerializer,PositionSerializer
+from .serializers import SendOTPSerializer,UserSignupSerializer,OTPLoginSerializer,UserSerializer,WatchlistSerializer,HighLowStrategySerializer,TradeSerializer,OrderDetailsSerializer,UserStrategyPortfolioSerializer,TradeDetailsSerializer,copySignalSerializers,HighLowStrategySerializer1,adminTradeSerializer,adminOrderDetailsSerializer,PositionSerializer,BrokerSerializer
 
 from django.db.models import Q
 from .permissions import IsStaff
@@ -122,21 +122,34 @@ class PhoneCheckView(APIView):
 class UserByPhoneView(APIView):
     permission_classes = [IsStaff]
     def get(self, request, phone):
-        try:
-            cache_key = f"admin_user_profile_{phone}"
-            data = cache.get(cache_key)
-            if not data:
-                user = User.objects.get(phone=phone)
-                serializer = UserSerializer(user)
-                cache.set(cache_key, serializer.data, timeout=60 * 100)
-                return Response(serializer.data)
-            return Response(data)
-                
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User with this phone number does not exist."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        if request.user.is_staff == True:
+            try:
+                cache_key = f"admin_user_profile_{phone}"
+                data = cache.get(cache_key)
+                if not data:
+                    user = User.objects.get(phone=phone)
+                    serializer = UserSerializer(user)
+                    cache.set(cache_key, serializer.data, timeout=60 * 100)
+                    return Response(serializer.data)
+                return Response(data)
+                    
+            except User.DoesNotExist:
+                return Response(
+                    {"error": "User with this phone number does not exist."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            if request.user.is_vendor == True:
+                if User.objects.filter(phone=phone,refercode =request.user.username ).exists():
+                    user = User.objects.get(phone=phone,refercode =request.user.username)
+                    serializer = UserSerializer(user)
+                    return Response(serializer.data)
+                else:
+                    return Response(
+                        {"error": "User with this phone number does not exist or you are not authorized."},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            
 
 
 class Edit_admin_user(APIView):
@@ -263,6 +276,12 @@ from .utils.coindcx import coindcxclient  # ✅ your client import
 
 class BrokerConnect(APIView):
     permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        dataset = BrokerModels.objects.filter(user = request.user)
+        data = BrokerSerializer(dataset, many=True).data
+        return Response(data)
+
     def post(self, request):
         api_key = request.data.get("api_key")
         api_secret = request.data.get("api_secret")
@@ -555,23 +574,31 @@ class get_dashboard_count(APIView):
             endDate = data['endDate']
             sdate, edate = convert_date_range_to_utc(startDate, endDate)
             total_volume = (
-                OrderDetails.objects
-                .filter(date__range=[sdate, edate],owner__refercode=request.user.username)
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate])
                 .aggregate(
-                    total=Sum(
-                        ExpressionWrapper(
-                        ( F('buyquantity') * F('buyprice') )+ (F('sellquantity') * F('sellprice')),
-                            output_field=DecimalField(max_digits=20, decimal_places=3)
-                        )
-                    )
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
+            total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
+            total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
+            total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+        else:
+            startDate = data['startDate']
+            endDate = data['endDate']
+            sdate, edate = convert_date_range_to_utc(startDate, endDate)
+            total_volume = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate], owner__refercode=request.user.username)
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode =request.user.username ).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
             return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
-        else:
-            pass
 
 
 class get_today_dashboard_count(APIView):
@@ -580,16 +607,12 @@ class get_today_dashboard_count(APIView):
 
         sdate, edate =get_todays_dates()
         if request.user.is_staff == True:
+            
             total_volume = (
-                OrderDetails.objects
+                tradeDetails.objects
                 .filter(date__range=[sdate, edate])
                 .aggregate(
-                    total=Sum(
-                        ExpressionWrapper(
-                            F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
-                            output_field=DecimalField(max_digits=20, decimal_places=3)
-                        )
-                    )
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
@@ -597,16 +620,12 @@ class get_today_dashboard_count(APIView):
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
             return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
         else:
+            
             total_volume = (
-                OrderDetails.objects
+                tradeDetails.objects
                 .filter(date__range=[sdate, edate],owner__refercode=request.user.username)
                 .aggregate(
-                    total=Sum(
-                        ExpressionWrapper(
-                            F('buyquantity') * F('buyprice') + F('sellquantity') * F('sellprice'),
-                            output_field=DecimalField(max_digits=20, decimal_places=3)
-                        )
-                    )
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
@@ -647,21 +666,21 @@ class get_open_position(APIView):
         users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "DeltaExchange")
         dataset = []
         for user in users_coindcx:
-            apikey,apisecret = user.owner.get_api_credentials()
+            apikey,apisecret = user.broker.get_api_credentials()
             client = coindcxclient(api_key=apikey,api_secret=apisecret)
             position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
             quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
-            dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'Coindcx','open_quantity':quantity_balance})
+            dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
         for user in users_delta:
             try:
-                apikey,apisecret = user.owner.get_api_credentials()
+                apikey,apisecret = user.broker.get_api_credentials()
                 client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
                 position = client.get_positions(product_id=symbolmaster.symbolid)
                 if position['success'] == True:
                     quantity_balance = int(position['result']['size'])
                 else:
                     quantity_balance = 0
-                dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':'DeltaExchange','open_quantity':quantity_balance})
+                dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
             except Exception as e:
                 print(str(e))
         return Response(dataset)
@@ -704,6 +723,23 @@ class close_coindcx_position(APIView):
         else:
             return Response({'error':'Error Closing Position.'},status=400)
 
+from .utils.functions import get_live_price
+class get_margin_calculator(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self,request):
+        data = request.data
+        liveprice = get_live_price(data['symbol'])
+        symbol = SymbolMaster.objects.get(symbol = data['symbol'])
+        quantity = ((float(data['capital']) * float(data['leverage']) * (float(data['capitalPercent'])/100)) / liveprice)
+        lotSize =int( quantity / float(symbol.contract_value))
+
+        profit = ((float(data['capital']) * float(data['target']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        loss = ((float(data['capital']) * float(data['stopLoss']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        marginRequired = (float(data['capital'])  * (float(data['capitalPercent'])/100)) 
+        riskRewardRatio = profit / loss
+        return Response({'profit':profit,'loss':loss,'lotSize':lotSize,'quantity':quantity,'contractValue':symbol.contract_value,'usedCapital':data['capital'],'marginRequired':marginRequired,'riskRewardRatio':riskRewardRatio})
+
+        
 
 
     
@@ -1108,6 +1144,24 @@ class Close_all_Positions(APIView):
         else:
             return Response({'message':'No Active Positions found for this Strategy.'},status = status.HTTP_400_BAD_REQUEST)
 
+
+
+class get_referal_link(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self,request):
+        if request.user.refercode:
+            user1 = User.objects.get(username =request.user.refercode )
+            coindcx_link = user1.coindcx_link
+            delta_link = user1.deltaexchange_link
+            return Response({'coindcx_link':coindcx_link,'delta_link':delta_link})
+        else:
+            coindcx_link = "https://www.delta.exchange/?code=CRYPTOARTH"
+            delta_link = "https://www.delta.exchange/?code=CRYPTOARTH"
+            return Response({'coindcx_link':coindcx_link,'delta_link':delta_link})
+
+
+
+
 class setSignal(APIView):
 
     permission_classes = [IsStaff]
@@ -1278,10 +1332,20 @@ class editActiveSignal(APIView):
 class get_strategy_data(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def get(self,request):
+        
         userdata = highLowstratergy.objects.all()
         data = HighLowStrategySerializer1(userdata,many=True).data
         return Response(data)
 
+
+
+class get_admin_strategy_data(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self,request):
+        
+        userdata = highLowstratergy.objects.filter(owner = request.user.username,trading_type__in=["Manual", "Both"])
+        data = HighLowStrategySerializer1(userdata,many=True).data
+        return Response(data)
 
 from .serializers import miniUserStrategyPortfolioSerializer
 
@@ -1308,6 +1372,9 @@ class admin_strategy_set(APIView):
             query &= Q(is_active=False)
         if status and status == "Active":
             query &= Q(is_active=True)
+        if request.user.is_staff != True:
+            if request.user.is_vendor == True:
+                query &= Q(owner=request.user.username)
         userdata = highLowstratergy.objects.filter(query)
         serialized_data = HighLowStrategySerializer(userdata, many=True).data
         return Response(serialized_data)
@@ -1351,6 +1418,10 @@ class add_user_to_strategy(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         users = User.objects.filter(phone__in=phone_numbers)
+        if not request.user.is_staff and request.user.is_vendor:
+            # Get vendor's username as referral code
+            vendor_referral_code = request.user.username
+            users = users.filter(refercode=vendor_referral_code)
         found_phones = set(users.values_list('phone', flat=True))
         
         # Check for non-existent phone numbers
@@ -1467,6 +1538,9 @@ class adminTradeDetails(APIView):
             query &= Q(owner__phone=owner)
         if strategy:
             query &= Q(stratergy_name=strategy)
+        if request.user.is_staff != True:
+            if request.user.is_vendor == True:
+                query &= Q(owner__refercode=request.user.username)
         if start_date and end_data:
             s,p =convert_date_range_to_utc(start_date,end_data)
             query &= Q(date__gte=s)
@@ -1494,6 +1568,10 @@ class adminPositionDetails(APIView):
             query &= Q(owner__phone=owner)
         if strategy:
             query &= Q(stratergy_name=strategy)
+        if request.user.is_staff != True:
+            if request.user.is_vendor == True:
+                query &= Q(owner__refercode=request.user.username)
+        
         # if start_date and end_data:
         #     s,p =convert_date_range_to_utc(start_date,end_data)
         #     query &= Q(date__gte=s)
@@ -1521,6 +1599,9 @@ class adminOrderDetails(APIView):
             query &= Q(owner__phone=owner)
         if strategy:
             query &= Q(stratergy_name=strategy)
+        if request.user.is_staff != True:
+            if request.user.is_vendor == True:
+                query &= Q(owner__refercode=request.user.username)
         if start_date and end_data:
             s,p =convert_date_range_to_utc(start_date,end_data)
             query &= Q(date__gte=s)
@@ -1580,6 +1661,10 @@ class admin_user_strategy(APIView):
             query &= Q(is_active=True)
         elif status == "INACTIVE":
             query &= Q(is_active=False)
+
+        if request.user.is_staff != True:
+            if request.user.is_vendor == True:
+                query &= Q(owner__refercode=request.user.username)
 
         userdata = userStratergyPortfolio.objects.filter(query)
         serialized_data = miniUserStrategyPortfolioSerializer(userdata, many=True).data

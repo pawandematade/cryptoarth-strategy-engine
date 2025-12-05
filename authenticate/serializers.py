@@ -3,7 +3,7 @@ from django.core.cache import cache  # ✅ This is correct
 from rest_framework import serializers
 from django.utils import timezone
 from datetime import timedelta
-from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial,customer_failorder,SignalMaster
+from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial,customer_failorder,SignalMaster,BrokerModels
 from rest_framework.exceptions import AuthenticationFailed
 import random
 from .utils.otp_service import OTPService
@@ -24,7 +24,7 @@ class UserSignupSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['phone', 'email', 'first_name', 'last_name', 'otp', 'access', 'refresh']
+        fields = ['phone','refercode', 'email', 'first_name', 'last_name', 'otp', 'access', 'refresh']
 
     def validate(self, attrs):
         """
@@ -252,7 +252,10 @@ class UserSerializer(serializers.ModelSerializer):
     
 
 
-
+class BrokerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BrokerModels
+        fields = '__all__'
     
 
 class SymbolMasterSerializer(serializers.ModelSerializer):
@@ -353,11 +356,12 @@ class UserStrategyPortfolioSerializer(serializers.ModelSerializer):
 
 class PositionSerializer(serializers.ModelSerializer):
     owner = UserSerializer(read_only = True)
+    broker = BrokerSerializer(read_only = True)
     local_date = serializers.SerializerMethodField()
 
     class Meta:
         model = Position
-        fields = ['id','order_id','symbol','owner','price','quantity','side','unique','leverage','date','stratergy', 'local_date','stratergy_name']
+        fields = ['id','order_id','symbol','owner','price','quantity','side','unique','leverage','date','stratergy', 'local_date','stratergy_name','broker']
 
     def get_local_date(self, obj):
         if obj.date:
@@ -371,13 +375,14 @@ class PositionSerializer(serializers.ModelSerializer):
 import pytz
 class TradeDetailsSerializer(serializers.ModelSerializer):
     local_date = serializers.SerializerMethodField()
+    broker = BrokerSerializer(read_only = True)
 
     class Meta:
         model = tradeDetails
         fields = [
             'id', 'owner', 'symbol', 'price', 'quantity', 'side',
             'unique', 'date', 'local_date', 'status', 'orderid',
-            'stratergy', 'remark'
+            'stratergy', 'remark','broker'
         ]
 
     def get_local_date(self, obj):
@@ -435,9 +440,10 @@ class tutorialSerializer(serializers.ModelSerializer):
 class adminTradeSerializer(serializers.ModelSerializer):
     local_date = serializers.SerializerMethodField()
     owner = miniUserSerializer(read_only = True)
+    broker = BrokerSerializer(read_only = True)
     class Meta:
         model = tradeDetails
-        fields = ['owner','symbol','price','quantity','side','unique','date','status','orderid','stratergy','remark','stratergy_name', 'local_date']
+        fields = ['owner','symbol','price','broker','quantity','side','unique','date','status','orderid','stratergy','remark','stratergy_name', 'local_date']
 
     def get_local_date(self, obj):
         if obj.date:
@@ -451,9 +457,10 @@ class adminTradeSerializer(serializers.ModelSerializer):
 class adminOrderDetailsSerializer(serializers.ModelSerializer):
     local_date = serializers.SerializerMethodField()
     owner = miniUserSerializer(read_only = True)
+    broker = BrokerSerializer(read_only = True)
     class Meta:
         model = OrderDetails
-        fields = ['owner','symbol','stratergy','buyprice','sellprice','buyquantity','sellquantity','side','orderid','date','status','profit','stratergy_name', 'local_date']
+        fields = ['owner','symbol','stratergy','broker','buyprice','sellprice','buyquantity','sellquantity','side','orderid','date','status','profit','stratergy_name', 'local_date']
 
     def get_local_date(self, obj):
         if obj.date:

@@ -49,7 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     api_secret = models.CharField(max_length=255, blank=True, null=True)
     is_login = models.BooleanField(default=False)
     broker = models.CharField(max_length=100, default="DeltaExchange")
-    username = models.CharField(max_length=100, blank=True, null=True)
+    username = models.CharField(max_length=100, blank=True, null=True,unique=True)
     refercode = models.CharField(max_length=100, blank=True, null=True)
     is_vendor = models.BooleanField(default=False)
 
@@ -208,6 +208,7 @@ class Position(models.Model):
     stratergy = models.CharField(max_length = 15,default = "NA")
     date = models.DateTimeField(default=date.today)
     stratergy_name = models.CharField(max_length = 25,default = "NA")
+    broker = models.ForeignKey(BrokerModels, on_delete=models.CASCADE, related_name="broker_position", null=True, blank=True)
 
 
 class adminPosition(models.Model):
@@ -232,6 +233,7 @@ class tradeDetails(models.Model):
     margin = models.DecimalField(max_digits=13,decimal_places=3,default = 0)
     remark = models.CharField(max_length = 85,default = "NA")
     stratergy_name = models.CharField(max_length = 25,default = "NA")
+    broker = models.ForeignKey(BrokerModels, on_delete=models.CASCADE, related_name="broker_trade", null=True, blank=True)
 
 
 class OrderDetails(models.Model):
@@ -248,6 +250,7 @@ class OrderDetails(models.Model):
     status = models.CharField(max_length = 15,default = "NA")
     profit = models.DecimalField(max_digits=13,decimal_places=3,default = 0)
     stratergy_name = models.CharField(max_length = 25,default = "NA")
+    broker = models.ForeignKey(BrokerModels, on_delete=models.CASCADE, related_name="broker_order", null=True, blank=True)
 
 
 class customer_failorder(models.Model):

@@ -32,6 +32,8 @@ urlpatterns = [
     path("broker/connect/", BrokerConnectView.as_view(), name="broker-connect"),
     
     
+    path("get_referal_link/", get_referal_link.as_view(), name="get_referal_link"),
+    path("get_admin_strategy_data/", get_admin_strategy_data.as_view(), name="get_admin_strategy_data"),
     path("edit_user/", Edit_admin_user.as_view(), name="Edit_admin_user"),
     path("change_margin_moode/", change_margin_moode.as_view(), name="change_margin_moode"),
     path("get_tutorial/", get_tutorial.as_view(), name="get_tutorial"),
@@ -59,6 +61,7 @@ urlpatterns = [
     
     # Deploy a strategy
     
+    path('get_margin_calculator/', get_margin_calculator.as_view(), name='get_margin_calculator'),
     path('user/open_position/', get_open_position.as_view(), name='get_open_position'),
     path('user/strategies/deploy/', deploy_strategy_portfolio.as_view(), name='deploy-strategy'),
      path('today_dashboardcount/', get_today_dashboard_count.as_view(), name='get_today_dashboard_count'),
