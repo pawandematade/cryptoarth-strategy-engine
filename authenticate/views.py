@@ -670,7 +670,8 @@ class get_open_position(APIView):
             client = coindcxclient(api_key=apikey,api_secret=apisecret)
             position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
             quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
-            dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
+            if float(quantity_balance) != 0:
+                dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
         for user in users_delta:
             try:
                 apikey,apisecret = user.broker.get_api_credentials()
@@ -680,7 +681,8 @@ class get_open_position(APIView):
                     quantity_balance = int(position['result']['size'])
                 else:
                     quantity_balance = 0
-                dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
+                if float(quantity_balance) != 0:
+                    dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
             except Exception as e:
                 print(str(e))
         return Response(dataset)
