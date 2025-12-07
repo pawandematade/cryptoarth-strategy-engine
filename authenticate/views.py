@@ -196,7 +196,7 @@ class admin_undeploy_user_strategy(APIView):
     def post(self,request):
         data = request.data
         strategyid = data['strategyid'] 
-        portfolio = userStratergyPortfolio.objects.get(stratergy =strategyid )  
+        portfolio = userStratergyPortfolio.objects.get(id =strategyid )  
         
         portfolio.delete()
 
@@ -817,14 +817,33 @@ class get_open_position(APIView):
         return 0
 
 
+class close_delta_position(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self,request):
+        data = request.data
+        symbol = data['symbol']
+        quantity = abs(int(data['quantity']))
+        brokerid = data['brokerid']
+        user = BrokerModels.objects.get(id=brokerid)
+        apikey,apisecret = user.get_api_credentials()
+        client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+        side = data['side']
+        order = client.place_order(product_symbol = symbol,side = self.side,size=quantity)
+        if order['success'] == True:  
+            return Response({'message':'Position Closed Successfully.'})
+        else:
+            return Response({'error':'Error Closing Position.'},status=400)
+
+
+
 class close_coindcx_position(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self,request):
         data = request.data
         symbol = data['symbol']
         quantity = abs(float(data['quantity']))
-        userid = data['user_id']
-        user = User.objects.get(id=userid)
+        brokerid = data['brokerid']
+        user = BrokerModels.objects.get(id=brokerid)
         apikey,apisecret = user.get_api_credentials()
         client = coindcxclient(api_key=apikey,api_secret=apisecret)
         side = data['side']
