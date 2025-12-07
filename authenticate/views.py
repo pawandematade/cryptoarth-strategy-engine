@@ -196,7 +196,7 @@ class admin_undeploy_user_strategy(APIView):
     def post(self,request):
         data = request.data
         strategyid = data['strategyid'] 
-        portfolio = userStratergyPortfolio.objects.get(stratergy_id =strategyid )  
+        portfolio = userStratergyPortfolio.objects.get(stratergy =strategyid )  
         
         portfolio.delete()
 
