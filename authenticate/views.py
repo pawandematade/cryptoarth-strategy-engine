@@ -100,6 +100,115 @@ class OTPLoginView(APIView):
         finally:
             connection.close()
 
+from .serializers import MiniStrategySerializer,miniUserSerializer
+class get_admin_strategy_list(APIView):
+    permission_classes = [IsStaff]
+    def get(self, request):
+        if request.user.is_staff == True:
+            strategy = highLowstratergy.objects.filter(is_active=True)
+        else:
+            strategy = highLowstratergy.objects.filter(is_active=True,owner = request.user.username)
+        data = MiniStrategySerializer(strategy,many=True).data
+        return Response(data)
+    
+class get_admin_user_list(APIView):
+    permission_classes = [IsStaff]
+    def get(self, request):
+        if request.user.is_staff == True:
+            userdata = User.objects.all()
+        else:
+            userdata = User.objects.filter(refercode = request.user.username)
+        data = miniUserSerializer(userdata,many=True).data
+        return Response(data)  
+    
+
+class get_admin_broker_list(APIView):
+    permission_classes = [IsStaff]
+    def post(self,request):
+        data = request.data
+        if request.user.is_staff == True:
+            brokerdata = BrokerModels.objects.filter(user_id = data['user_id'])
+            data = BrokerSerializer(brokerdata,many = True)
+            return Response(data)
+        else:
+            if User.objects.filter(id = data['user_id'],refercode = request.user.username).exists():
+                brokerdata = BrokerModels.objects.filter(user_id = data['user_id'])
+                data = BrokerSerializer(brokerdata,many = True)
+                return Response(data)
+            else:
+                return Response({'message':'User not found'}, status = status.HTTP_404_NOT_FOUND)
+            
+
+class admin_deploy_user_strategy(APIView):
+    permission_classes = [IsStaff]
+    def post(self,request):
+        data = request.data
+
+        strategyid = data['strategyid']  
+        user_id = data['user_id']
+        broker_id = data['broker_id']
+        try:
+            strategy = highLowstratergy.objects.get(id=strategyid)
+        except highLowstratergy.DoesNotExist:
+            return Response(
+                {"error": "Strategy not found", "status": False},
+                status=status.HTTP_404_NOT_FOUND
+            ) 
+        
+        existing_symbol_deployments = userStratergyPortfolio.objects.filter(
+                owner_id=user_id,
+                stratergy__symbol=strategy.symbol,  # Assuming strategy has a 'symbol' field
+                is_active=True,
+                broker_id = broker_id
+            ).exclude(stratergy_id=strategyid)
+        
+        if existing_symbol_deployments.exists():
+            return Response({
+                "error": f"You already have an active deployment for symbol '{strategy.symbol}'",
+           
+                "status": False
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        existing_deployment, created = userStratergyPortfolio.objects.get_or_create(
+            owner_id=user_id,
+            stratergy_id=strategyid,
+            defaults={'is_active': True},
+            broker_id = data.get('broker_id','')
+        )
+        
+        if not created:
+            # Strategy already exists, activate it
+            existing_deployment.is_active = True
+            existing_deployment.save()
+            message = "Strategy is already activated."
+        else:
+            message = "Strategy deployed successfully"
+        response_serializer = UserStrategyPortfolioSerializer(existing_deployment,many=False)
+        return Response({
+            'status': 'success',
+            'message': message,
+            'data': response_serializer.data
+        }, status=status.HTTP_201_CREATED)
+    
+
+class admin_undeploy_user_strategy(APIView):
+    permission_classes = [IsStaff]
+    def post(self,request):
+        data = request.data
+        strategyid = data['strategyid'] 
+        portfolio = userStratergyPortfolio.objects.get(stratergy_id =strategyid )  
+        
+        portfolio.delete()
+
+        return Response({
+            'status': 'success',
+            'message': 'Strategy undeployed successfully',
+   
+        })
+        
+
+
+
 
 
 

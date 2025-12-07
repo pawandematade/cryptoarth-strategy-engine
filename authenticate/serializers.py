@@ -282,6 +282,12 @@ class HighLowStrategySerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class MiniStrategySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = highLowstratergy
+        fields = ['id','full_name']
+
+
 class HighLowStrategyLimitedSerializer(serializers.ModelSerializer):
     class Meta:
         model = highLowstratergy
@@ -417,7 +423,7 @@ class copySignalSerializers(serializers.ModelSerializer):
 class miniUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['phone','first_name','last_name','is_login']
+        fields = ['id','phone','first_name','last_name','is_login']
 
 
 class miniUserStrategyPortfolioSerializer(serializers.ModelSerializer):
