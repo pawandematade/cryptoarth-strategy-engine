@@ -961,9 +961,14 @@ class get_margin_calculator(APIView):
         symbol = SymbolMaster.objects.get(symbol = data['symbol'])
         quantity = ((float(data['capital']) * float(data['leverage']) * (float(data['capitalPercent'])/100)) / liveprice)
         lotSize =int( quantity / float(symbol.contract_value))
-
-        profit = ((float(data['capital']) * float(data['target']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
-        loss = ((float(data['capital']) * float(data['stopLoss']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        if data['targetType'] == "percent":
+            profit = ((float(data['capital']) * float(data['target']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        else:
+            profit = (float(data['capital']) * (float(data['target'])/liveprice)) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        if data['stopLossType'] == "percent":
+            loss = ((float(data['capital']) * float(data['stopLoss']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        else:
+            loss = (float(data['capital']) * (float(data['stopLoss'])/liveprice)) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
         marginRequired = (float(data['capital'])  * (float(data['capitalPercent'])/100)) 
         riskRewardRatio = profit / loss
         return Response({'profit':profit,'loss':loss,'lotSize':lotSize,'quantity':quantity,'contractValue':symbol.contract_value,'usedCapital':data['capital'],'marginRequired':marginRequired,'riskRewardRatio':riskRewardRatio})
