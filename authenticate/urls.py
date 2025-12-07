@@ -71,6 +71,7 @@ urlpatterns = [
     path('close_open_position_onbroker/', close_open_position_onbroker.as_view(), name='close_open_position_onbroker'),
     path('close_delta_position/', close_delta_position.as_view(), name='close_delta_position'),
     path('close_coindcx_position/', close_coindcx_position.as_view(), name='close_coindcx_position'),
+    path('get_margin_calculator1/', get_margin_calculator1.as_view(), name='get_margin_calculator1'),
     path('get_margin_calculator/', get_margin_calculator.as_view(), name='get_margin_calculator'),
     path('user/open_position/', get_open_position.as_view(), name='get_open_position'),
     path('user/strategies/deploy/', deploy_strategy_portfolio.as_view(), name='deploy-strategy'),

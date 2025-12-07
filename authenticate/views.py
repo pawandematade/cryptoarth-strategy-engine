@@ -774,16 +774,39 @@ class close_open_position_onbroker(APIView):
         users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "Coindcx")
         users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "DeltaExchange")
         for user in users_coindcx:
-            apikey,apisecret = user.broker.get_api_credentials()
-            client = coindcxclient(api_key=apikey,api_secret=apisecret)
-            position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
-            quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
-            if float(quantity_balance) != 0:
-                if quantity_balance > 0:
-                    side = "sell"
+            try:
+                apikey,apisecret = user.broker.get_api_credentials()
+                client = coindcxclient(api_key=apikey,api_secret=apisecret)
+                position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
+                quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
+                if float(quantity_balance) != 0:
+                    if quantity_balance > 0:
+                        side = "sell"
+                    else:
+                        side = "buy"
+                    client.place_order_coindcx(side = side,symbol =  self.convert_symbol(symbol),qty=quantity_balance,leverage=50)
+            except:
+                pass
+        
+        for user in users_delta:
+            try:
+                apikey,apisecret = user.broker.get_api_credentials()
+                client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+
+                position = client.get_positions(product_id=symbolmaster.symbolid)
+                if position['success'] == True:
+                    quantity_balance = int(position['result']['size'])
                 else:
-                    side = "buy"
-                client.place_order_coindcx(side = side,symbol =  self.convert_symbol(symbol),qty=quantity_balance,leverage=50)
+                    quantity_balance = 0
+                if float(quantity_balance) != 0:
+                    if quantity_balance > 0:
+                        side = "sell"
+                    else:
+                        side = "buy"
+                    client.place_order(product_symbol = symbol,side = side,size=quantity_balance)
+                    
+            except Exception as e:
+                print(str(e))
         return Response({'message':'Orders Close Successfully.'})
 
 
@@ -974,7 +997,25 @@ class get_margin_calculator(APIView):
         return Response({'profit':profit,'loss':loss,'lotSize':lotSize,'quantity':quantity,'contractValue':symbol.contract_value,'usedCapital':data['capital'],'marginRequired':marginRequired,'riskRewardRatio':riskRewardRatio})
 
         
-
+class get_margin_calculator1(APIView):
+    
+    def post(self,request):
+        data = request.data
+        liveprice = get_live_price(data['symbol'])
+        symbol = SymbolMaster.objects.get(symbol = data['symbol'])
+        quantity = ((float(data['capital']) * float(data['leverage']) * (float(data['capitalPercent'])/100)) / liveprice)
+        lotSize =int( quantity / float(symbol.contract_value))
+        if data['targetType'] == "percent":
+            profit = ((float(data['capital']) * float(data['target']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        else:
+            profit = (float(data['capital']) * (float(data['target'])/liveprice)) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        if data['stopLossType'] == "percent":
+            loss = ((float(data['capital']) * float(data['stopLoss']))/100) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        else:
+            loss = (float(data['capital']) * (float(data['stopLoss'])/liveprice)) * (float(data['leverage']) * (float(data['capitalPercent'])/100))
+        marginRequired = (float(data['capital'])  * (float(data['capitalPercent'])/100)) 
+        riskRewardRatio = profit / loss
+        return Response({'profit':profit,'loss':loss,'lotSize':lotSize,'quantity':quantity,'contractValue':symbol.contract_value,'usedCapital':data['capital'],'marginRequired':marginRequired,'riskRewardRatio':riskRewardRatio})
 
     
 
