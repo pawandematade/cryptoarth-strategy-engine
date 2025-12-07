@@ -251,7 +251,7 @@ class process_exit_order:
                     order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=qty,leverage=self.leverage)
                     
                     if order['success'] == True:
-                        margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) * float(self.symbol_d['contract_value'])
+                        margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) 
                         self.order_set.append({'owner':user['owner']['id'],'broker_id':user['broker']['id'],'margin':margin_used,'exit_price':float(order['result'][0]['price']),'exit_orderid':order['result'][0]['id'],'exit_status':'completed','exit_quantity':order['result'][0]['total_quantity'],'exit_datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),'entry_price':float(user['price']),'entry_quantity':user_qty,'entry_orderid':user['order_id'],'side':user['side']})
                     else:
                         remarks = order['error'].args[0]['message']
@@ -507,14 +507,14 @@ class process_entry_order:
                 client = coindcxclient(api_key=apikey,api_secret=apisecret)
                 balance_data = client.get_wallet_info()
                 conversion_rate=client.get_usdt_conversion()[0]['conversion_price']
-                print(conversion_rate)
+                
                 quantity = self.caclulate_quantity1(balance_data,conversion_rate)
       
                 if quantity:
                     order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=quantity,leverage=self.leverage)
-                    print(order)
+            
                     if order['success'] == True:
-                        margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) * float(self.symbol_d['contract_value'])
+                        margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) 
                         self.order_set.append({'owner':user['owner']['id'],'broker_id':user['broker']['id'],'margin':margin_used,'price':float(order['result'][0]['price']),'orderid':order['result'][0]['id'],'status':'completed','quantity':order['result'][0]['total_quantity'],'datetime':self.convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at']))})
                     else:
                         remarks = order['error'].args[0]['message']

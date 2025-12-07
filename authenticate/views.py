@@ -764,6 +764,54 @@ class signalmasterView(APIView):
         return Response(data)
 
 
+class close_open_position_onbroker(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self,request):
+        data =request.data
+        strategy_id = data['strategy_id']
+        symbol = data['symbol']
+        symbolmaster = SymbolMaster.objects.get(symbol = symbol)
+        users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "Coindcx")
+        users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "DeltaExchange")
+        for user in users_coindcx:
+            apikey,apisecret = user.broker.get_api_credentials()
+            client = coindcxclient(api_key=apikey,api_secret=apisecret)
+            position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
+            quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
+            if float(quantity_balance) != 0:
+                if quantity_balance > 0:
+                    side = "sell"
+                else:
+                    side = "buy"
+                client.place_order_coindcx(side = side,symbol =  self.convert_symbol(symbol),qty=quantity_balance,leverage=50)
+        return Response({'message':'Orders Close Successfully.'})
+
+
+
+    def convert_symbol(self,symbol):
+        # Remove 'USD' and add 'B-' prefix and '_USDT' suffix
+        base_currency = symbol.replace('USD', '')
+        return f"B-{base_currency}_USDT"
+    
+
+    def get_open_position(self,positions, symbol):
+        """
+        Returns the open quantity for a given trading symbol.
+        If no active position, returns 0.
+        """
+        if not positions:  # handles [] or None
+            return 0
+        
+        for pos in positions:
+            if pos.get('pair') == symbol:
+                return pos.get('active_pos', 0)  # return active position size
+        
+        return 0
+
+
+
+
+
 class get_open_position(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self,request):

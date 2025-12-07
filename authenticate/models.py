@@ -305,3 +305,5 @@ class tutorial(models.Model):
     title =  models.CharField(max_length = 250,default = "NA")
     description = models.TextField(default="NA")
     link =  models.CharField(max_length = 100,default = "NA")
+    broker =  models.CharField(max_length = 100,default = "NA")
+    tag =  models.CharField(max_length = 100,default = "NA")
