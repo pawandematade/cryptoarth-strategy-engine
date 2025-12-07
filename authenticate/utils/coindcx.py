@@ -61,12 +61,27 @@ class coindcxclient:
                 "timestamp": timeStamp
                 }
             data = self._make_authenticated_request('GET', '/derivatives/futures/wallets',body) 
-            usdt_balance = next((item['balance'] for item in data if item['currency_short_name'] == 'USDT'), 0)
+ 
+            usdt_balance = next((item['balance'] for item in data if item['currency_short_name'] == 'INR'), 0)
             return round(float(usdt_balance),3)
             
         except Exception as e:
             print(f"Unexpected error: {e}")
             return {'success': False, 'error': str(e)}
+        
+    def get_usdt_conversion(self):
+        try:
+            timeStamp = self.get_timestamp()
+
+            body = {
+                "timestamp": timeStamp
+                }
+            data = self._make_authenticated_request('GET', '/derivatives/futures/data/conversions',body) 
+            return data
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            return {'success': False, 'error': str(e)}
+
         
     def get_positions_coindcx(self,symbol):
         try:

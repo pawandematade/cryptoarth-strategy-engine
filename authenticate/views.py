@@ -835,6 +835,57 @@ class close_delta_position(APIView):
             return Response({'error':'Error Closing Position.'},status=400)
 
 
+def get_open_position1(positions, symbol):
+        """
+        Returns the open quantity for a given trading symbol.
+        If no active position, returns 0.
+        """
+        if not positions:  # handles [] or None
+            return 0
+        
+        for pos in positions:
+            if pos.get('pair') == symbol:
+                return pos.get('active_pos', 0)  # return active position size
+        
+        return 0
+
+def convert_ms_to_kolkata_datetime(timestamp_ms: int):
+        """
+        Converts a Unix timestamp in milliseconds to a datetime object
+        in Kolkata timezone (Asia/Kolkata).
+        """
+        try:
+            kolkata_tz = pytz.timezone('Asia/Kolkata')
+            return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=kolkata_tz)
+        except (ValueError, TypeError):
+            return None
+
+class close_position_byid(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    
+    def post(self,request):
+        data = request.data
+        position = Position.objects.get(id = data['id'])
+        if position.broker.broker == "Coindcx":
+            apikey,apisecret = position.broker.get_api_credentials()
+            client = coindcxclient(api_key=apikey, api_secret=apisecret)
+            position1 = client.get_positions_coindcx(symbol=position.symbol)
+            quantity_balance = get_open_position1(position1, position.symbol)
+            user_qty = float(position.quantity)
+            if (position.side == "buy" and quantity_balance > 0) or (position.side == "sell" and quantity_balance < 0):
+                qty = min(user_qty, abs(quantity_balance))
+                if position.side == "buy":
+                    side = "sell"
+                else:
+                    side = "buy"
+                order = client.place_order_coindcx(side = side,symbol = position.symbol,qty=qty,leverage=position.leverage)
+                if order['success'] == True:
+                    pass
+                    # post = OrderDetails(owner_id = position.owner.id,orderid = position.order_id,symbol=position.symbol,side = position.side,stratergy = position.stratergy_name,date=convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),buyprice = float(position.price) if position.side == "buy" else float(order['result'][0]['price']),sellprice=,buyquantity=,sellquantity=,status = "Completed",profit =,stratergy_name=position.strategy_name,broker_id=position.broker.id)
+
+
+
 
 class close_coindcx_position(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -1019,7 +1070,7 @@ class ProcessSignal(APIView):
         data = text_data.split("|")
         print(data)
         symbol,symbolid, entry, target, stoploss, strategy_id, stratergycode, tradingbridgecode, side, input_datetime_str, leverage, capital, type,blank = data
-        print(symbol, entry, target, stoploss, strategy_id, stratergycode, tradingbridgecode, side, input_datetime_str, leverage, capital, type )
+        
         try:
             input_datetime = datetime.strptime(input_datetime_str, "%m/%d/%Y %I:%M:%S %p")
             tz = pytz.timezone('Asia/Kolkata')
@@ -1074,6 +1125,7 @@ class ProcessSignal(APIView):
 
                     return Response({'message':'Signal Process Successfully.'})
                 else:
+                    print(symbolid,side,leverage,capital,strategy_id,strat.name)
                     client12 = process_entry_order(symbolid,side,leverage,capital,strategy_id,strat.name)
                     client12.process()
                     

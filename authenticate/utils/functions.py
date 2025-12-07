@@ -311,7 +311,7 @@ class process_exit_order:
                 loop_logic = [executor.submit(self.process_customer_position,user,symbol_data) for user in dataset]
                 wait(loop_logic)
 
-                print(self.order_set)
+                
                 orders = [
                     OrderDetails(
                         owner_id=order['owner'],
@@ -353,6 +353,10 @@ class process_exit_order:
                     for order in self.order_set
                     
                 ]
+                try:
+                    cache.delete_pattern('trade_details_*')
+                except:
+                    pass
                 tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
                 ids = [ order['entry_orderid'] for order in self.order_set ]
                 Position.objects.filter(order_id__in=ids).delete()
@@ -430,16 +434,20 @@ class process_entry_order:
             return None
         
     def decrypt_api(self,user):
-        from cryptography.fernet import Fernet, InvalidToken
-        from decouple import config
-
-        FERNET_KEY = config('FERNET_KEY', default=None)
-        f = Fernet(FERNET_KEY)
         try:
-            key = f.decrypt(user['broker']['api_key'].encode()).decode() 
-            secret = f.decrypt(user['broker']['api_secret'].encode()).decode() 
-            return key, secret
-        except (InvalidToken, AttributeError):
+            from cryptography.fernet import Fernet, InvalidToken
+            from decouple import config
+
+            FERNET_KEY = config('FERNET_KEY', default=None)
+            f = Fernet(FERNET_KEY)
+            try:
+                key = f.decrypt(user['broker']['api_key'].encode()).decode() 
+                secret = f.decrypt(user['broker']['api_secret'].encode()).decode() 
+                return key, secret
+            except (InvalidToken, AttributeError):
+                return None, None
+        except Exception as e:
+            print(str(e))
             return None, None
         
     def adjust_quantity(self,quantity, contract_value):
@@ -454,13 +462,13 @@ class process_entry_order:
         adjusted = math.floor(quantity * (10 ** decimal_places)) / (10 ** decimal_places)
         return adjusted
     
-    def caclulate_quantity1(self,fund):
+    def caclulate_quantity1(self,fund,conversion_rate):
         data = self.symbol_d
-        margin = fund * int(self.leverage) * float(self.capital)
-        
+        margin = (fund/float(conversion_rate)) * int(self.leverage) * float(self.capital)
         liveprice = float(get_live_price(self.symbol_d['symbol']))
         qty = margin / liveprice
         qty = self.adjust_quantity(qty, float(data['contract_value']))
+      
         if qty >= float(data['contract_value']):
             return qty
         else:
@@ -491,14 +499,16 @@ class process_entry_order:
     
     
     def process_customer_position(self,user,symbol_data):
+
         apikey,apisecret = self.decrypt_api(user)
-        # print(user['broker']['broker'])
+        print(user['broker']['broker'])
         if user['broker']['broker'] == "Coindcx":
             if apikey and apisecret and user['is_active']:
                 client = coindcxclient(api_key=apikey,api_secret=apisecret)
                 balance_data = client.get_wallet_info()
-   
-                quantity = self.caclulate_quantity1(balance_data)
+                conversion_rate=client.get_usdt_conversion()[0]['conversion_price']
+                print(conversion_rate)
+                quantity = self.caclulate_quantity1(balance_data,conversion_rate)
       
                 if quantity:
                     order = client.place_order_coindcx(side = self.side,symbol = self.symbol_coindcx,qty=quantity,leverage=self.leverage)
@@ -522,6 +532,7 @@ class process_entry_order:
             if apikey and apisecret and user['is_active']:
                 client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
                 balance_data = client.get_balances()
+             
                 fund = float(balance_data['result'][0]['available_balance'])
                 quantity = self.caclulate_quantity(fund)
                 if quantity:
@@ -561,66 +572,72 @@ class process_entry_order:
 
 
     def process(self):
-        position = self.create_admin_position()
-        if position:
-            symbol_data = self.get_symbol_data()
-            if symbol_data:
-                userdata = userStratergyPortfolio.objects.filter(Q(stratergy_id = self.strategy_id) & Q(is_active=True))
-                dataset = UserStrategyPortfolioSerializer(userdata,many=True).data
-                with ThreadPoolExecutor(max_workers=150) as executor:
-                    loop_logic = [executor.submit(self.process_customer_position,user,symbol_data) for user in dataset]
-                    wait(loop_logic)
-                    
-
-                    positions = [
-                        Position(
-                            owner_id=order['owner'],
-                            order_id=order['orderid'],
-                            symbol=symbol_data['symbol'],       # or dynamic if available
-                            side=self.side,             # or from order if exists
-                            price=order['price'],
-                            quantity=order['quantity'],
-                            unique=position.order_id,
-                            leverage=self.leverage,
-                            stratergy=self.strategy_id,
-                            date=order['datetime'],
-                            stratergy_name = self.strategy_name,
-                            broker_id = order['broker_id']
-                        )
-                        for order in self.order_set
-                    ]
-                    Position.objects.bulk_create(positions, batch_size=100, ignore_conflicts=True)
-                    trades = [
-                        tradeDetails(
-                            owner_id=order['owner'],
-                            symbol=symbol_data['symbol'],
-                            price=order['price'],
-                            quantity=order['quantity'],
-                            side=self.side,
-                            unique=position.order_id,
-                            date=order['datetime'],
-                            status=order['status'],
-                            orderid=order['orderid'],
-                            stratergy=self.strategy_id,
-                            remark="Order Placed Successfully.",
-                            stratergy_name = self.strategy_name,
-                            margin=order['margin'],
-                            broker_id = order['broker_id']
-                        )
-                        for order in self.order_set
+        try:
+            position = self.create_admin_position()
+            
+            if position:
+                symbol_data = self.get_symbol_data()
+                
+                if symbol_data:
+                    userdata = userStratergyPortfolio.objects.filter(Q(stratergy_id = self.strategy_id) & Q(is_active=True))
+                    print(userdata)
+                    dataset = UserStrategyPortfolioSerializer(userdata,many=True).data
+                    with ThreadPoolExecutor(max_workers=150) as executor:
+                        loop_logic = [executor.submit(self.process_customer_position,user,symbol_data) for user in dataset]
+                        wait(loop_logic)
                         
-                    ]
-                    tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
-                    fail = [
-                        customer_failorder(
-                            owner_id=order['owner'],
-                            orderid = order['orderid'],
-                            strategy = self.strategy_name,
-                            remarks = order['remarks']
-                        )
-                        for order in self.failure
-                    ]
-                    customer_failorder.objects.bulk_create(fail, batch_size=100, ignore_conflicts=True)
+
+                        positions = [
+                            Position(
+                                owner_id=order['owner'],
+                                order_id=order['orderid'],
+                                symbol=symbol_data['symbol'],       # or dynamic if available
+                                side=self.side,             # or from order if exists
+                                price=order['price'],
+                                quantity=order['quantity'],
+                                unique=position.order_id,
+                                leverage=self.leverage,
+                                stratergy=self.strategy_id,
+                                date=order['datetime'],
+                                stratergy_name = self.strategy_name,
+                                broker_id = order['broker_id']
+                            )
+                            for order in self.order_set
+                        ]
+                        Position.objects.bulk_create(positions, batch_size=100, ignore_conflicts=True)
+                        trades = [
+                            tradeDetails(
+                                owner_id=order['owner'],
+                                symbol=symbol_data['symbol'],
+                                price=order['price'],
+                                quantity=order['quantity'],
+                                side=self.side,
+                                unique=position.order_id,
+                                date=order['datetime'],
+                                status=order['status'],
+                                orderid=order['orderid'],
+                                stratergy=self.strategy_id,
+                                remark="Order Placed Successfully.",
+                                stratergy_name = self.strategy_name,
+                                margin=order['margin'],
+                                broker_id = order['broker_id']
+                            )
+                            for order in self.order_set
+                            
+                        ]
+                        tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
+                        fail = [
+                            customer_failorder(
+                                owner_id=order['owner'],
+                                orderid = order['orderid'],
+                                strategy = self.strategy_name,
+                                remarks = order['remarks']
+                            )
+                            for order in self.failure
+                        ]
+                        customer_failorder.objects.bulk_create(fail, batch_size=100, ignore_conflicts=True)
+        except Exception as e:
+            print(str(e))
 
 
 from django.utils import timezone
@@ -679,6 +696,7 @@ def get_live_price(symbol):
     if not price:
         data = requests.get(f"https://api.india.delta.exchange/v2/tickers/{symbol}").json()
         price = float(data['result']['mark_price'])
+        print(price)
     return price
 
 

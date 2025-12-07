@@ -354,10 +354,11 @@ class UserStrategyPortfolioSerializer(serializers.ModelSerializer):
 
     owner = UserSerializer(read_only = True)
     stratergy = HighLowStrategySerializer(read_only = True)
+    broker = BrokerSerializer(read_only = True)
     class Meta:
         model = userStratergyPortfolio
 
-        fields = ['id','owner','stratergy','is_active']
+        fields = ['id','owner','stratergy','is_active','broker']
 
 
 class PositionSerializer(serializers.ModelSerializer):
