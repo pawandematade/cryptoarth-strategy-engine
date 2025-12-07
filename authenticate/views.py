@@ -128,12 +128,12 @@ class get_admin_broker_list(APIView):
         data = request.data
         if request.user.is_staff == True:
             brokerdata = BrokerModels.objects.filter(user_id = data['user_id'])
-            data = BrokerSerializer(brokerdata,many = True)
+            data = BrokerSerializer(brokerdata,many = True).data
             return Response(data)
         else:
             if User.objects.filter(id = data['user_id'],refercode = request.user.username).exists():
                 brokerdata = BrokerModels.objects.filter(user_id = data['user_id'])
-                data = BrokerSerializer(brokerdata,many = True)
+                data = BrokerSerializer(brokerdata,many = True).data
                 return Response(data)
             else:
                 return Response({'message':'User not found'}, status = status.HTTP_404_NOT_FOUND)
