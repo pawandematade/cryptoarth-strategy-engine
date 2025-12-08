@@ -1038,6 +1038,18 @@ class OrderDetailsView(APIView):
             cache.set(cache_key, data, timeout=300)  # Cache for 5 minutes
         return Response(data)
 
+from .models import latencycheck
+from .serializers import latencyCheckSerializer 
+
+class LatencyCheckViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsStaff]
+    # Order by newest first
+    queryset = latencycheck.objects.all().order_by('-created_at')
+    serializer_class = latencyCheckSerializer
+    
+    # Disable pagination
+    pagination_class = None
+
 class HighLowStrategyViewSet1(viewsets.ModelViewSet):
     serializer_class = HighLowStrategySerializer
     

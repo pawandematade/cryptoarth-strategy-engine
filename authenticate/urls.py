@@ -6,6 +6,7 @@ router = DefaultRouter()
 router.register(r'highlow-strategies', HighLowStrategyViewSet, basename='highlow-strategy')
 router.register(r'highlow-strategies1', HighLowStrategyViewSet1, basename='highlow-strategy')
 router.register(r'highlow-strategies-limited', HighLowStrategyLimitedCreateView, basename='highlow-strategy-limited')
+router.register(r'latency', LatencyCheckViewSet, basename='latency')
 
 # router.register('seller/auth', SellerAuthViewSet, basename='seller-auth')
 

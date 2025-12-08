@@ -3,7 +3,7 @@ from django.core.cache import cache  # ✅ This is correct
 from rest_framework import serializers
 from django.utils import timezone
 from datetime import timedelta
-from .models import User,SymbolMaster,highLowstratergy,tradeDetails,OrderDetails,userStratergyPortfolio,Position,copysignal,tutorial,customer_failorder,SignalMaster,BrokerModels
+from .models import *
 from rest_framework.exceptions import AuthenticationFailed
 import random
 from .utils.otp_service import OTPService
@@ -476,6 +476,49 @@ class adminOrderDetailsSerializer(serializers.ModelSerializer):
             local_time = utc_time.astimezone(ist_timezone)
             return local_time.strftime("%Y-%m-%d %H:%M:%S")
         return None
+    
+
+class latencyCheckSerializer(serializers.ModelSerializer):
+    # Define the custom fields
+    local_created_at = serializers.SerializerMethodField()
+    local_start_at = serializers.SerializerMethodField()
+    local_end_at = serializers.SerializerMethodField()
+    
+    strategy = MiniStrategySerializer(read_only=True)
+
+    class Meta:
+        model = latencycheck
+        fields = [
+            'local_created_at', 
+            'local_start_at', 
+            'local_end_at', 
+            'created_at', 
+            'symbol', 
+            'strategy', 
+            'time_start', 
+            'time_end', 
+            'time_taken'
+        ]
+
+    # --- Helper Method to Avoid Repetition ---
+    def _get_ist_time(self, dt_field):
+        if dt_field:
+            ist_timezone = pytz.timezone("Asia/Kolkata")
+            # Convert to local time
+            local_time = dt_field.astimezone(ist_timezone)
+            # Format as string
+            return local_time.strftime("%Y-%m-%d %H:%M:%S")
+        return None
+
+    # --- Specific Getters for Each Field ---
+    def get_local_created_at(self, obj):
+        return self._get_ist_time(obj.created_at)
+
+    def get_local_start_at(self, obj):
+        return self._get_ist_time(obj.time_start)
+
+    def get_local_end_at(self, obj):
+        return self._get_ist_time(obj.time_end)
 
 
 

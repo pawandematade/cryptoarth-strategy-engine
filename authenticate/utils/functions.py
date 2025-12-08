@@ -1,4 +1,4 @@
-from authenticate.models import SymbolMaster, User,userStratergyPortfolio,tradeDetails,OrderDetails,customer_failorder
+from authenticate.models import SymbolMaster, User, latencycheck,userStratergyPortfolio,tradeDetails,OrderDetails,customer_failorder
 import requests
 import json
 from typing import List, Dict, Any
@@ -9,6 +9,7 @@ from authenticate.serializers import UserStrategyPortfolioSerializer,PositionSer
 from .coindcx import coindcxclient
 from .deltaexchange import DeltaExchangeClient
 import math
+import time as t
 
 def save_products_to_db(products):
     """
@@ -306,71 +307,88 @@ class process_exit_order:
             self.leverage = adminposition.leverage
             positions = Position.objects.filter(unique = adminposition.order_id)
             dataset = PositionSerializer(positions,many = True).data
+            kolkata_tz = pytz.timezone('Asia/Kolkata')
+    
+            # 2. Capture Start Time (Current time converted to Kolkata)
+            start_timestamp = t.time()
+            start_dt = timezone.now().astimezone(kolkata_tz)
          
             with ThreadPoolExecutor(max_workers=150) as executor:
                 loop_logic = [executor.submit(self.process_customer_position,user,symbol_data) for user in dataset]
                 wait(loop_logic)
 
-                
-                orders = [
-                    OrderDetails(
-                        owner_id=order['owner'],
-                        orderid=order['entry_orderid'],
-                        symbol=symbol_data['symbol'],       # or dynamic if available
-                        side=order['side'],             # or from order if exists
-                        stratergy=self.strategy_id,
-                        date=order['exit_datetime'],
-                        buyprice = order['entry_price'] if order['side'] == "buy" else order['exit_price'],
-                        sellprice = order['entry_price'] if order['side'] == "sell" else order['exit_price'],
-                        buyquantity = order['entry_quantity'] if order['side'] == "buy" else order['exit_quantity'],
-                        sellquantity = order['entry_quantity'] if order['side'] == "sell" else order['exit_quantity'],
-                        status = "Completed",
-                        profit = ((order['exit_price'] * order['exit_quantity'] * symbol_data['contract_value']) - (order['entry_price'] * order['entry_quantity'] * symbol_data['contract_value'])) if order['side'] == "buy" else ((order['entry_price'] * order['entry_quantity'] * symbol_data['contract_value']) - (order['exit_price'] * order['exit_quantity'] * symbol_data['contract_value'])),
-                        stratergy_name = self.strategy_name,
-                        broker_id = order['broker_id']
+            end_timestamp = t.time()
+            end_dt = timezone.now().astimezone(kolkata_tz)
+            duration_ms = int((end_timestamp - start_timestamp) * 1000)
+            try:
+                latencycheck.objects.create(
+                    symbol=symbol_data.get('symbol', 'NA'),
+                    strategy_id=self.strategy_id,
+                    time_start=start_dt,
+                    time_end=end_dt,
+                    time_taken=duration_ms
+                )
+            except:
+                pass
+            orders = [
+                OrderDetails(
+                    owner_id=order['owner'],
+                    orderid=order['entry_orderid'],
+                    symbol=symbol_data['symbol'],       # or dynamic if available
+                    side=order['side'],             # or from order if exists
+                    stratergy=self.strategy_id,
+                    date=order['exit_datetime'],
+                    buyprice = order['entry_price'] if order['side'] == "buy" else order['exit_price'],
+                    sellprice = order['entry_price'] if order['side'] == "sell" else order['exit_price'],
+                    buyquantity = order['entry_quantity'] if order['side'] == "buy" else order['exit_quantity'],
+                    sellquantity = order['entry_quantity'] if order['side'] == "sell" else order['exit_quantity'],
+                    status = "Completed",
+                    profit = ((order['exit_price'] * order['exit_quantity'] * symbol_data['contract_value']) - (order['entry_price'] * order['entry_quantity'] * symbol_data['contract_value'])) if order['side'] == "buy" else ((order['entry_price'] * order['entry_quantity'] * symbol_data['contract_value']) - (order['exit_price'] * order['exit_quantity'] * symbol_data['contract_value'])),
+                    stratergy_name = self.strategy_name,
+                    broker_id = order['broker_id']
 
-                    )
-                    for order in self.order_set
-                ]
-                OrderDetails.objects.bulk_create(orders, batch_size=100, ignore_conflicts=True)
-                trades = [
-                    tradeDetails(
-                        owner_id=order['owner'],
-                        symbol=symbol_data['symbol'],
-                        price=order['exit_price'],
-                        quantity=order['exit_quantity'],
-                        side=self.side,
-                        unique=order['exit_orderid'],
-                        date=order['exit_datetime'],
-                        status=order['exit_status'],
-                        orderid=order['entry_orderid'],
-                        stratergy=self.strategy_id,
-                        remark="Order Placed Successfully.",
-                        stratergy_name = self.strategy_name,
-                        margin=order['margin'],
-                        broker_id = order['broker_id']
-                    )
-                    for order in self.order_set
-                    
-                ]
-                try:
-                    cache.delete_pattern('trade_details_*')
-                except:
-                    pass
-                tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
-                ids = [ order['entry_orderid'] for order in self.order_set ]
-                Position.objects.filter(order_id__in=ids).delete()
-                adminPosition.objects.filter(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol'])).delete()
-                fail = [
-                    customer_failorder(
-                        owner_id=order['owner'],
-                        orderid = order['orderid'],
-                        strategy = self.strategy_name,
-                        remarks = order['remarks']
-                    )
-                    for order in self.failure
-                ]
-                customer_failorder.objects.bulk_create(fail, batch_size=100, ignore_conflicts=True)
+                )
+                for order in self.order_set
+            ]
+            OrderDetails.objects.bulk_create(orders, batch_size=100, ignore_conflicts=True)
+            trades = [
+                tradeDetails(
+                    owner_id=order['owner'],
+                    symbol=symbol_data['symbol'],
+                    price=order['exit_price'],
+                    quantity=order['exit_quantity'],
+                    side=self.side,
+                    unique=order['exit_orderid'],
+                    date=order['exit_datetime'],
+                    status=order['exit_status'],
+                    orderid=order['entry_orderid'],
+                    stratergy=self.strategy_id,
+                    remark="Order Placed Successfully.",
+                    stratergy_name = self.strategy_name,
+                    margin=order['margin'],
+                    broker_id = order['broker_id']
+                )
+                for order in self.order_set
+                
+            ]
+            try:
+                cache.delete_pattern('trade_details_*')
+            except:
+                pass
+            tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
+            ids = [ order['entry_orderid'] for order in self.order_set ]
+            Position.objects.filter(order_id__in=ids).delete()
+            adminPosition.objects.filter(Q(strategy_id = self.strategy_id) & Q(symbol = symbol_data['symbol'])).delete()
+            fail = [
+                customer_failorder(
+                    owner_id=order['owner'],
+                    orderid = order['orderid'],
+                    strategy = self.strategy_name,
+                    remarks = order['remarks']
+                )
+                for order in self.failure
+            ]
+            customer_failorder.objects.bulk_create(fail, batch_size=100, ignore_conflicts=True)
         else:
             pass
 
@@ -580,62 +598,80 @@ class process_entry_order:
                 
                 if symbol_data:
                     userdata = userStratergyPortfolio.objects.filter(Q(stratergy_id = self.strategy_id) & Q(is_active=True))
-                    print(userdata)
+                    
+                    kolkata_tz = pytz.timezone('Asia/Kolkata')
+                    
+                    # 2. Capture Start Time (Current time converted to Kolkata)
+                    start_timestamp = t.time()
+                    start_dt = timezone.now().astimezone(kolkata_tz)
+
                     dataset = UserStrategyPortfolioSerializer(userdata,many=True).data
                     with ThreadPoolExecutor(max_workers=150) as executor:
                         loop_logic = [executor.submit(self.process_customer_position,user,symbol_data) for user in dataset]
                         wait(loop_logic)
                         
-
-                        positions = [
-                            Position(
-                                owner_id=order['owner'],
-                                order_id=order['orderid'],
-                                symbol=symbol_data['symbol'],       # or dynamic if available
-                                side=self.side,             # or from order if exists
-                                price=order['price'],
-                                quantity=order['quantity'],
-                                unique=position.order_id,
-                                leverage=self.leverage,
-                                stratergy=self.strategy_id,
-                                date=order['datetime'],
-                                stratergy_name = self.strategy_name,
-                                broker_id = order['broker_id']
-                            )
-                            for order in self.order_set
-                        ]
-                        Position.objects.bulk_create(positions, batch_size=100, ignore_conflicts=True)
-                        trades = [
-                            tradeDetails(
-                                owner_id=order['owner'],
-                                symbol=symbol_data['symbol'],
-                                price=order['price'],
-                                quantity=order['quantity'],
-                                side=self.side,
-                                unique=position.order_id,
-                                date=order['datetime'],
-                                status=order['status'],
-                                orderid=order['orderid'],
-                                stratergy=self.strategy_id,
-                                remark="Order Placed Successfully.",
-                                stratergy_name = self.strategy_name,
-                                margin=order['margin'],
-                                broker_id = order['broker_id']
-                            )
-                            for order in self.order_set
-                            
-                        ]
-                        tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
-                        fail = [
-                            customer_failorder(
-                                owner_id=order['owner'],
-                                orderid = order['orderid'],
-                                strategy = self.strategy_name,
-                                remarks = order['remarks']
-                            )
-                            for order in self.failure
-                        ]
-                        customer_failorder.objects.bulk_create(fail, batch_size=100, ignore_conflicts=True)
+                    end_timestamp = t.time()
+                    end_dt = timezone.now().astimezone(kolkata_tz)
+                    duration_ms = int((end_timestamp - start_timestamp) * 1000)
+                    try:
+                        latencycheck.objects.create(
+                            symbol=symbol_data.get('symbol', 'NA'),
+                            strategy_id=self.strategy_id,
+                            time_start=start_dt,
+                            time_end=end_dt,
+                            time_taken=duration_ms
+                        )
+                    except:
+                        pass
+                    positions = [
+                        Position(
+                            owner_id=order['owner'],
+                            order_id=order['orderid'],
+                            symbol=symbol_data['symbol'],       # or dynamic if available
+                            side=self.side,             # or from order if exists
+                            price=order['price'],
+                            quantity=order['quantity'],
+                            unique=position.order_id,
+                            leverage=self.leverage,
+                            stratergy=self.strategy_id,
+                            date=order['datetime'],
+                            stratergy_name = self.strategy_name,
+                            broker_id = order['broker_id']
+                        )
+                        for order in self.order_set
+                    ]
+                    Position.objects.bulk_create(positions, batch_size=100, ignore_conflicts=True)
+                    trades = [
+                        tradeDetails(
+                            owner_id=order['owner'],
+                            symbol=symbol_data['symbol'],
+                            price=order['price'],
+                            quantity=order['quantity'],
+                            side=self.side,
+                            unique=position.order_id,
+                            date=order['datetime'],
+                            status=order['status'],
+                            orderid=order['orderid'],
+                            stratergy=self.strategy_id,
+                            remark="Order Placed Successfully.",
+                            stratergy_name = self.strategy_name,
+                            margin=order['margin'],
+                            broker_id = order['broker_id']
+                        )
+                        for order in self.order_set
+                        
+                    ]
+                    tradeDetails.objects.bulk_create(trades, batch_size=100, ignore_conflicts=True)
+                    fail = [
+                        customer_failorder(
+                            owner_id=order['owner'],
+                            orderid = order['orderid'],
+                            strategy = self.strategy_name,
+                            remarks = order['remarks']
+                        )
+                        for order in self.failure
+                    ]
+                    customer_failorder.objects.bulk_create(fail, batch_size=100, ignore_conflicts=True)
         except Exception as e:
             print(str(e))
 

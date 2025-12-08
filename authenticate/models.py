@@ -299,6 +299,13 @@ class copysignal(models.Model):
     trailingprice = models.DecimalField(max_digits=13,decimal_places=3,default = 0)
 
 
+class latencycheck(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    symbol =  models.CharField(max_length = 45,default = "NA")
+    strategy = models.ForeignKey(highLowstratergy, on_delete=models.CASCADE)
+    time_start = models.DateTimeField()
+    time_end = models.DateTimeField()
+    time_taken = models.IntegerField(default = 0)
 
 
 class tutorial(models.Model):
