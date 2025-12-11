@@ -436,7 +436,7 @@ class BrokerConnect(APIView):
                 try:
                     client = DeltaExchangeClient(api_key, api_secret)
                     account_info = client.get_account_info()
-                    print(account_info)
+                    
                 except Exception as e:
                     return Response({"error": f"Connection failed: {str(e)}"}, status=400)
                 if not account_info.get("success", False):
@@ -446,7 +446,9 @@ class BrokerConnect(APIView):
                     )
 
                 # 3️⃣ Extract result
+                
                 result = account_info.get("result", {})
+                nameof = result.get("account_name", "NA")
                 is_kyc_done = result.get("is_kyc_done", False)
                 is_login_enabled = result.get("is_login_enabled", False)
 
@@ -454,6 +456,15 @@ class BrokerConnect(APIView):
                     return Response(
                         {
                             "error": "KYC not completed or login disabled.",
+                            "kyc_status": is_kyc_done,
+                            "login_enabled": is_login_enabled,
+                        },
+                        status=400
+                    )
+                if nameof == "Main" and BrokerModels.objects.filter(user = user,broker =broker ).exists():
+                    return Response(
+                        {
+                            "error": "Main Account already added.",
                             "kyc_status": is_kyc_done,
                             "login_enabled": is_login_enabled,
                         },
