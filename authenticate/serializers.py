@@ -329,9 +329,19 @@ class TradeSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class SignalMasterSerializer(serializers.ModelSerializer):
+    local_date = serializers.SerializerMethodField()
+
     class Meta:
         model = SignalMaster
         fields = '__all__'
+
+    def get_local_date(self, obj):
+        if obj.timestamp:
+            utc_time = obj.timestamp
+            ist_timezone = pytz.timezone("Asia/Kolkata")
+            local_time = utc_time.astimezone(ist_timezone)
+            return local_time.strftime("%Y-%m-%d %H:%M:%S")
+        return None
 
 
 class OrderDetailsSerializer(serializers.ModelSerializer):
