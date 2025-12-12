@@ -2049,6 +2049,46 @@ class get_tutorial(APIView):
             cache.set(cache_key, serializer.data, timeout=60 * 100)
             return Response(serializer.data)
         return Response(data)
+
+# from .models import Tutorial
+# from .serializers import TutorialSerializer
+
+class TutorialDetailAPIView(APIView):
+    permission_classes = [IsStaff]
+    """
+    GET: Retrieve a specific tutorial
+    PUT: Update a tutorial
+    DELETE: Delete a tutorial
+    """
+    
+    def get_object(self, pk):
+        return get_object_or_404(tutorial, pk=pk)
+    
+    def get(self, request, pk):
+        tutorial = self.get_object(pk)
+        serializer = tutorialSerializer(tutorial)
+        return Response(serializer.data)
+    
+    def put(self, request, pk):
+        tutorial = self.get_object(pk)
+        serializer = tutorialSerializer(tutorial, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def patch(self, request, pk):
+        tutorial = self.get_object(pk)
+        serializer = tutorialSerializer(tutorial, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        tutorial = self.get_object(pk)
+        tutorial.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
         
 
 

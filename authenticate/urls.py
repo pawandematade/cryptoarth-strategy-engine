@@ -39,7 +39,7 @@ urlpatterns = [
     path("get_admin_broker_list/", get_admin_broker_list.as_view(), name="get_admin_broker_list"),
     path("admin_deploy_user_strategy/", admin_deploy_user_strategy.as_view(), name="admin_deploy_user_strategy"),
     path("admin_undeploy_user_strategy/", admin_undeploy_user_strategy.as_view(), name="admin_undeploy_user_strategy"),
-
+    path('tutorials/<int:pk>/', TutorialDetailAPIView.as_view(), name='tutorial-detail'),
     path("get_referal_link/", get_referal_link.as_view(), name="get_referal_link"),
     path("get_admin_strategy_data/", get_admin_strategy_data.as_view(), name="get_admin_strategy_data"),
     path("edit_user/", Edit_admin_user.as_view(), name="Edit_admin_user"),
