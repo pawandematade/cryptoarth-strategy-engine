@@ -113,6 +113,7 @@ class BrokerModels(models.Model):
     api_key = models.CharField(max_length=255, blank=True, null=True)
     api_secret = models.CharField(max_length=255, blank=True, null=True)
     status = models.BooleanField(default = True)
+    coindcx_id = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return self.name if self.name else self.broker

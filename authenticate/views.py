@@ -413,7 +413,9 @@ class BrokerConnect(APIView):
                 try:
                     client = coindcxclient(api_key, api_secret)
                     account_info = client.get_account_info()
-                   
+                    coindcx_id = account_info['result']['coindcx_id']
+                    if BrokerModels.objects.filter(user = request.user,status = True,coindcx_id = coindcx_id):
+                        return Response({"error": "Broker already connected"}, status=400)
                     if account_info['success'] == True:
                         user: User = request.user
                         broker = BrokerModels.objects.create(
