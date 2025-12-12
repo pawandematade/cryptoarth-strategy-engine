@@ -384,6 +384,33 @@ from .utils.coindcx import coindcxclient  # ✅ your client import
 
 
 
+        
+class balanceFetch(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self, request):
+        dataset = BrokerModels.objects.filter(user = request.user,status = True)
+        brokerlist = []
+        if dataset:
+            for broker in dataset:
+                if broker.broker == "Coindcx":
+                    apikey,apisecret = broker.get_api_credentials()
+                    client = coindcxclient(api_key=apikey,api_secret=apisecret)
+                    balance_data = client.get_wallet_info()
+                    conversion_rate = 96
+                    balance = float(balance_data)/conversion_rate
+                    brokerlist.append({'broker':'Coindcx','user_name':broker.user.first_name,'user_phone':broker.user.phone,'name':broker.name,'balance':balance})
+                else:
+                    apikey,apisecret = broker.get_api_credentials()
+                    client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+                    balance_data = client.get_balances()
+                    fund = float(balance_data['result'][0]['available_balance'])
+                    brokerlist.append({'broker':'Coindcx','user_name':broker.user.first_name,'user_phone':broker.user.phone,'name':broker.name,'balance':fund})
+            return Response(brokerlist)
+        else:
+            return Response({'message':'No Broker Connected.'},status=400)
+
+
+
 
 
 class BrokerConnect(APIView):
@@ -697,6 +724,17 @@ class TradeDetailsView(APIView):
     
 from .serializers import SignalMasterSerializer
 from django.db.models import F, Sum, DecimalField, ExpressionWrapper
+
+class get_user_pnl(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self,request):
+        sdate, edate =get_todays_dates()
+        today_profit  = OrderDetails.objects.filter(date__range=[sdate, edate],owner = request.user).aggregate(total=Sum('profit'))['total'] or 0
+        total_profit = OrderDetails.objects.filter(owner = request.user).aggregate(total=Sum('profit'))['total'] or 0
+        trades = Position.objects.filter(owner = request.user).count()
+        return Response({'today_profit':today_profit,'total_profit':total_profit,'trades':trades})
+
+
 
 class get_dashboard_count(APIView):
     permission_classes = [IsStaff]

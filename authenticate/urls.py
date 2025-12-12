@@ -54,6 +54,9 @@ urlpatterns = [
     # Endpoint to check if a user exists by phone number
     path('check-phone/', PhoneCheckView.as_view(), name='check-phone'),
 
+    
+    path('get_user_pnl/', get_user_pnl.as_view(), name='get_user_pnl'),
+    path('broker/balance/', balanceFetch.as_view(), name='balanceFetch'),
     path('broker/connect1/', BrokerConnect.as_view(), name='BrokerConnect'),
     path('connect/coindcx/', BrokerConnectCoindcx.as_view(), name='broker-connect-coindcx'),
     path('signal-list/', signalmasterView.as_view(), name='signalmasterView'),
