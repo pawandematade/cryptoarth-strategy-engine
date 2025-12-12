@@ -597,7 +597,7 @@ class process_entry_order:
                 symbol_data = self.get_symbol_data()
                 
                 if symbol_data:
-                    userdata = userStratergyPortfolio.objects.filter(Q(stratergy_id = self.strategy_id) & Q(is_active=True))
+                    userdata = userStratergyPortfolio.objects.filter(Q(stratergy_id = self.strategy_id) & Q(is_active=True) & Q(broker__status = True))
                     
                     kolkata_tz = pytz.timezone('Asia/Kolkata')
                     

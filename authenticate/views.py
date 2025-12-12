@@ -127,12 +127,12 @@ class get_admin_broker_list(APIView):
     def post(self,request):
         data = request.data
         if request.user.is_staff == True:
-            brokerdata = BrokerModels.objects.filter(user_id = data['user_id'])
+            brokerdata = BrokerModels.objects.filter(user_id = data['user_id'],status = True)
             data = BrokerSerializer(brokerdata,many = True).data
             return Response(data)
         else:
             if User.objects.filter(id = data['user_id'],refercode = request.user.username).exists():
-                brokerdata = BrokerModels.objects.filter(user_id = data['user_id'])
+                brokerdata = BrokerModels.objects.filter(user_id = data['user_id'],status = True)
                 data = BrokerSerializer(brokerdata,many = True).data
                 return Response(data)
             else:
@@ -387,9 +387,17 @@ class BrokerConnect(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        dataset = BrokerModels.objects.filter(user = request.user)
+        dataset = BrokerModels.objects.filter(user = request.user,status = True)
         data = BrokerSerializer(dataset, many=True).data
         return Response(data)
+    
+    def put(self, request):
+        data = request.data
+        id = data['id']
+        broker = BrokerModels.objects.get(id = id)
+        broker.status = False
+        broker.save()
+        return Response({'message':'Broker Deactivate successfully.'})
 
     def post(self, request):
         api_key = request.data.get("api_key")
@@ -399,7 +407,7 @@ class BrokerConnect(APIView):
         if not api_key or not api_secret:
             return Response({"error": "api_key and api_secret are required"}, status=400)
         if broker == "Coindcx":
-            if BrokerModels.objects.filter(api_key =api_key,api_secret=api_secret ).exists():
+            if BrokerModels.objects.filter(api_key =api_key,api_secret=api_secret,status = True ).exists():
                 return Response({"error": "Broker already connected"}, status=400)
             else:
                 try:
@@ -430,7 +438,7 @@ class BrokerConnect(APIView):
                 except Exception as e:
                     return Response({"error": f"Connection failed: {str(e)}"}, status=400)
         else:
-            if BrokerModels.objects.filter(api_key =api_key,api_secret=api_secret ).exists():
+            if BrokerModels.objects.filter(api_key =api_key,api_secret=api_secret,status = True ).exists():
                 return Response({"error": "Broker already connected"}, status=400) 
             else:
                 try:
@@ -461,7 +469,7 @@ class BrokerConnect(APIView):
                         },
                         status=400
                     )
-                if nameof == "Main" and BrokerModels.objects.filter(user = user,broker =broker ).exists():
+                if nameof == "Main" and BrokerModels.objects.filter(user = user,broker =broker,status = True ).exists():
                     return Response(
                         {
                             "error": "Main Account already added.",
