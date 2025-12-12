@@ -253,9 +253,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class BrokerSerializer(serializers.ModelSerializer):
+    local_date = serializers.SerializerMethodField()
+    
     class Meta:
         model = BrokerModels
         fields = '__all__'
+
+    def get_local_date(self, obj):
+        if obj.datetime:
+            utc_time = obj.datetime
+            ist_timezone = pytz.timezone("Asia/Kolkata")
+            local_time = utc_time.astimezone(ist_timezone)
+            return local_time.strftime("%Y-%m-%d %H:%M:%S")
+        return None
     
 
 class SymbolMasterSerializer(serializers.ModelSerializer):
