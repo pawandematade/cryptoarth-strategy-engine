@@ -398,13 +398,13 @@ class balanceFetch(APIView):
                     balance_data = client.get_wallet_info()
                     conversion_rate = 96
                     balance = float(balance_data)/conversion_rate
-                    brokerlist.append({'broker':'Coindcx','user_name':broker.user.first_name,'user_phone':broker.user.phone,'name':broker.name,'balance':balance})
+                    brokerlist.append({'broker':broker.broker,'user_name':broker.user.first_name,'user_phone':broker.user.phone,'name':broker.name,'balance':balance})
                 else:
                     apikey,apisecret = broker.get_api_credentials()
                     client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
                     balance_data = client.get_balances()
                     fund = float(balance_data['result'][0]['available_balance'])
-                    brokerlist.append({'broker':'Coindcx','user_name':broker.user.first_name,'user_phone':broker.user.phone,'name':broker.name,'balance':fund})
+                    brokerlist.append({'broker':broker.broker,'user_name':broker.user.first_name,'user_phone':broker.user.phone,'name':broker.name,'balance':fund})
             return Response(brokerlist)
         else:
             return Response({'message':'No Broker Connected.'},status=400)
