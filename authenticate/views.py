@@ -905,7 +905,7 @@ class close_open_position_onbroker(APIView):
                         side = "sell"
                     else:
                         side = "buy"
-                    client.place_order_coindcx(side = side,symbol =  self.convert_symbol(symbol),qty=quantity_balance,leverage=50)
+                    client.place_order_coindcx(side = side,symbol =  self.convert_symbol(symbol),qty=abs(quantity_balance),leverage=50)
             except:
                 pass
         
@@ -924,7 +924,7 @@ class close_open_position_onbroker(APIView):
                         side = "sell"
                     else:
                         side = "buy"
-                    client.place_order(product_symbol = symbol,side = side,size=quantity_balance)
+                    client.place_order(product_symbol = symbol,side = side,size=abs(quantity_balance))
                     
             except Exception as e:
                 print(str(e))
