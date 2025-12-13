@@ -753,10 +753,24 @@ class get_dashboard_count(APIView):
                     total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
+            coindcx_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate],broker__broker = "Coindcx")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
+            delta_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate],broker__broker = "DeltaExchange")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
-            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin})
         else:
             startDate = data['startDate']
             endDate = data['endDate']
@@ -768,10 +782,24 @@ class get_dashboard_count(APIView):
                     total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
+            delta_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate], owner__refercode=request.user.username,broker__broker = "DeltaExchange")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
+            coindcx_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate], owner__refercode=request.user.username,broker__broker = "Coindcx")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode =request.user.username ).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
-            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin})
 
 
 class get_today_dashboard_count(APIView):
@@ -788,10 +816,24 @@ class get_today_dashboard_count(APIView):
                     total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
+            delta_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate],broker__broker = "DeltaExchange")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
+            coindcx_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate],broker__broker = "Coindcx")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
-            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin})
         else:
             
             total_volume = (
@@ -801,10 +843,24 @@ class get_today_dashboard_count(APIView):
                     total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
+            delta_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate],owner__refercode=request.user.username,broker__broker = "DeltaExchange")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
+            coindcx_margin = (
+                tradeDetails.objects
+                .filter(date__range=[sdate, edate],owner__refercode=request.user.username,broker__broker = "Coindcx")
+                .aggregate(
+                    total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
+                )
+            )['total'] or 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode=request.user.username).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
-            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users})
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin})
      
 from .serializers import SignalMasterSerializer
 class signalmasterView(APIView):
