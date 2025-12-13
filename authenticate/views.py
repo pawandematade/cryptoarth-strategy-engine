@@ -451,7 +451,8 @@ class BrokerConnect(APIView):
                         broker = BrokerModels.objects.create(
                             user=user,
                             name = name,
-                            broker=broker
+                            broker=broker,
+                            datetime=timezone.now()
                         )
                         broker.set_api_credentials(api_key, api_secret)
                         user.is_login = True
@@ -514,7 +515,8 @@ class BrokerConnect(APIView):
                 broker = BrokerModels.objects.create(
                     user=user,
                     name = name,
-                    broker=broker
+                    broker=broker,
+                    datetime=timezone.now()
                 )
                 broker.set_api_credentials(api_key, api_secret)
                 user.is_login = True
