@@ -2071,6 +2071,14 @@ class TutorialDetailAPIView(APIView):
         serializer = tutorialSerializer(tutorial)
         return Response(serializer.data)
     
+    def post(self, request):
+        # Note: For POST, pk is typically not used since we're creating a new object
+        serializer = tutorialSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
     def put(self, request, pk):
         tutorial = self.get_object(pk)
         serializer = tutorialSerializer(tutorial, data=request.data)
