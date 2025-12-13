@@ -502,6 +502,7 @@ class BrokerConnect(APIView):
                         },
                         status=400
                     )
+                user: User = request.user
                 if nameof == "Main" and BrokerModels.objects.filter(user = user,broker =broker,status = True ).exists():
                     return Response(
                         {
@@ -511,7 +512,7 @@ class BrokerConnect(APIView):
                         },
                         status=400
                     )
-                user: User = request.user
+                
                 broker = BrokerModels.objects.create(
                     user=user,
                     name = name,
