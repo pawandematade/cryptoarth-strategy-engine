@@ -34,6 +34,7 @@ urlpatterns = [
     
     
 
+path("get_user_positions/", get_user_positions.as_view(), name="get_user_positions"),
     path("get_admin_strategy_list/", get_admin_strategy_list.as_view(), name="get_admin_strategy_list"),
     path("get_admin_user_list/", get_admin_user_list.as_view(), name="get_admin_user_list"),
     path("get_admin_broker_list/", get_admin_broker_list.as_view(), name="get_admin_broker_list"),

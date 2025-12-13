@@ -1941,6 +1941,16 @@ class adminPositionDetails(APIView):
         userdata = Position.objects.filter(query)
         serialized_data = PositionSerializer(userdata, many=True).data
         return Response(serialized_data)
+    
+
+class get_user_positions(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def get(self, request):
+        userdata = Position.objects.filter(owner = request.user)
+        serialized_data = PositionSerializer(userdata, many=True).data
+        return Response(serialized_data)
+
+
 
 
 class adminOrderDetails(APIView):
