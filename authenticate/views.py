@@ -970,7 +970,7 @@ class get_open_position(APIView):
             apikey,apisecret = user.broker.get_api_credentials()
             client = coindcxclient(api_key=apikey,api_secret=apisecret)
             position = client.get_positions_coindcx(symbol=self.convert_symbol(symbol))
-            quantity_balance = self.get_open_position(position, self.convert_symbol(symbol))
+            quantity_balance = self.get_open_position1(position, self.convert_symbol(symbol))
             if float(quantity_balance) != 0:
                 dataset.append({'user_id':user.owner.id,'user_phone':user.owner.phone,'user_name':user.owner.first_name,'broker':user.broker.id,'broker_name':user.broker.broker,'open_quantity':quantity_balance})
         for user in users_delta:
@@ -994,7 +994,7 @@ class get_open_position(APIView):
         return f"B-{base_currency}_USDT"
     
 
-    def get_open_position(self,positions, symbol):
+    def get_open_position1(self,positions, symbol):
         """
         Returns the open quantity for a given trading symbol.
         If no active position, returns 0.
