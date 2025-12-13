@@ -963,8 +963,8 @@ class get_open_position(APIView):
         strategy_id = data['strategy_id']
         symbol = data['symbol']
         symbolmaster = SymbolMaster.objects.get(symbol = symbol)
-        users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "Coindcx")
-        users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,owner__broker = "DeltaExchange")
+        users_coindcx = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,broker__broker = "Coindcx")
+        users_delta = userStratergyPortfolio.objects.filter(stratergy_id = strategy_id,broker__broker = "DeltaExchange")
         dataset = []
         for user in users_coindcx:
             apikey,apisecret = user.broker.get_api_credentials()
