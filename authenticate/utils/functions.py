@@ -326,7 +326,10 @@ class process_exit_order:
                     strategy_id=self.strategy_id,
                     time_start=start_dt,
                     time_end=end_dt,
-                    time_taken=duration_ms
+                    time_taken=duration_ms,
+                    side = self.side,
+                    type = "Exit",
+                    user_count = len(self.order_set)
                 )
             except:
                 pass
@@ -619,7 +622,10 @@ class process_entry_order:
                             strategy_id=self.strategy_id,
                             time_start=start_dt,
                             time_end=end_dt,
-                            time_taken=duration_ms
+                            time_taken=duration_ms,
+                            side = self.side,
+                            type = "Entry",
+                            user_count = len(self.order_set)
                         )
                     except:
                         pass

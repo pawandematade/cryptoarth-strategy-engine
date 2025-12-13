@@ -517,7 +517,10 @@ class latencyCheckSerializer(serializers.ModelSerializer):
             'strategy', 
             'time_start', 
             'time_end', 
-            'time_taken'
+            'time_taken',
+            'side',
+            'type',
+            'user_count'
         ]
 
     # --- Helper Method to Avoid Repetition ---

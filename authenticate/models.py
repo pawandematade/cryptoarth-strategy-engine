@@ -308,6 +308,9 @@ class latencycheck(models.Model):
     time_start = models.DateTimeField()
     time_end = models.DateTimeField()
     time_taken = models.IntegerField(default = 0)
+    user_count = models.IntegerField(default = 0)
+    side = models.CharField(max_length = 45,default = "NA")
+    type = models.CharField(max_length = 45,default = "NA")
 
 
 class tutorial(models.Model):
