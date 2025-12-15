@@ -1265,6 +1265,22 @@ class HighLowStrategyLimitedCreateView(viewsets.ModelViewSet):
         except:
             pass
         return instance
+    
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        try:
+            cache.delete_pattern("highlow_strategies_*")
+        except:
+            pass
+        return instance
+
+    # Delete
+    def perform_destroy(self, instance):
+        try:
+            cache.delete_pattern("highlow_strategies_*")
+        except:
+            pass
+        instance.delete()
 
 
 

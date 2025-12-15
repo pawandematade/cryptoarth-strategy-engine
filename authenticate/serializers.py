@@ -451,10 +451,11 @@ class miniUserStrategyPortfolioSerializer(serializers.ModelSerializer):
 
     owner = miniUserSerializer(read_only = True)
     stratergy = HighLowStrategySerializer(read_only = True)
+    broker = BrokerSerializer(read_only = True)
     class Meta:
         model = userStratergyPortfolio
 
-        fields = ['id','owner','stratergy','is_active']
+        fields = ['id','owner','stratergy','is_active','broker']
 
 
 class tutorialSerializer(serializers.ModelSerializer):
