@@ -768,6 +768,12 @@ class get_dashboard_count(APIView):
                     total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
+            try:
+                bot_count = userStratergyPortfolio.objects.filter(is_active = True).count()
+                positions_count = Position.objects.all().count()
+            except:
+                bot_count = 0
+                positions_count = 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
@@ -797,6 +803,12 @@ class get_dashboard_count(APIView):
                     total=Sum('margin', output_field=DecimalField(max_digits=20, decimal_places=3))
                 )
             )['total'] or 0
+            try:
+                bot_count = userStratergyPortfolio.objects.filter(is_active = True,owner__refercode =request.user.username ).count()
+                positions_count = Position.objects.filter(owner__refercode =request.user.username).count()
+            except:
+                bot_count = 0
+                positions_count = 0
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode =request.user.username ).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
@@ -1806,7 +1818,7 @@ class admin_strategy_set(APIView):
     
 
 class user_strategy_set(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
         data = request.data
         query = Q(owner = request.user.phone)
