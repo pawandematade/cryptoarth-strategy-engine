@@ -777,7 +777,7 @@ class get_dashboard_count(APIView):
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate]).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate]).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate]).aggregate(total=Sum('profit'))['total'] or 0
-            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin})
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin,'bot_count':bot_count,'positions_count':positions_count})
         else:
             startDate = data['startDate']
             endDate = data['endDate']
@@ -812,7 +812,7 @@ class get_dashboard_count(APIView):
             total_orders = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).count()
             total_users = User.objects.filter(date_joined__range=[sdate, edate],refercode =request.user.username ).count()
             total_profit = OrderDetails.objects.filter(date__range=[sdate, edate],owner__refercode=request.user.username).aggregate(total=Sum('profit'))['total'] or 0
-            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin})
+            return Response({'total_volume':total_volume,'total_orders':total_orders,'total_profit':total_profit,'total_users':total_users,'coindcx_margin':coindcx_margin,'delta_margin':delta_margin,'bot_count':bot_count,'positions_count':positions_count})
 
 
 class get_today_dashboard_count(APIView):
@@ -1842,12 +1842,19 @@ class user_strategy_set(APIView):
 from django.shortcuts import get_object_or_404   
 
 class add_user_to_strategy(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
         data = request.data
         strategy_id = data.get('strategy_id')
         phone_numbers_str = data.get('phone_numbers')
-        strategy = get_object_or_404(highLowstratergy, id=strategy_id)
+        if request.user.is_staff == True:
+            strategy = get_object_or_404(highLowstratergy, id=strategy_id)
+        else:
+            if request.user.is_vendor == True:
+                strategy = get_object_or_404(highLowstratergy, id=strategy_id,owner = request.user.username)
+            else:
+                strategy = get_object_or_404(highLowstratergy, id=strategy_id,owner = request.user.phone)
+
         phone_numbers = [phone.strip() for phone in phone_numbers_str.split(',') if phone.strip()]
         if not phone_numbers:
             return Response(
@@ -1931,26 +1938,65 @@ class StrategyUsersDetailView(APIView):
         }
         
         return Response(response_data, status=status.HTTP_200_OK)
+    
+
 
 class admin_activate_strategy(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [permissions.IsAuthenticated]
+    
     def post(self, request):
         data = request.data
-        strategy = highLowstratergy.objects.get(id = data['id'])
+        strategy_id = data.get('id')
+        
+        if not strategy_id:
+            return Response({'error': 'Strategy ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Get strategy based on user type
+            if request.user.is_staff:
+                strategy = highLowstratergy.objects.get(id=strategy_id)
+            elif request.user.is_vendor:
+                strategy = highLowstratergy.objects.get(id=strategy_id, owner=request.user.username)
+            else:
+                strategy = highLowstratergy.objects.get(id=strategy_id, owner=request.user.phone)
+                
+        except highLowstratergy.DoesNotExist:
+            return Response({'error': 'Strategy not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Only update if strategy exists
         strategy.is_active = True
         strategy.save()
+        
+        # Clear cache
         try:
             cache.delete_pattern("highlow_strategies_*")
         except:
             pass
-        return Response({'message':'Strategy Activate Successfully.'})
+            
+        return Response({'message': 'Strategy Activated Successfully.'}, status=status.HTTP_200_OK)
 
 
 class admin_deactivate_strategy(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
         data = request.data
-        strategy = highLowstratergy.objects.get(id = data['id'])
+        strategy_id = data['id']
+        try:
+            # Get strategy based on user type
+            if request.user.is_staff:
+                strategy = highLowstratergy.objects.get(id=strategy_id)
+            elif request.user.is_vendor:
+                strategy = highLowstratergy.objects.get(id=strategy_id, owner=request.user.username)
+            else:
+                strategy = highLowstratergy.objects.get(id=strategy_id, owner=request.user.phone)
+                
+        except highLowstratergy.DoesNotExist:
+            return Response({'error': 'Strategy not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
         strategy.is_active = False
         strategy.save()
         try:
