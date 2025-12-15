@@ -1607,7 +1607,7 @@ class UndeployStrategyAPIView(APIView):
         """Undeploy a strategy (set is_active to False)"""
         data = request.data
         strategyid = data['strategyid'] 
-        portfolio = userStratergyPortfolio.objects.get(Q(stratergy_id =strategyid ) & Q(owner_id = request.user.id)) 
+        portfolio = userStratergyPortfolio.objects.get(Q(id=strategyid ) & Q(owner_id = request.user.id)) 
         
         
         
