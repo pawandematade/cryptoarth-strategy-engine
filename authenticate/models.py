@@ -166,7 +166,7 @@ class highLowstratergy(models.Model):
     stratergy_code = models.CharField(max_length = 55,default = "NA")
     name = models.CharField(max_length = 25,default = "NA")
     full_name  = models.CharField(max_length = 25,default = "NA")
-    is_active = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
     stratergy_description = models.CharField(max_length = 500,default = "NA")
     tag = models.JSONField(blank=True, null = True)
     captial_requirement = models.TextField(default="NA")
