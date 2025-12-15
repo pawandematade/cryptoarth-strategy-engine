@@ -67,7 +67,19 @@ class SignupView(APIView):
         }, status=status.HTTP_400_BAD_REQUEST)
     
 
-
+def get_open_position1(positions, symbol):
+        """
+        Returns the open quantity for a given trading symbol.
+        If no active position, returns 0.
+        """
+        if not positions:  # handles [] or None
+            return 0
+        
+        for pos in positions:
+            if pos.get('pair') == symbol:
+                return pos.get('active_pos', 0)  # return active position size
+        
+        return 0
 
 
 class OTPLoginView(APIView):
@@ -1039,19 +1051,7 @@ class close_delta_position(APIView):
             return Response({'error':'Error Closing Position.'},status=400)
 
 
-def get_open_position1(positions, symbol):
-        """
-        Returns the open quantity for a given trading symbol.
-        If no active position, returns 0.
-        """
-        if not positions:  # handles [] or None
-            return 0
-        
-        for pos in positions:
-            if pos.get('pair') == symbol:
-                return pos.get('active_pos', 0)  # return active position size
-        
-        return 0
+
 
 def convert_ms_to_kolkata_datetime(timestamp_ms: int):
         """
@@ -1063,6 +1063,85 @@ def convert_ms_to_kolkata_datetime(timestamp_ms: int):
             return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=kolkata_tz)
         except (ValueError, TypeError):
             return None
+        
+
+class close_position_customer(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self,request):
+        data = request.data
+        id1 = data['position_id']
+        position1 = get_object_or_404(Position,id = id1,owner = request.user)
+        apikey,apisecret = position1.broker.get_api_credentials()
+        if position1.side == "buy":
+            side12 = "sell"
+        else:
+            side12 = "buy"
+        if position1.broker.broker == "Coindcx":
+            client = coindcxclient(api_key=apikey, api_secret=apisecret)
+            position = client.get_positions_coindcx(symbol=position1.symbol)
+            quantity_balance = get_open_position1(position, position1.symbol)
+            user_qty = float(position1.quantity)
+            if position1.side == "buy" and quantity_balance > 0:
+                qty = min(user_qty, abs(quantity_balance))
+
+                order = client.place_order_coindcx(side = side12,symbol = position1.symbol,qty=qty,leverage=position1.leverage)
+                margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) 
+                post = OrderDetails(owner_id = position1.owner.id,orderid = position1.order_id,symbol = position1.symbol,side = position1.side,stratergy = position1.stratergy,date = convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),buyprice = position1.price,sellprice = float(order['result'][0]['price']),buyquantity = position1.quantity,sellquantity = order['result'][0]['total_quantity'],status = "Completed",profit = ((order['result'][0]['total_quantity'] * float(order['result'][0]['price'])) - (float(position1.quantity) * float(position1.price))),stratergy_name =position1.stratergy_name,broker_id = position1.broker.id )
+                post.save()
+                post1 = tradeDetails(owner_id = position1.owner.id,symbol = position1.symbol,price =float(order['result'][0]['price']),quantity = order['result'][0]['total_quantity'],side = side12,unique = order['result'][0]['id'] ,date = convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),status =order['result']['state'],orderid = position1.order_id,stratergy = position1.stratergy,remark="Order Placed Successfully.", stratergy_name = position1.stratergy_name,margin = margin_used,broker_id = position1.broker.id)
+                post1.save()
+                position1.delete()
+                return Response({'message':'Position closed successfully.'})
+            elif position1.side == "sell" and quantity_balance < 0:
+                qty = min(user_qty, abs(quantity_balance))
+
+                order = client.place_order_coindcx(side = side12,symbol = position1.symbol,qty=qty,leverage=position1.leverage)
+                margin_used = float(order['result'][0]['price']) * float(order['result'][0]['total_quantity']) 
+                post = OrderDetails(owner_id = position1.owner.id,orderid = position1.order_id,symbol = position1.symbol,side = position1.side,stratergy = position1.stratergy,date = convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),sellprice = position1.price,buyprice = float(order['result'][0]['price']),sellquantity = position1.quantity,buyquantity = order['result'][0]['total_quantity'],status = "Completed",profit = ((float(position1.quantity) * float(position1.price)) - (order['result'][0]['total_quantity'] * float(order['result'][0]['price']))),stratergy_name =position1.stratergy_name,broker_id = position1.broker.id )
+                post.save()
+                post1 = tradeDetails(owner_id = position1.owner.id,symbol = position1.symbol,price =float(order['result'][0]['price']),quantity = order['result'][0]['total_quantity'],side = side12,unique = order['result'][0]['id'] ,date = convert_ms_to_kolkata_datetime(int(order['result'][0]['created_at'])),status =order['result']['state'],orderid = position1.order_id,stratergy = position1.stratergy,remark="Order Placed Successfully.", stratergy_name = position1.stratergy_name,margin = margin_used,broker_id = position1.broker.id)
+                post1.save()
+                position1.delete()
+                return Response({'message':'Position closed successfully.'})
+            else:
+                return Response({'message':'No open positipn find.'})
+        else:
+            client = DeltaExchangeClient(api_key=apikey,api_secret=apisecret)
+            position = client.get_positions(product_id=position1.symbol)
+            if position['success'] == True:
+                quantity_balance = int(position['result']['size'])
+                user_qty = int(float(position1.quantity))
+                if position1.side == "buy" and quantity_balance > 0:
+                    qty = min(user_qty, abs(quantity_balance))
+                    order = client.place_order(product_symbol = position1.symbol,side = side12,size=qty)
+                    symbol = SymbolMaster.objects.get(symbol = position1.symbol)
+                    margin_used = float(order['result']['average_fill_price']) * float(order['result']['size']) * float(symbol.contract_value) 
+                    post = OrderDetails(owner_id = position1.owner.id,orderid = position1.order_id,symbol = position1.symbol,side = position1.side,stratergy = position1.stratergy,date = order['result']['created_at'],buyprice = position1.price,sellprice = float(order['result']['average_fill_price']),buyquantity = position1.quantity,sellquantity = order['result']['size'],status = "Completed",profit = ((order['result']['size'] * float(order['result']['average_fill_price'])) - (float(position1.quantity) * float(position1.price))),stratergy_name =position1.stratergy_name,broker_id = position1.broker.id )
+                    post.save()
+                    post1 = tradeDetails(owner_id = position1.owner.id,symbol = position1.symbol,price =float(order['result']['average_fill_price']),quantity = float(order['result']['average_fill_price']),side = side12,unique = order['result']['id'] ,date = order['result']['created_at'],status =order['result']['state'],orderid = position1.order_id,stratergy = position1.stratergy,remark="Order Placed Successfully.", stratergy_name = position1.stratergy_name,margin = margin_used,broker_id = position1.broker.id)
+                    post1.save()
+                    position1.delete()
+                    return Response({'message':'Position closed successfully.'})
+                elif position1.side == "sell" and quantity_balance < 0:
+                    qty = min(user_qty, abs(quantity_balance))
+                    order = client.place_order(product_symbol = position1.symbol,side = side12,size=qty)
+                    margin_used = float(order['result']['average_fill_price']) * float(order['result']['size']) * float(symbol.contract_value) 
+                    post = OrderDetails(owner_id = position1.owner.id,orderid = position1.order_id,symbol = position1.symbol,side = position1.side,stratergy = position1.stratergy,date = order['result']['created_at'],sellprice = position1.price,buyprice = float(order['result']['average_fill_price']),sellquantity = position1.quantity,buyquantity = order['result']['size'],status = "Completed",profit = ((float(position1.quantity) * float(position1.price)) - (order['result']['size'] * float(order['result']['average_fill_price'])) ),stratergy_name =position1.stratergy_name,broker_id = position1.broker.id )
+                    post.save()
+                    post1 = tradeDetails(owner_id = position1.owner.id,symbol = position1.symbol,price =float(order['result']['average_fill_price']),quantity = float(order['result']['average_fill_price']),side = side12,unique = order['result']['id'] ,date = order['result']['created_at'],status =order['result']['state'],orderid = position1.order_id,stratergy = position1.stratergy,remark="Order Placed Successfully.", stratergy_name = position1.stratergy_name,margin = margin_used,broker_id = position1.broker.id)
+                    post1.save()
+                    position1.delete()
+                    return Response({'message':'Positipn closed successfully.'})
+                else:
+                    return Response({'message':'No open positipn find.'})
+
+
+
+
+
+
+
+
 
 class close_position_byid(APIView):
     permission_classes = [permissions.IsAuthenticated]

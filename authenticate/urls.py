@@ -83,6 +83,7 @@ path("get_user_positions/", get_user_positions.as_view(), name="get_user_positio
      path('today_dashboardcount/', get_today_dashboard_count.as_view(), name='get_today_dashboard_count'),
      path('dashboardcount/', get_dashboard_count.as_view(), name='get_today_dashboard_count'),
     
+     path('close_position_customer/', close_position_customer.as_view(), name='close_position_customer'),
     path('user_strategy_set/', user_strategy_set.as_view(), name='user_strategy_set'),
     path('add_user_to_strategy/', add_user_to_strategy.as_view(), name='add_user_to_strategy'),
     path('remove_user_to_strategy/', remove_user_to_strategy.as_view(), name='remove_user_to_strategy'),
