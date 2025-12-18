@@ -33,6 +33,8 @@ else:
         "http://localhost:5174",  # Alternative Vite port
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",  # Allow backend origin
+        "http://localhost:8000",  # Allow backend origin
         FRONTEND_URL,
     ]
     # Remove duplicates and None values
