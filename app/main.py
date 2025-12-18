@@ -7,6 +7,7 @@ from app.api.routes_secure_ai import router as secure_ai_router
 from app.api.routes_strategy import router as strategy_router
 from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
+from app.api.routes_websocket import router as websocket_router
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL
@@ -56,6 +57,7 @@ app.include_router(secure_ai_router, prefix="/auth")  # Secure AI strategy gener
 app.include_router(strategy_router, prefix="/auth")  # Strategy performance metrics
 app.include_router(credits_router, prefix="/auth")  # Credits management
 app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
+app.include_router(websocket_router, prefix="/auth")  # WebSocket for live prices
 
 @app.get("/")
 def health():
