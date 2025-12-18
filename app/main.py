@@ -9,21 +9,38 @@ from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
+from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL
 
 app = FastAPI(title="CryptoArth Strategy Engine")
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Configure CORS based on environment
+if IS_PRODUCTION:
+    # Production: Only allow specific origins
+    allowed_origins = [
+        FRONTEND_URL,
+        BASE_API_URL,
+        "https://aistrategy.cryptoarth.in",
+        "https://cryptoarth.in",
+        "https://panel.cryptoarth.in",
+    ]
+    # Remove duplicates and None values
+    allowed_origins = list(set(filter(None, allowed_origins)))
+else:
+    # Local development: Allow localhost ports
+    allowed_origins = [
         "http://localhost:5173",  # Vite default port
         "http://localhost:3000",  # React default port
         "http://localhost:5174",  # Alternative Vite port
-        "https://trade-api.cryptoarth.in",
-        "https://cryptoarth.in",
-        "https://panel.cryptoarth.in",
-        "*"  # Allow all origins in development (remove in production)
-    ],
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+        FRONTEND_URL,
+    ]
+    # Remove duplicates and None values
+    allowed_origins = list(set(filter(None, allowed_origins)))
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
