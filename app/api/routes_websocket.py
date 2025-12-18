@@ -137,7 +137,9 @@ def on_delta_open(ws):
     
     # Subscribe to all currently subscribed symbols
     if subscribed_symbols:
-        subscribe_to_symbols(ws, list(subscribed_symbols))
+        symbols_list = list(subscribed_symbols)
+        logger.info(f"Subscribing to {len(symbols_list)} symbols on Delta WebSocket reconnect")
+        subscribe_to_symbols(ws, symbols_list)
 
 
 def subscribe_to_delta(ws, symbols: List[str]):
@@ -244,8 +246,33 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         # Subscribe to Delta Exchange if not already subscribed
                         new_symbols = [s for s in symbols if s not in subscribed_symbols]
-                        if new_symbols and delta_ws and delta_ws.sock and delta_ws.sock.connected:
-                            subscribe_to_delta(delta_ws, new_symbols)
+                        if new_symbols:
+                            # Add to subscribed symbols immediately
+                            subscribed_symbols.update(new_symbols)
+                            
+                            # Subscribe to Delta Exchange if connected
+                            if delta_ws:
+                                try:
+                                    # Check if WebSocket is connected (websocket-client uses sock property)
+                                    if hasattr(delta_ws, 'sock') and delta_ws.sock:
+                                        # Check if socket is actually connected
+                                        import socket
+                                        try:
+                                            # Try to get socket state
+                                            if delta_ws.sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                                                subscribe_to_delta(delta_ws, new_symbols)
+                                            else:
+                                                # Socket exists but not connected, wait for reconnection
+                                                logger.warning(f"Delta WebSocket not connected, will subscribe when reconnected: {new_symbols}")
+                                        except:
+                                            # Socket might be in transition, wait for reconnection
+                                            logger.warning(f"Delta WebSocket in transition, will subscribe when reconnected: {new_symbols}")
+                                    else:
+                                        # WebSocket not initialized yet, will subscribe when connected
+                                        logger.info(f"Delta WebSocket not initialized, will subscribe when connected: {new_symbols}")
+                                except Exception as e:
+                                    logger.error(f"Error checking Delta WebSocket connection: {e}")
+                                    # Still add to subscribed symbols, will subscribe when connected
                         
                         await websocket.send_json({
                             'type': 'subscribed',
