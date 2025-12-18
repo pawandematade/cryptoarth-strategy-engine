@@ -82,7 +82,7 @@ def on_delta_message(ws, message):
         if data.get('type') == 'v2/ticker':
             symbol = data.get('symbol')
             if symbol:
-                # Extract price data
+                # Extract all available price data from Delta Exchange ticker
                 price_data = {
                     'type': 'ticker',
                     'symbol': symbol,
@@ -94,7 +94,16 @@ def on_delta_message(ws, message):
                     'high': data.get('high'),
                     'low': data.get('low'),
                     'volume': data.get('volume'),
-                    'timestamp': data.get('timestamp')
+                    'timestamp': data.get('timestamp'),
+                    'mark_change_24h': data.get('mark_change_24h'),
+                    'ltp_change_24h': data.get('ltp_change_24h'),
+                    'tick_size': data.get('tick_size'),
+                    'contract_multiplier': data.get('contract_multiplier'),
+                    # Extract best bid/ask from quotes if available
+                    'best_bid': data.get('quotes', {}).get('best_bid') if isinstance(data.get('quotes'), dict) else data.get('best_bid'),
+                    'bid_size': data.get('quotes', {}).get('bid_size') if isinstance(data.get('quotes'), dict) else data.get('bid_size'),
+                    'best_ask': data.get('quotes', {}).get('best_ask') if isinstance(data.get('quotes'), dict) else data.get('best_ask'),
+                    'ask_size': data.get('quotes', {}).get('ask_size') if isinstance(data.get('quotes'), dict) else data.get('ask_size'),
                 }
                 
                 # Store in Redis
@@ -107,6 +116,21 @@ def on_delta_message(ws, message):
                 
                 # Broadcast to all connected clients
                 broadcast_to_clients(price_data)
+        
+        # Handle L1 orderbook updates (for best bid/ask)
+        elif data.get('type') == 'l1_orderbook':
+            symbol = data.get('symbol')
+            if symbol:
+                orderbook_data = {
+                    'type': 'l1_orderbook',
+                    'symbol': symbol,
+                    'best_bid': data.get('best_bid'),
+                    'bid_qty': data.get('bid_qty'),
+                    'best_ask': data.get('best_ask'),
+                    'ask_qty': data.get('ask_qty'),
+                    'timestamp': data.get('timestamp')
+                }
+                broadcast_to_clients(orderbook_data)
         
         # Handle other message types (L2 orderbook, trades, etc.)
         elif data.get('type'):
@@ -153,6 +177,10 @@ def subscribe_to_delta(ws, symbols: List[str]):
             'channels': [
                 {
                     'name': 'v2/ticker',
+                    'symbols': symbols
+                },
+                {
+                    'name': 'l1_orderbook',
                     'symbols': symbols
                 }
             ]
