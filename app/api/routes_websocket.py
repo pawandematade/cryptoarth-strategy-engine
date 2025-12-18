@@ -157,17 +157,27 @@ def on_delta_close(ws, close_status_code, close_msg):
 
 def on_delta_open(ws):
     """Handle Delta WebSocket open - subscribe to symbols"""
-    logger.info("Delta WebSocket connection opened successfully")
+    logger.info("✅ Delta WebSocket connection opened successfully")
     
-    # Subscribe to all currently subscribed symbols
-    if subscribed_symbols:
-        symbols_list = list(subscribed_symbols)
-        logger.info(f"Subscribing to {len(symbols_list)} symbols on Delta WebSocket reconnect")
-        subscribe_to_symbols(ws, symbols_list)
+    # Auto-subscribe to default symbols (BTCUSD, ETHUSD) for live prices
+    # This ensures prices are always available even if no frontend is connected
+    default_symbols = ['BTCUSD', 'ETHUSD']
+    logger.info(f"Auto-subscribing to default symbols: {default_symbols}")
+    # Subscribe IMMEDIATELY - no delay
+    subscribe_to_symbols(ws, default_symbols)
+    subscribed_symbols.update(default_symbols)
+    
+    # Also subscribe to any additional symbols that were requested
+    if len(subscribed_symbols) > len(default_symbols):
+        additional_symbols = [s for s in subscribed_symbols if s not in default_symbols]
+        if additional_symbols:
+            logger.info(f"Subscribing to additional symbols: {additional_symbols}")
+            # Subscribe IMMEDIATELY - no delay
+            subscribe_to_symbols(ws, additional_symbols)
 
 
 def subscribe_to_delta(ws, symbols: List[str]):
-    """Subscribe to symbols on Delta Exchange WebSocket"""
+    """Subscribe to symbols on Delta Exchange WebSocket - IMMEDIATE subscription"""
     if not symbols:
         return
     
@@ -188,11 +198,21 @@ def subscribe_to_delta(ws, symbols: List[str]):
     }
     
     try:
+        # Send subscription IMMEDIATELY - no delay
         ws.send(json.dumps(subscribe_msg))
-        logger.info(f"Subscribed to Delta Exchange symbols: {symbols}")
+        logger.info(f"✅ Immediately subscribed to Delta Exchange symbols: {symbols}")
         subscribed_symbols.update(symbols)
     except Exception as e:
-        logger.error(f"Error subscribing to Delta Exchange: {e}")
+        logger.error(f"❌ Error subscribing to Delta Exchange: {e}")
+        # Retry once after a very short delay
+        import time
+        time.sleep(0.1)
+        try:
+            ws.send(json.dumps(subscribe_msg))
+            logger.info(f"✅ Retry subscription successful for symbols: {symbols}")
+            subscribed_symbols.update(symbols)
+        except Exception as retry_error:
+            logger.error(f"❌ Retry subscription failed: {retry_error}")
 
 
 def subscribe_to_symbols(ws, symbols: List[str]):
@@ -231,8 +251,14 @@ def connect_to_delta():
         logger.error(f"Error connecting to Delta Exchange: {e}")
 
 
-# Start Delta Exchange connection on module load
+# Auto-subscribe to default symbols for live prices
+DEFAULT_SYMBOLS = ['BTCUSD', 'ETHUSD']
+
+# Start Delta Exchange connection on module load - IMMEDIATE connection
 connect_to_delta()
+
+# Auto-subscribe to default symbols IMMEDIATELY (connection handles subscription in on_open)
+# No need for separate thread - subscription happens in on_delta_open callback
 
 
 @router.websocket("/ws/live-prices")
@@ -241,12 +267,21 @@ async def websocket_endpoint(websocket: WebSocket):
     WebSocket endpoint for frontend to receive live price updates
     Frontend can subscribe to specific symbols
     """
-    await websocket.accept()
-    active_connections.add(websocket)
-    connection_subscriptions[websocket] = set()
-    connection_loops[websocket] = asyncio.get_event_loop()
+    # Accept connection from any origin (CORS is handled at HTTP level)
+    # For WebSocket, we accept all connections in development
+    origin = websocket.headers.get("origin")
+    logger.info(f"WebSocket connection attempt from origin: {origin}")
     
-    logger.info(f"Client connected. Total connections: {len(active_connections)}")
+    try:
+        await websocket.accept()
+        active_connections.add(websocket)
+        connection_subscriptions[websocket] = set()
+        connection_loops[websocket] = asyncio.get_event_loop()
+        
+        logger.info(f"Client connected. Total connections: {len(active_connections)}")
+    except Exception as e:
+        logger.error(f"Error accepting WebSocket connection: {e}")
+        raise
     
     try:
         # Send welcome message
@@ -269,7 +304,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         if isinstance(symbols, str):
                             symbols = [symbols]
                         
-                        # Add to connection subscriptions
+                        # Add to connection subscriptions immediately
                         connection_subscriptions[websocket].update(symbols)
                         
                         # Subscribe to Delta Exchange if not already subscribed
@@ -278,7 +313,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             # Add to subscribed symbols immediately
                             subscribed_symbols.update(new_symbols)
                             
-                            # Subscribe to Delta Exchange if connected
+                            # Subscribe to Delta Exchange if connected - IMMEDIATE subscription
                             if delta_ws:
                                 try:
                                     # Check if WebSocket is connected (websocket-client uses sock property)
@@ -288,13 +323,19 @@ async def websocket_endpoint(websocket: WebSocket):
                                         try:
                                             # Try to get socket state
                                             if delta_ws.sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                                                # IMMEDIATELY subscribe - no delay
                                                 subscribe_to_delta(delta_ws, new_symbols)
+                                                logger.info(f"✅ Immediately subscribed to new symbols: {new_symbols}")
                                             else:
                                                 # Socket exists but not connected, wait for reconnection
                                                 logger.warning(f"Delta WebSocket not connected, will subscribe when reconnected: {new_symbols}")
                                         except:
-                                            # Socket might be in transition, wait for reconnection
-                                            logger.warning(f"Delta WebSocket in transition, will subscribe when reconnected: {new_symbols}")
+                                            # Socket might be in transition, try subscribing anyway
+                                            try:
+                                                subscribe_to_delta(delta_ws, new_symbols)
+                                                logger.info(f"✅ Subscribed to symbols (socket in transition): {new_symbols}")
+                                            except Exception as sub_error:
+                                                logger.warning(f"Delta WebSocket in transition, will subscribe when reconnected: {new_symbols}, error: {sub_error}")
                                     else:
                                         # WebSocket not initialized yet, will subscribe when connected
                                         logger.info(f"Delta WebSocket not initialized, will subscribe when connected: {new_symbols}")
@@ -302,6 +343,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                     logger.error(f"Error checking Delta WebSocket connection: {e}")
                                     # Still add to subscribed symbols, will subscribe when connected
                         
+                        # Send confirmation immediately
                         await websocket.send_json({
                             'type': 'subscribed',
                             'symbols': list(connection_subscriptions[websocket])
