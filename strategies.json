@@ -1,0 +1,27 @@
+[
+  {
+    "id": 1,
+    "symbol": "BTCUSD",
+    "condition": {
+      "type": "price_above",
+      "value": 90500
+    }
+  },
+  {
+    "id": 2,
+    "symbol": "BTCUSD",
+    "condition": {
+      "type": "price_above",
+      "value": 92000
+    }
+  },
+  {
+    "id": 3,
+    "symbol": "BTCUSD",
+    "condition": {
+      "type": "price_above",
+      "value": 88000
+    }
+  }
+]
+

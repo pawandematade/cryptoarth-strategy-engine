@@ -1,0 +1,312 @@
+from fastapi import APIRouter, HTTPException, Header
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
+import logging
+import json
+from app.services.openai_service import generate_strategy, generate_strategy_with_context
+from app.services.backtest_service import run_backtest
+from app.strategies.loader import load_strategies, save_strategy
+from app.store.redis_client import redis_client
+from app.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+class AIStrategyRequest(BaseModel):
+    """Request model for AI strategy generation"""
+    prompt: str = Field(..., description="Natural language description of the trading strategy")
+    symbol: str = Field(default="BTCUSD", description="Trading symbol (e.g., BTCUSD)")
+    current_price: Optional[float] = Field(default=None, description="Current market price for context")
+    market_context: Optional[str] = Field(default=None, description="Additional market context")
+    save_strategy: bool = Field(default=False, description="Whether to save the strategy to strategies.json")
+
+
+class AIStrategyResponse(BaseModel):
+    """Response model for AI strategy generation"""
+    success: bool
+    strategy: Optional[dict] = None
+    message: str
+    strategy_id: Optional[int] = None
+
+
+@router.post("/ai-strategy/generate", response_model=AIStrategyResponse)
+def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str] = Header(None)):
+    """
+    Generate a trading strategy using AI based on natural language description.
+    
+    Example requests:
+    - "Buy when BTC price goes above 90000"
+    - "Alert me when price drops below 85000"
+    - "Notify when price is between 88000 and 92000"
+    
+    Returns:
+        AIStrategyResponse: Generated strategy in structured format
+    """
+    try:
+        # Validate input
+        if not request.prompt or not request.prompt.strip():
+            raise HTTPException(status_code=400, detail="Prompt is required")
+        
+        if not request.symbol or not request.symbol.strip():
+            raise HTTPException(status_code=400, detail="Symbol is required")
+        
+        # Check and consume credits
+        user_id = get_user_id_from_header(authorization)
+        credit_check = check_credits_available(user_id, 'ai_generate')
+        
+        if not credit_check['has_credits']:
+            raise HTTPException(
+                status_code=402,  # Payment Required
+                detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to continue."
+            )
+        
+        # Consume credits before generating
+        credit_result = consume_credits(user_id, 'ai_generate')
+        if not credit_result['success']:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Failed to process credits: {credit_result['message']}"
+            )
+        
+        # Get current price from Redis if not provided
+        current_price = request.current_price
+        if current_price is None:
+            try:
+                price_key = f"PRICE:{request.symbol}"
+                price_str = redis_client.get(price_key)
+                if price_str:
+                    current_price = float(price_str)
+                    logger.info(f"Retrieved current price from Redis: {current_price}")
+            except Exception as e:
+                logger.warning(f"Could not retrieve current price from Redis: {e}")
+        
+        # Generate strategy using OpenAI
+        try:
+            if current_price or request.market_context:
+                strategy = generate_strategy_with_context(
+                    user_prompt=request.prompt,
+                    symbol=request.symbol.strip().upper(),
+                    current_price=current_price,
+                    market_context=request.market_context
+                )
+            else:
+                strategy = generate_strategy(
+                    user_prompt=request.prompt,
+                    symbol=request.symbol.strip().upper()
+                )
+        except Exception as e:
+            logger.error(f"Error generating strategy: {e}", exc_info=True)
+            return AIStrategyResponse(
+                success=False,
+                message=f"Error generating strategy: {str(e)}"
+            )
+        
+        if not strategy:
+            logger.error("Strategy generation returned None. Check OpenAI service logs.")
+            return AIStrategyResponse(
+                success=False,
+                message="Failed to generate strategy. Please check your OpenAI API key and try again."
+            )
+        
+        # Save strategy if requested
+        strategy_id = None
+        if request.save_strategy:
+            try:
+                strategy_id = save_strategy(strategy)
+                logger.info(f"Strategy saved with ID: {strategy_id}")
+            except Exception as e:
+                logger.error(f"Failed to save strategy: {e}")
+                return AIStrategyResponse(
+                    success=True,
+                    strategy=strategy,
+                    message=f"Strategy generated successfully but failed to save: {str(e)}"
+                )
+        
+        return AIStrategyResponse(
+            success=True,
+            strategy=strategy,
+            message="Strategy generated successfully",
+            strategy_id=strategy_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in generate_ai_strategy: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/ai-strategy/list")
+def list_strategies():
+    """
+    Get all saved strategies.
+    
+    Returns:
+        dict: List of all strategies
+    """
+    try:
+        strategies = load_strategies()
+        return {
+            "success": True,
+            "count": len(strategies),
+            "strategies": strategies
+        }
+    except Exception as e:
+        logger.error(f"Error listing strategies: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load strategies: {str(e)}")
+
+
+@router.get("/ai-strategy/{strategy_id}")
+def get_strategy(strategy_id: int):
+    """
+    Get a specific strategy by ID.
+    
+    Returns:
+        dict: Strategy details
+    """
+    try:
+        strategies = load_strategies()
+        strategy = next((s for s in strategies if s.get("id") == strategy_id), None)
+        
+        if not strategy:
+            raise HTTPException(status_code=404, detail=f"Strategy with ID {strategy_id} not found")
+        
+        return {
+            "success": True,
+            "strategy": strategy
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting strategy: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get strategy: {str(e)}")
+
+
+class BacktestRequest(BaseModel):
+    """Request model for backtest"""
+    strategy: Dict[str, Any] = Field(..., description="Strategy object to backtest")
+    period: str = Field(default="month", description="Time period: 'year', 'month', or 'day'")
+
+
+@router.post("/ai-strategy/backtest")
+def run_strategy_backtest(request: BacktestRequest, authorization: Optional[str] = Header(None)):
+    """
+    Run backtest for a strategy.
+    
+    Args:
+        request: BacktestRequest with strategy and period
+        authorization: Authorization header with user ID
+    
+    Returns:
+        dict: Comprehensive backtest results
+    """
+    try:
+        # Validate input
+        if not request.strategy:
+            raise HTTPException(status_code=400, detail="Strategy is required")
+        
+        if request.period not in ['year', 'month', 'day']:
+            raise HTTPException(status_code=400, detail="Period must be 'year', 'month', or 'day'")
+        
+        # Check and consume credits
+        user_id = get_user_id_from_header(authorization)
+        credit_check = check_credits_available(user_id, 'backtest')
+        
+        if not credit_check['has_credits']:
+            raise HTTPException(
+                status_code=402,  # Payment Required
+                detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to run backtest."
+            )
+        
+        # Consume credits before running backtest
+        credit_result = consume_credits(user_id, 'backtest')
+        if not credit_result['success']:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Failed to process credits: {credit_result['message']}"
+            )
+        
+        # Validate strategy structure
+        strategy = request.strategy
+        
+        # Check for required fields
+        if not isinstance(strategy, dict):
+            raise HTTPException(status_code=400, detail="Strategy must be a dictionary/object")
+        
+        if not strategy.get('symbol'):
+            raise HTTPException(status_code=400, detail="Strategy must have a 'symbol' field")
+        
+        if not strategy.get('condition'):
+            raise HTTPException(status_code=400, detail="Strategy must have a 'condition' field")
+        
+        condition = strategy.get('condition')
+        if not isinstance(condition, dict):
+            raise HTTPException(status_code=400, detail="Strategy condition must be a dictionary/object")
+        
+        if not condition.get('type'):
+            raise HTTPException(status_code=400, detail="Strategy condition must have a 'type' field")
+        
+        # Normalize strategy structure - ensure parameters are accessible
+        # Parameters can be at root level or in condition.parameters
+        if 'parameters' not in strategy and condition.get('parameters'):
+            strategy['parameters'] = condition.get('parameters')
+        elif 'parameters' in strategy and not condition.get('parameters'):
+            condition['parameters'] = strategy.get('parameters')
+        
+        # For indicator strategies, ensure parameters exist
+        condition_type = condition.get('type')
+        if condition_type in ['ema_crossover', 'supertrend', 'moving_average', 'rsi', 'macd', 'bollinger_bands']:
+            if not strategy.get('parameters') and not condition.get('parameters'):
+                # Add default parameters based on type
+                if condition_type == 'ema_crossover':
+                    strategy['parameters'] = {'ema_fast': 9, 'ema_slow': 21, 'tp_percent': 1, 'sl_percent': 1}
+                    condition['parameters'] = strategy['parameters']
+                elif condition_type == 'supertrend':
+                    strategy['parameters'] = {'period': 7, 'multiplier': 3}
+                    condition['parameters'] = strategy['parameters']
+        
+        logger.info(f"Running backtest for strategy: {strategy.get('symbol', 'N/A')}, type: {condition_type}, period: {request.period}")
+        logger.debug(f"Strategy structure: symbol={strategy.get('symbol')}, condition.type={condition_type}, has_parameters={bool(strategy.get('parameters') or condition.get('parameters'))}")
+        
+        # Run backtest
+        backtest_results = run_backtest(strategy, request.period)
+        
+        if not backtest_results:
+            raise HTTPException(status_code=500, detail="Failed to run backtest")
+        
+        # Cache backtest results in Redis for performance endpoint
+        try:
+            strategy_id = None
+            # Try to get strategy_id from strategy
+            if 'strategy_id' in strategy:
+                strategy_id = strategy['strategy_id']
+            elif 'id' in strategy:
+                strategy_id = str(strategy['id'])
+            
+            if strategy_id:
+                backtest_key = f"BACKTEST:{strategy_id}"
+                import json
+                redis_client.setex(
+                    backtest_key,
+                    86400 * 7,  # Cache for 7 days
+                    json.dumps(backtest_results)
+                )
+                logger.info(f"Cached backtest results for strategy: {strategy_id}")
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache backtest results: {cache_error}")
+            # Don't fail the request if caching fails
+        
+        return {
+            "success": True,
+            "results": backtest_results,
+            "message": f"Backtest completed successfully for {request.period}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error running backtest: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
