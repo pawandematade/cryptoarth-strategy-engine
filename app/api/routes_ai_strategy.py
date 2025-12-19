@@ -207,22 +207,12 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             
             logger.info(f"✅ Using OpenAI response parameters (from prompt)")
             
-            # Add user parameters to strategy for frontend display (runtime only - not stored)
-            strategy['userParams'] = {
-                'prompt': request.prompt.strip(),
-                'symbol': request.symbol.strip().upper() if request.symbol else None,
-                'timeframe': request.timeframe,
-                'chartType': request.chart_type,
-                'tpValue': request.take_profit.get('value') if request.take_profit else None,
-                'tpType': request.take_profit.get('type') if request.take_profit else None,
-                'slValue': request.stop_loss.get('value') if request.stop_loss else None,
-                'slType': request.stop_loss.get('type') if request.stop_loss else None,
-                'trailingEnabled': request.trailing_stop.get('enabled') if request.trailing_stop else False,
-                'trailingValue': request.trailing_stop.get('value') if request.trailing_stop else None,
-                'trailingType': request.trailing_stop.get('type') if request.trailing_stop else None,
-            }
+            # CRITICAL: Do NOT include request payload data in response
+            # Request payload (prompt, symbol, timeframe, chart_type, take_profit, stop_loss, etc.) is INTERNAL ONLY
+            # Response contains ONLY the parsed strategy from OpenAI (symbol, condition, parameters)
+            # No userParams, no request data, no builder/internal fields
             
-            # Log final strategy parameters
+            # Log final strategy parameters (for debugging only - not in response)
             logger.info("=" * 80)
             logger.info("📊 FINAL STRATEGY PARAMETERS:")
             logger.info(f"{json.dumps(strategy.get('parameters', {}), indent=2)}")
