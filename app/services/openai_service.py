@@ -193,20 +193,37 @@ CRITICAL: If parameters are provided (TP, SL, Symbol, Timeframe), you MUST inclu
 DO NOT ignore any parameters - they are part of the complete strategy requirements.
 Return only the JSON object with 'symbol' and 'condition' fields."""
 
-        # CRITICAL: OpenAI API call - we send ONLY the prompt
-        # The user_message contains the complete merged prompt with all parameters
-        # No other fields (symbol, timeframe, etc.) are sent separately
+        # CRITICAL: OpenAI API call - we send ONLY the merged prompt string
+        # 
+        # MANDATORY RULES:
+        # 1. All frontend fields (chart_type, symbol, timeframe, stop_loss, take_profit, etc.) 
+        #    are merged into ONE prompt string via build_prompt()
+        # 2. The user_message contains ONLY the merged prompt string (with instructions)
+        # 3. OpenAI API requires model + messages structure (this is OpenAI's API requirement)
+        # 4. Within messages array, user message contains ONLY the merged prompt
+        # 5. NO other user-provided fields (symbol, timeframe, chart_type, take_profit, stop_loss) 
+        #    are sent as separate fields to OpenAI
+        #
+        # The merged prompt string (user_prompt) contains ALL parameters:
+        # - Strategy description
+        # - Symbol
+        # - Timeframe
+        # - Chart Type
+        # - Take Profit
+        # - Stop Loss
+        # - Trailing Stop
+        # - Current Price
+        # - Market Context
+        # - Any future fields added from frontend
         
-        # OpenAI API requires model + messages structure
-        # We send ONLY the merged prompt string in the user message
-        # The request body contains: model, messages (system + user prompt), temperature, response_format
-        # NO other user-provided fields (symbol, timeframe, chart_type, take_profit, stop_loss) are sent
-        
+        # Build OpenAI API payload
+        # NOTE: OpenAI Chat Completions API requires model + messages structure
+        # The user message content contains ONLY the merged prompt string
         api_params = {
             "model": OPENAI_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}  # ONLY the merged prompt string
+                {"role": "user", "content": user_message}  # Contains ONLY merged prompt string
             ],
             "temperature": 0.8,
         }
@@ -215,12 +232,21 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
         if "gpt-4" in OPENAI_MODEL or "gpt-3.5-turbo" in OPENAI_MODEL:
             api_params["response_format"] = {"type": "json_object"}
         
-        # FINAL CHECK: api_params contains ONLY OpenAI-required fields
-        # - model (required by OpenAI)
-        # - messages (required by OpenAI, contains system prompt + user prompt)
-        # - temperature (optional)
-        # - response_format (optional, for JSON mode)
-        # NO symbol, timeframe, chart_type, take_profit, stop_loss fields
+        # FINAL VALIDATION: Ensure no user-provided fields leak into API call
+        # api_params contains ONLY:
+        # - model (required by OpenAI API)
+        # - messages (required by OpenAI API - contains system prompt + user message with merged prompt)
+        # - temperature (optional OpenAI parameter)
+        # - response_format (optional OpenAI parameter)
+        # 
+        # CRITICAL: NO symbol, timeframe, chart_type, take_profit, stop_loss fields
+        # All these are embedded in the merged prompt string within user_message
+        
+        # Validate that api_params doesn't contain any user-provided fields
+        forbidden_keys = ['symbol', 'timeframe', 'chart_type', 'take_profit', 'stop_loss', 'trailing_stop', 'prompt']
+        for key in forbidden_keys:
+            if key in api_params:
+                raise ValueError(f"CRITICAL ERROR: User-provided field '{key}' found in OpenAI API params. This should never happen.")
         
         response = client.chat.completions.create(**api_params)
         

@@ -120,8 +120,26 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             except Exception as e:
                 logger.warning(f"Could not retrieve current price from Redis: {e}")
         
-        # CRITICAL: Use PromptBuilder to convert payload to single prompt string
-        # All trading rules must exist ONLY inside the generated prompt
+        # CRITICAL: Transform incoming payload into ONE single prompt string
+        # 
+        # MANDATORY RULES:
+        # 1. Frontend sends: { chart_type, prompt, symbol, timeframe, stop_loss, take_profit, ... }
+        # 2. We merge ALL fields (including future fields) into ONE human-readable prompt string
+        # 3. This merged prompt string is the ONLY thing sent to OpenAI
+        # 4. NO other fields (chart_type, symbol, timeframe, stop_loss, take_profit) are sent separately
+        # 5. Frontend contract remains unchanged
+        #
+        # The build_prompt() function merges ALL incoming fields into a single string:
+        # - prompt (strategy description)
+        # - symbol
+        # - timeframe
+        # - chart_type
+        # - take_profit
+        # - stop_loss
+        # - trailing_stop
+        # - current_price
+        # - market_context
+        # - Any future fields added from frontend
         try:
             final_prompt = build_prompt(
                 strategy_description=request.prompt.strip(),
@@ -139,15 +157,19 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             raise HTTPException(status_code=400, detail=str(e))
         
         # CRITICAL: Generate strategy using OpenAI
-        # We send ONLY the merged prompt string - no other fields
-        # The prompt contains: user description + symbol + timeframe + chart_type + take_profit + stop_loss + trailing_stop
+        # 
+        # We send ONLY the merged prompt string to OpenAI
+        # The final_prompt contains ALL parameters merged into ONE string
+        # OpenAI receives ONLY: { "prompt": "<merged string>" } (within messages structure)
+        # NO other fields are sent separately
         try:
-            logger.info("🤖 Calling OpenAI with merged prompt (all parameters embedded)")
+            logger.info("🤖 Calling OpenAI with merged prompt (all parameters embedded in single string)")
             
             # Call OpenAI with ONLY the merged prompt string
-            # generate_strategy() receives only the prompt and sends it to OpenAI
-            # OpenAI API requires model + messages, but we only send the prompt in user message
-            # No other fields (symbol, timeframe, etc.) are sent separately
+            # generate_strategy() receives only the merged prompt and sends it to OpenAI
+            # OpenAI API requires model + messages structure (OpenAI's API requirement)
+            # Within messages, user message contains ONLY the merged prompt string
+            # No other fields (symbol, timeframe, chart_type, take_profit, stop_loss) are sent separately
             strategy = generate_strategy(user_prompt=final_prompt)
             
             logger.info(f"✅ Strategy generated successfully")
