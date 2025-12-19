@@ -61,150 +61,17 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
             return None
     
     try:
-        # System prompt to guide the AI
-        system_prompt = """You are an expert trading strategy builder for cryptocurrency markets. 
-Your task is to convert user's natural language trading strategy descriptions into structured JSON format.
-
-CRITICAL: You MUST capture ALL conditions and requirements mentioned in the user's prompt. 
-Different descriptions MUST result in different strategy structures, even if they seem similar.
-Pay close attention to additional conditions like "candle close", "high break", "wait", "after", etc.
-
-The strategy format should be:
-{
-    "symbol": "BTCUSD",
-    "condition": {
-        "type": "price_above" | "price_below" | "price_between" | "supertrend" | "ema_crossover" | "moving_average" | "rsi" | "macd" | "bollinger_bands",
-        "value": <number> or {"min": <number>, "max": <number>} or null for indicator strategies
-    },
-    "parameters": {
-        // For EMA Crossover: {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}
-        // For SuperTrend: {"period": 7, "multiplier": 3}
-        // For Moving Average: {"period": 20, "type": "SMA" | "EMA"}
-        // For RSI: {"period": 14, "oversold": 30, "overbought": 70}
-        // Additional conditions can be stored here:
-        // "wait_candle_close": true/false - wait for candle to close before executing
-        // "require_high_break": true/false - require high to break before taking trade
-        // "entry_condition": "crossover" | "candle_close" | "high_break" - specific entry condition
-    }
-}
-
-Supported condition types:
-- "price_above": Trigger when price is above a value
-- "price_below": Trigger when price is below a value
-- "price_between": Trigger when price is between min and max values
-- "ema_crossover": EMA crossover strategy (requires ema_fast and ema_slow in parameters)
-- "supertrend": SuperTrend indicator strategy (requires period and multiplier in parameters)
-- "moving_average": Moving average crossover strategy
-- "rsi": RSI indicator strategy
-- "macd": MACD indicator strategy
-- "bollinger_bands": Bollinger Bands strategy
-
-Examples showing how to capture DIFFERENT conditions:
-- "EMA 9 cross above 21 EMA buy and EMA 9 cross below 21 EMA sell, TP 1% SL 1%" -> 
-  {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}}
-
-- "EMA 9 cross above 21 EMA buy and EMA 9 cross below 21 EMA sell once cross over candle close and close candle high break then take trade" -> 
-  {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1, "wait_candle_close": true, "require_high_break": true, "entry_condition": "candle_close_high_break"}}
-
-- "9 and 21 EMA crossover strategy with 1% TP and 1% SL" -> 
-  {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}}
-
-- "Buy when BTC price goes above 90000" -> {"type": "price_above", "value": 90000}
-- "Super trend 7 3" or "supertrend 7 3" -> {"type": "supertrend", "value": null, "parameters": {"period": 7, "multiplier": 3}}
-- "Sell when price drops below 85000" -> {"type": "price_below", "value": 85000}
-
-IMPORTANT RULES:
-1. ALWAYS capture ALL conditions mentioned in the user prompt - do not ignore any part
-2. If user mentions "candle close", "wait for candle close", "after candle close" - add "wait_candle_close": true
-3. If user mentions "high break", "break high", "candle high break" - add "require_high_break": true
-4. If user mentions both "candle close" AND "high break" - add both conditions
-5. Different prompts MUST result in different parameter structures
-6. For EMA Crossover: Extract fast EMA period, slow EMA period, TP percentage, and SL percentage from the prompt
-7. For SuperTrend: Extract period and multiplier from the prompt (e.g., "7 3" means period=7, multiplier=3)
-8. Always include the "parameters" field for indicator-based strategies
-9. TP and SL percentages should be extracted and included in parameters
-10. Return ONLY valid JSON, no additional text or explanation."""
-
-        # CRITICAL: user_prompt contains ALL parameters merged into ONE string
-        # Format: "strategy description. Symbol: BTCUSD. Timeframe: 15MIN. Chart Type: Candles. Take Profit: 2000 points. Stop Loss: 2000 points."
-        # OpenAI receives ONLY this prompt string - no other fields
-        
-        # Generate unique request ID for this call
-        unique_id = str(uuid.uuid4())
-        
-        # Build user message - the prompt contains EVERYTHING
-        user_message = f"""Convert this complete trading strategy description into JSON format.
-The description below contains the strategy logic AND all trading parameters in a single line.
-YOU MUST extract and use ALL parameters mentioned in the description.
-
-Request ID: {unique_id}
-
-Complete Strategy Description (all parameters included):
-{user_prompt}
-
-MANDATORY INSTRUCTIONS - YOU MUST FOLLOW THESE:
-1. Extract the strategy type from "Strategy Description:" line (e.g., EMA crossover, SuperTrend, etc.)
-2. Extract Symbol from "Symbol:" line - USE THIS EXACT SYMBOL in your response
-3. If "Timeframe:" is provided, note it (important context for the strategy)
-4. If "Chart Type:" is provided, note it (important context)
-5. If "Take Profit:" is provided, you MUST include it in parameters:
-   - If it says "points" → add "tp_point": [value] to parameters
-   - If it says "percentage" or "%" → add "tp_percent": [value] to parameters
-   - Example: "Take Profit: 2000 points" → "tp_point": 2000
-   - Example: "Take Profit: 1%" → "tp_percent": 1
-6. If "Stop Loss:" is provided, you MUST include it in parameters:
-   - If it says "points" → add "sl_point": [value] to parameters
-   - If it says "percentage" or "%" → add "sl_percent": [value] to parameters
-   - Example: "Stop Loss: 2000 points" → "sl_point": 2000
-   - Example: "Stop Loss: 1%" → "sl_percent": 1
-7. If "Trailing Stop:" is provided, include it similarly
-8. If "Strategy Description:" contains "candle close" or "high break" or "once", add:
-   - "wait_candle_close": true (if candle close mentioned)
-   - "require_high_break": true (if high break mentioned)
-   - "entry_condition": "candle_close_high_break" (if both mentioned)
-9. For SuperTrend: Extract period and multiplier EXACTLY as mentioned
-   - "value 7 3" → period=7, multiplier=3
-   - "value 10 2" → period=10, multiplier=2
-10. Different inputs MUST result in DIFFERENT parameter structures
-
-EXAMPLE INPUT:
-Strategy Description: make super trend strategy value 7 3
-Symbol: BTCUSD
-Timeframe: 15MIN
-Chart Type: Candles
-Take Profit: 2000 points
-Stop Loss: 2000 points
-
-EXAMPLE OUTPUT:
-{{
-  "symbol": "BTCUSD",
-  "condition": {{
-    "type": "supertrend",
-    "parameters": {{
-      "period": 7,
-      "multiplier": 3,
-      "tp_point": 2000,
-      "sl_point": 2000
-    }}
-  }}
-}}
-
-CRITICAL: If parameters are provided (TP, SL, Symbol, Timeframe), you MUST include them in your response.
-DO NOT ignore any parameters - they are part of the complete strategy requirements.
-Return only the JSON object with 'symbol' and 'condition' fields."""
-
-        # CRITICAL: OpenAI API call - we send ONLY the merged prompt string
+        # CRITICAL: OpenAI API call - send ONLY the merged prompt string
         # 
         # MANDATORY RULES:
-        # 1. All frontend fields (chart_type, symbol, timeframe, stop_loss, take_profit, etc.) 
-        #    are merged into ONE prompt string via build_prompt()
-        # 2. The user_message contains ONLY the merged prompt string (with instructions)
-        # 3. OpenAI API requires model + messages structure (this is OpenAI's API requirement)
-        # 4. Within messages array, user message contains ONLY the merged prompt
-        # 5. NO other user-provided fields (symbol, timeframe, chart_type, take_profit, stop_loss) 
-        #    are sent as separate fields to OpenAI
+        # 1. user_prompt contains ALL frontend fields merged into ONE human-readable string
+        #    (This is done by build_prompt() in routes_ai_strategy.py)
+        # 2. Send ONLY the merged prompt string to OpenAI - no system prompt, no extra instructions
+        # 3. OpenAI API requires model + messages structure
+        # 4. Within messages, user message contains ONLY the merged prompt string
+        # 5. NO other fields (symbol, timeframe, chart_type, take_profit, stop_loss) sent separately
         #
-        # The merged prompt string (user_prompt) contains ALL parameters:
+        # The merged prompt string (user_prompt) already contains ALL parameters:
         # - Strategy description
         # - Symbol
         # - Timeframe
@@ -217,13 +84,12 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
         # - Any future fields added from frontend
         
         # Build OpenAI API payload
-        # NOTE: OpenAI Chat Completions API requires model + messages structure
-        # The user message content contains ONLY the merged prompt string
+        # Send ONLY the merged prompt string in user message
+        # No system prompt, no extra instructions - just the merged prompt
         api_params = {
             "model": OPENAI_MODEL,
             "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}  # Contains ONLY merged prompt string
+                {"role": "user", "content": user_prompt}  # ONLY the merged prompt string
             ],
             "temperature": 0.8,
         }
