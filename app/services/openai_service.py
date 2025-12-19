@@ -66,9 +66,9 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
         # MANDATORY RULES:
         # 1. user_prompt contains ALL frontend fields merged into ONE human-readable string
         #    (This is done by build_prompt() in routes_ai_strategy.py)
-        # 2. Send ONLY the merged prompt string to OpenAI - no system prompt, no extra instructions
+        # 2. Send ONLY the merged prompt string to OpenAI - no system prompt
         # 3. OpenAI API requires model + messages structure
-        # 4. Within messages, user message contains ONLY the merged prompt string
+        # 4. Within messages, user message contains the merged prompt with minimal format instructions
         # 5. NO other fields (symbol, timeframe, chart_type, take_profit, stop_loss) sent separately
         #
         # The merged prompt string (user_prompt) already contains ALL parameters:
@@ -83,13 +83,20 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
         # - Market Context
         # - Any future fields added from frontend
         
+        # Build user message with merged prompt and minimal format instruction
+        # The merged prompt contains all user inputs, we just need to tell OpenAI to return JSON
+        user_message = f"""Convert this trading strategy description into JSON format:
+
+{user_prompt}
+
+Return JSON with structure: {{"symbol": "...", "condition": {{"type": "...", "parameters": {{...}}}}}}"""
+        
         # Build OpenAI API payload
-        # Send ONLY the merged prompt string in user message
-        # No system prompt, no extra instructions - just the merged prompt
+        # Send ONLY the merged prompt string in user message (with minimal format instruction)
         api_params = {
             "model": OPENAI_MODEL,
             "messages": [
-                {"role": "user", "content": user_prompt}  # ONLY the merged prompt string
+                {"role": "user", "content": user_message}  # Merged prompt + minimal format instruction
             ],
             "temperature": 0.8,
         }
@@ -243,7 +250,8 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse OpenAI JSON response: {e}")
-        logger.error(f"Response content: {content}")
+        logger.error(f"Response content (first 500 chars): {content[:500]}")
+        logger.error(f"Full response length: {len(content)}")
         return None
     except Exception as e:
         logger.error(f"Error generating strategy with OpenAI: {e}", exc_info=True)
@@ -252,6 +260,9 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
             logger.error(f"OpenAI API error response: {e.response}")
         if hasattr(e, 'status_code'):
             logger.error(f"HTTP status code: {e.status_code}")
+        # Log the actual exception type and message
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception message: {str(e)}")
         return None
 
 
