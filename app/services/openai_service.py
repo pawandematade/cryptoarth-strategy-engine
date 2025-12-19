@@ -62,6 +62,10 @@ def generate_strategy(user_prompt: str, symbol: str = "BTCUSD") -> Optional[Dict
         system_prompt = """You are an expert trading strategy builder for cryptocurrency markets. 
 Your task is to convert user's natural language trading strategy descriptions into structured JSON format.
 
+CRITICAL: You MUST capture ALL conditions and requirements mentioned in the user's prompt. 
+Different descriptions MUST result in different strategy structures, even if they seem similar.
+Pay close attention to additional conditions like "candle close", "high break", "wait", "after", etc.
+
 The strategy format should be:
 {
     "symbol": "BTCUSD",
@@ -74,6 +78,10 @@ The strategy format should be:
         // For SuperTrend: {"period": 7, "multiplier": 3}
         // For Moving Average: {"period": 20, "type": "SMA" | "EMA"}
         // For RSI: {"period": 14, "oversold": 30, "overbought": 70}
+        // Additional conditions can be stored here:
+        // "wait_candle_close": true/false - wait for candle to close before executing
+        // "require_high_break": true/false - require high to break before taking trade
+        // "entry_condition": "crossover" | "candle_close" | "high_break" - specific entry condition
     }
 }
 
@@ -88,25 +96,31 @@ Supported condition types:
 - "macd": MACD indicator strategy
 - "bollinger_bands": Bollinger Bands strategy
 
-Examples:
+Examples showing how to capture DIFFERENT conditions:
 - "EMA 9 cross above 21 EMA buy and EMA 9 cross below 21 EMA sell, TP 1% SL 1%" -> 
   {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}}
+
+- "EMA 9 cross above 21 EMA buy and EMA 9 cross below 21 EMA sell once cross over candle close and close candle high break then take trade" -> 
+  {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1, "wait_candle_close": true, "require_high_break": true, "entry_condition": "candle_close_high_break"}}
+
 - "9 and 21 EMA crossover strategy with 1% TP and 1% SL" -> 
   {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}}
-- "EMA 9 21 crossover" -> 
-  {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}}
-- "9 EMA cross 21 EMA" -> 
-  {"type": "ema_crossover", "value": null, "parameters": {"ema_fast": 9, "ema_slow": 21, "tp_percent": 1, "sl_percent": 1}}
+
 - "Buy when BTC price goes above 90000" -> {"type": "price_above", "value": 90000}
 - "Super trend 7 3" or "supertrend 7 3" -> {"type": "supertrend", "value": null, "parameters": {"period": 7, "multiplier": 3}}
 - "Sell when price drops below 85000" -> {"type": "price_below", "value": 85000}
 
-IMPORTANT: 
-- For EMA Crossover: Extract fast EMA period, slow EMA period, TP percentage, and SL percentage from the prompt
-- For SuperTrend: Extract period and multiplier from the prompt (e.g., "7 3" means period=7, multiplier=3)
-- Always include the "parameters" field for indicator-based strategies
-- TP and SL percentages should be extracted and included in parameters
-- Return ONLY valid JSON, no additional text or explanation."""
+IMPORTANT RULES:
+1. ALWAYS capture ALL conditions mentioned in the user prompt - do not ignore any part
+2. If user mentions "candle close", "wait for candle close", "after candle close" - add "wait_candle_close": true
+3. If user mentions "high break", "break high", "candle high break" - add "require_high_break": true
+4. If user mentions both "candle close" AND "high break" - add both conditions
+5. Different prompts MUST result in different parameter structures
+6. For EMA Crossover: Extract fast EMA period, slow EMA period, TP percentage, and SL percentage from the prompt
+7. For SuperTrend: Extract period and multiplier from the prompt (e.g., "7 3" means period=7, multiplier=3)
+8. Always include the "parameters" field for indicator-based strategies
+9. TP and SL percentages should be extracted and included in parameters
+10. Return ONLY valid JSON, no additional text or explanation."""
 
         # User prompt with context
         user_message = f"""Convert this trading strategy into the JSON format:
@@ -135,7 +149,11 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
         
         # Extract and parse the response
         content = response.choices[0].message.content.strip()
-        logger.info(f"OpenAI response: {content}")
+        logger.info("=" * 80)
+        logger.info("🤖 OPENAI RESPONSE RECEIVED")
+        logger.info(f"Response Content: {content}")
+        logger.info(f"Response Length: {len(content)}")
+        logger.info("=" * 80)
         
         # Try to extract JSON from the response (in case there's extra text)
         # First, try direct parsing
