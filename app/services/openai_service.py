@@ -122,12 +122,25 @@ IMPORTANT RULES:
 9. TP and SL percentages should be extracted and included in parameters
 10. Return ONLY valid JSON, no additional text or explanation."""
 
-        # User prompt with context
-        user_message = f"""Convert this trading strategy into the JSON format:
+        # User prompt with context - emphasize capturing ALL conditions
+        # CRITICAL: Use the EXACT user_prompt passed to this function - do not modify it
+        user_message = f"""Convert this trading strategy into the JSON format. 
+IMPORTANT: Capture EVERY condition and requirement mentioned in the description below.
+CRITICAL: Use the EXACT description provided - do not simplify or modify it.
+
 Symbol: {symbol}
 Strategy description: {user_prompt}
 
-Return only the JSON object with 'symbol' and 'condition' fields."""
+CRITICAL INSTRUCTIONS:
+1. If the description mentions conditions like "candle close", "wait", "high break", "after", "once", etc., 
+   you MUST include these in the parameters object as additional fields.
+2. Different descriptions MUST result in different parameter structures.
+3. If description says "once cross over candle close and close candle high break then take trade" - 
+   add "wait_candle_close": true, "require_high_break": true, "entry_condition": "candle_close_high_break"
+4. If description is simple like "EMA 9 cross above 21 EMA buy" - do NOT add candle close or high break conditions.
+5. Pay attention to EVERY word in the description - they all matter.
+
+Return only the JSON object with 'symbol' and 'condition' fields. Include ALL conditions from the description."""
 
         # Call OpenAI API
         # Note: response_format only works with certain models (gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106+)
