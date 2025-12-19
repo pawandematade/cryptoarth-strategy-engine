@@ -214,68 +214,109 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             )
         
         # All trading rules come from OpenAI response based on the prompt
-        # No overrides - we trust OpenAI to extract all parameters from the prompt
+        # Strategy uses unified schema: symbol, strategy_type, logic, risk, meta
         if strategy:
-            # CRITICAL: Final normalization - ensure condition.value is removed
-            if strategy.get('condition') and 'value' in strategy.get('condition', {}):
-                del strategy['condition']['value']
-                logger.info("Removed condition.value from final response")
-            
             # CRITICAL: Remove userParams if it exists (security violation)
             # userParams contains frontend request data and must NEVER be in strategy object
             if 'userParams' in strategy:
                 del strategy['userParams']
                 logger.warning("⚠️ Removed userParams from strategy object (security violation)")
             
-            # CRITICAL: Ensure single source of truth for parameters
-            # Both condition.parameters and root parameters should reference the same object
-            condition = strategy.get('condition', {})
-            if condition and 'parameters' in condition:
-                # Use condition.parameters as source of truth
-                params = condition['parameters']
-                strategy['parameters'] = params
-                # Ensure both reference the same object (no duplication)
-                strategy['condition']['parameters'] = params
-            elif 'parameters' in strategy:
-                # If only root parameters exist, sync to condition
-                params = strategy['parameters']
-                if condition:
-                    condition['parameters'] = params
-                    strategy['condition'] = condition
+            # CRITICAL: Remove old schema fields if present (condition, parameters, sell_condition)
+            # These should have been transformed to unified schema, but remove if still present
+            old_schema_fields = ['condition', 'parameters', 'sell_condition']
+            for field in old_schema_fields:
+                if field in strategy:
+                    del strategy[field]
+                    logger.warning(f"⚠️ Removed old schema field '{field}' from strategy")
             
-            # CRITICAL: Final validation - strategy must contain ONLY AI-generated data
-            # Allowed fields: symbol, condition, parameters
-            # Forbidden fields: userParams, prompt, chart_type, timeframe (from request)
-            allowed_strategy_fields = {'symbol', 'condition', 'parameters'}
+            # CRITICAL: Validate unified schema structure
+            # REQUIRED sections: symbol, strategy_type, logic, risk, meta
+            # DO NOT remove these required sections - only remove forbidden fields
+            
+            # Check for required sections
+            required_sections = {'symbol', 'strategy_type', 'logic', 'risk', 'meta'}
+            missing_sections = required_sections - set(strategy.keys())
+            if missing_sections:
+                logger.error(f"❌ CRITICAL ERROR: Strategy missing required sections: {missing_sections}")
+                raise ValueError(f"Strategy must contain all required sections: {required_sections}. Missing: {missing_sections}")
+            
+            # Validate logic section
+            logic = strategy.get('logic', {})
+            if not logic:
+                logger.error("❌ CRITICAL ERROR: logic section is empty")
+                raise ValueError("Strategy logic section must not be empty")
+            
+            # Validate logic.emas array exists and is non-empty
+            if 'emas' not in logic or not isinstance(logic.get('emas'), list) or len(logic.get('emas', [])) == 0:
+                logger.error("❌ CRITICAL ERROR: logic.emas array is missing or empty")
+                raise ValueError("Strategy logic must contain non-empty 'emas' array")
+            
+            # Validate entry structure
+            if 'entry' not in logic:
+                logger.error("❌ CRITICAL ERROR: logic.entry section is missing")
+                raise ValueError("Strategy logic must contain 'entry' section")
+            if 'buy' not in logic.get('entry', {}) or 'sell' not in logic.get('entry', {}):
+                logger.error("❌ CRITICAL ERROR: logic.entry must contain both 'buy' and 'sell'")
+                raise ValueError("Strategy entry must contain both 'buy' and 'sell' sections")
+            
+            # CRITICAL: Remove ONLY forbidden fields from root level, NOT required sections
+            # Forbidden fields: userParams, prompt, chart_type (outside meta), timeframe (outside meta), condition, parameters, ema_fast, ema_slow
+            allowed_strategy_fields = {'symbol', 'strategy_type', 'logic', 'risk', 'meta'}
             strategy_keys = set(strategy.keys())
             forbidden_fields = strategy_keys - allowed_strategy_fields
             
             if forbidden_fields:
-                logger.error(f"❌ SECURITY VIOLATION: Strategy contains forbidden fields: {forbidden_fields}")
-                # Remove all forbidden fields
+                logger.warning(f"⚠️ Removing forbidden fields: {forbidden_fields}")
+                # Remove only forbidden fields (not required sections)
                 for field in forbidden_fields:
-                    del strategy[field]
-                    logger.warning(f"⚠️ Removed forbidden field '{field}' from strategy object")
+                    if field not in required_sections:  # Double check - don't remove required sections
+                        del strategy[field]
+                        logger.warning(f"⚠️ Removed forbidden field '{field}' from strategy object")
             
-            logger.info(f"✅ Using OpenAI response parameters (from prompt)")
+            # CRITICAL: Remove forbidden fields from logic section (ema_fast, ema_slow, timeframe, chart_type)
+            logic = strategy.get('logic', {})
+            forbidden_logic_fields = ['ema_fast', 'ema_slow', 'timeframe', 'chart_type', 'condition', 'sell_condition', 'parameters']
+            for field in forbidden_logic_fields:
+                if field in logic:
+                    del logic[field]
+                    logger.warning(f"⚠️ Removed forbidden field '{field}' from logic section")
+            
+            # CRITICAL: Ensure timeframe and chart_type are in meta, not logic
+            if 'timeframe' in logic:
+                if 'timeframe' not in strategy.get('meta', {}):
+                    strategy.setdefault('meta', {})['timeframe'] = logic['timeframe']
+                del logic['timeframe']
+            if 'chart_type' in logic:
+                if 'chart_type' not in strategy.get('meta', {}):
+                    strategy.setdefault('meta', {})['chart_type'] = logic['chart_type']
+                del logic['chart_type']
+            
+            logger.info(f"✅ Using OpenAI response with unified schema (logic, risk, meta)")
             
             # CRITICAL: Do NOT include request payload data in response
             # Request payload (prompt, symbol, timeframe, chart_type, take_profit, stop_loss, etc.) is INTERNAL ONLY
-            # Response contains ONLY the parsed strategy from OpenAI (symbol, condition, parameters)
+            # Response contains ONLY the parsed strategy from OpenAI (symbol, strategy_type, logic, risk, meta)
             # No userParams, no request data, no builder/internal fields
-            # Condition must contain ONLY: type and parameters (no value field)
             
-            # Final check: Verify strategy structure is clean
+            # Final check: Verify strategy has all required sections
             final_strategy_keys = set(strategy.keys())
             if 'userParams' in final_strategy_keys:
                 raise ValueError("CRITICAL ERROR: userParams still present in strategy after cleanup")
-            if not final_strategy_keys.issubset(allowed_strategy_fields):
-                raise ValueError(f"CRITICAL ERROR: Strategy contains unexpected fields: {final_strategy_keys - allowed_strategy_fields}")
             
-            # Log final strategy parameters (for debugging only - not in response)
+            # Verify required sections are present
+            if not required_sections.issubset(final_strategy_keys):
+                missing = required_sections - final_strategy_keys
+                raise ValueError(f"CRITICAL ERROR: Strategy missing required sections: {missing}")
+            
+            # Log final strategy structure (for debugging only - not in response)
             logger.info("=" * 80)
-            logger.info("📊 FINAL STRATEGY PARAMETERS:")
-            logger.info(f"{json.dumps(strategy.get('parameters', {}), indent=2)}")
+            logger.info("📊 FINAL STRATEGY STRUCTURE (Unified Schema):")
+            logger.info(f"Symbol: {strategy.get('symbol')}")
+            logger.info(f"Strategy Type: {strategy.get('strategy_type')}")
+            logger.info(f"EMAs: {strategy.get('logic', {}).get('emas', [])}")
+            logger.info(f"Risk: {json.dumps(strategy.get('risk', {}), indent=2)}")
+            logger.info(f"Meta: {json.dumps(strategy.get('meta', {}), indent=2)}")
             logger.info("=" * 80)
         
         # NO DATABASE STORAGE - Runtime only
