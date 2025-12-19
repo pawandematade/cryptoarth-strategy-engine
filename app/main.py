@@ -6,6 +6,7 @@ from app.api.routes_history import router as history_router
 from app.api.routes_ai_strategy import router as ai_strategy_router
 from app.api.routes_secure_ai import router as secure_ai_router
 from app.api.routes_strategy import router as strategy_router
+from app.api.routes_strategy_performance import router as strategy_performance_router
 from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
 from app.api.routes_websocket import router as websocket_router
@@ -69,6 +70,7 @@ app.include_router(history_router, prefix="/auth")
 app.include_router(ai_strategy_router, prefix="/auth")
 app.include_router(secure_ai_router, prefix="/auth")  # Secure AI strategy generation
 app.include_router(strategy_router, prefix="/auth")  # Strategy performance metrics
+app.include_router(strategy_performance_router, prefix="/auth")  # Strategy performance API
 app.include_router(credits_router, prefix="/auth")  # Credits management
 app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
 app.include_router(websocket_router, prefix="/auth")  # WebSocket for live prices
