@@ -101,12 +101,12 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
         # FINAL VALIDATION: Ensure no user-provided fields leak into API call
         # api_params contains ONLY:
         # - model (required by OpenAI API)
-        # - messages (required by OpenAI API - contains system prompt + user message with merged prompt)
+        # - messages (required by OpenAI API - contains ONLY user message with merged prompt)
         # - temperature (optional OpenAI parameter)
         # - response_format (optional OpenAI parameter)
         # 
         # CRITICAL: NO symbol, timeframe, chart_type, take_profit, stop_loss fields
-        # All these are embedded in the merged prompt string within user_message
+        # All these are embedded in the merged prompt string (user_prompt)
         
         # Validate that api_params doesn't contain any user-provided fields
         forbidden_keys = ['symbol', 'timeframe', 'chart_type', 'take_profit', 'stop_loss', 'trailing_stop', 'prompt']
