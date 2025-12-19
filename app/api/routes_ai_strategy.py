@@ -110,9 +110,9 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         
         # Get current price from Redis if not provided
         current_price = request.current_price
-        if current_price is None:
+        if current_price is None and request.symbol:
             try:
-                price_key = f"PRICE:{request.symbol}"
+                price_key = f"PRICE:{request.symbol.strip().upper()}"
                 price_str = redis_client.get(price_key)
                 if price_str:
                     current_price = float(price_str)
@@ -120,95 +120,32 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             except Exception as e:
                 logger.warning(f"Could not retrieve current price from Redis: {e}")
         
-        # CRITICAL: Create a STRUCTURED prompt that includes ALL payload parameters
-        # OpenAI needs to see ALL parameters clearly, not just appended to description
-        original_prompt = request.prompt.strip()
-        
-        logger.info(f"📝 Original User Prompt: {original_prompt}")
-        logger.info(f"📝 Original Prompt Length: {len(original_prompt)}")
-        
-        # Build a structured prompt that clearly separates description from parameters
-        # This format makes it crystal clear to OpenAI what parameters to use
-        structured_prompt_parts = []
-        structured_prompt_parts.append(f"Strategy Description: {original_prompt}")
-        
-        # Add all parameters in a clear, structured format
-        if request.symbol:
-            structured_prompt_parts.append(f"Symbol: {request.symbol.strip().upper()}")
-            logger.info(f"📝 Parameter - Symbol: {request.symbol.strip().upper()}")
-        
-        if request.timeframe:
-            structured_prompt_parts.append(f"Timeframe: {request.timeframe}")
-            logger.info(f"📝 Parameter - Timeframe: {request.timeframe}")
-        
-        if request.chart_type:
-            chart_type_name = "Heikin Ashi" if request.chart_type == "heikin_ashi" else "Candles"
-            structured_prompt_parts.append(f"Chart Type: {chart_type_name}")
-            logger.info(f"📝 Parameter - Chart Type: {chart_type_name}")
-        
-        if request.take_profit and request.take_profit.get('value'):
-            tp_type = request.take_profit.get('type', 'percent')
-            tp_value = request.take_profit.get('value')
-            if tp_type == 'percent':
-                structured_prompt_parts.append(f"Take Profit: {tp_value}% (percentage)")
-            else:
-                structured_prompt_parts.append(f"Take Profit: {tp_value} points")
-            logger.info(f"📝 Parameter - Take Profit: {tp_value} {tp_type}")
-        
-        if request.stop_loss and request.stop_loss.get('value'):
-            sl_type = request.stop_loss.get('type', 'percent')
-            sl_value = request.stop_loss.get('value')
-            if sl_type == 'percent':
-                structured_prompt_parts.append(f"Stop Loss: {sl_value}% (percentage)")
-            else:
-                structured_prompt_parts.append(f"Stop Loss: {sl_value} points")
-            logger.info(f"📝 Parameter - Stop Loss: {sl_value} {sl_type}")
-        
-        if request.trailing_stop and request.trailing_stop.get('enabled') and request.trailing_stop.get('value'):
-            tr_type = request.trailing_stop.get('type', 'percent')
-            tr_value = request.trailing_stop.get('value')
-            if tr_type == 'percent':
-                structured_prompt_parts.append(f"Trailing Stop: {tr_value}% (percentage)")
-            else:
-                structured_prompt_parts.append(f"Trailing Stop: {tr_value} points")
-            logger.info(f"📝 Parameter - Trailing Stop: {tr_value} {tr_type}")
-        
-        # Create the final structured prompt
-        enhanced_prompt = "\n".join(structured_prompt_parts)
-        
-        # Log the final structured prompt
-        logger.info("=" * 80)
-        logger.info(f"📝 FINAL STRUCTURED PROMPT (with ALL parameters):")
-        logger.info(enhanced_prompt)
-        logger.info(f"📝 Enhanced Prompt Length: {len(enhanced_prompt)}")
-        logger.info("=" * 80)
+        # CRITICAL: Use PromptBuilder to convert payload to single prompt string
+        # All trading rules must exist ONLY inside the generated prompt
+        try:
+            final_prompt = build_prompt(
+                strategy_description=request.prompt.strip(),
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                chart_type=request.chart_type,
+                take_profit=request.take_profit,
+                stop_loss=request.stop_loss,
+                trailing_stop=request.trailing_stop,
+                current_price=current_price,
+                market_context=request.market_context
+            )
+        except ValueError as e:
+            logger.error(f"❌ PromptBuilder validation failed: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
         
         # Generate strategy using OpenAI
+        # IMPORTANT: We send ONLY { "prompt": "..." } to OpenAI
         try:
-            logger.info("🤖 Calling OpenAI service to generate strategy...")
-            logger.info(f"📝 Request ID: {request.request_id}")
-            logger.info(f"📝 Timestamp: {request.timestamp}")
-            logger.info(f"📝 Sending to OpenAI - Original Prompt: {request.prompt}")
-            logger.info(f"📝 Sending to OpenAI - Enhanced Prompt: {enhanced_prompt}")
-            logger.info(f"📝 Enhanced Prompt Hash (first 200 chars): {enhanced_prompt[:200]}")
+            logger.info("🤖 Calling OpenAI service with prompt-only payload...")
+            logger.info(f"📝 Final Prompt (first 200 chars): {final_prompt[:200]}...")
             
-            # Log prompt comparison if this is not the first request
-            # This helps identify if same prompt is being sent
-            logger.info(f"📝 Full Enhanced Prompt Length: {len(enhanced_prompt)}")
-            logger.info(f"📝 Enhanced Prompt (FULL): {enhanced_prompt}")
-            
-            if current_price or request.market_context:
-                strategy = generate_strategy_with_context(
-                    user_prompt=enhanced_prompt,  # Use enhanced prompt with all parameters
-                    symbol=request.symbol.strip().upper(),
-                    current_price=current_price,
-                    market_context=request.market_context
-                )
-            else:
-                strategy = generate_strategy(
-                    user_prompt=enhanced_prompt,  # Use enhanced prompt with all parameters
-                    symbol=request.symbol.strip().upper()
-                )
+            # Call OpenAI with ONLY the prompt string
+            strategy = generate_strategy(user_prompt=final_prompt)
             
             logger.info(f"✅ Strategy generated successfully")
             logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
@@ -217,14 +154,6 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             # Log parameters to verify all conditions are captured
             if strategy and strategy.get('parameters'):
                 logger.info(f"Strategy Parameters: {json.dumps(strategy.get('parameters'), indent=2)}")
-                # Check if additional conditions are present
-                params = strategy.get('parameters', {})
-                if params.get('wait_candle_close'):
-                    logger.info("✅ Candle close condition detected in parameters")
-                if params.get('require_high_break'):
-                    logger.info("✅ High break condition detected in parameters")
-                if params.get('entry_condition'):
-                    logger.info(f"✅ Entry condition: {params.get('entry_condition')}")
         except Exception as e:
             logger.error(f"Error generating strategy: {e}", exc_info=True)
             error_msg = str(e)
@@ -259,72 +188,21 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                 message="Failed to generate strategy. Please check server logs for details. Possible issues: Invalid API key, network error, or OpenAI service unavailable."
             )
         
-        # CRITICAL: Merge user-provided TP/SL into strategy parameters
-        # This ensures user's TP/SL values override any defaults or OpenAI response
+        # All trading rules come from OpenAI response based on the prompt
+        # No overrides - we trust OpenAI to extract all parameters from the prompt
         if strategy:
+            # Normalize parameters structure (ensure they're accessible)
             params = strategy.get('parameters', {})
             condition_params = strategy.get('condition', {}).get('parameters', {})
             if condition_params:
                 params.update(condition_params)
             
-            # CRITICAL: Always use user-provided TP/SL from request (they override OpenAI response)
-            # This ensures the strategy uses the exact values from the payload
-            if request.take_profit and request.take_profit.get('value'):
-                tp_type = request.take_profit.get('type', 'percent')
-                tp_value = request.take_profit.get('value')
-                # Remove any existing TP values from OpenAI response
-                params.pop('tp_percent', None)
-                params.pop('tp_point', None)
-                params.pop('tp', None)
-                # Set the user-provided TP
-                if tp_type == 'percent':
-                    params['tp_percent'] = tp_value
-                    params['tp'] = tp_value  # Also set tp for compatibility
-                    logger.info(f"✅ OVERRIDING with user-provided TP: {tp_value}%")
-                else:  # point
-                    params['tp_point'] = tp_value
-                    params['tp'] = tp_value
-                    logger.info(f"✅ OVERRIDING with user-provided TP: {tp_value} points")
-            else:
-                logger.info("⚠️ No user-provided TP - using OpenAI response or defaults")
-            
-            if request.stop_loss and request.stop_loss.get('value'):
-                sl_type = request.stop_loss.get('type', 'percent')
-                sl_value = request.stop_loss.get('value')
-                # Remove any existing SL values from OpenAI response
-                params.pop('sl_percent', None)
-                params.pop('sl_point', None)
-                params.pop('sl', None)
-                # Set the user-provided SL
-                if sl_type == 'percent':
-                    params['sl_percent'] = sl_value
-                    params['sl'] = sl_value  # Also set sl for compatibility
-                    logger.info(f"✅ OVERRIDING with user-provided SL: {sl_value}%")
-                else:  # point
-                    params['sl_point'] = sl_value
-                    params['sl'] = sl_value
-                    logger.info(f"✅ OVERRIDING with user-provided SL: {sl_value} points")
-            else:
-                logger.info("⚠️ No user-provided SL - using OpenAI response or defaults")
-            
-            # Also ensure symbol matches the request
-            if request.symbol:
-                strategy['symbol'] = request.symbol.strip().upper()
-                logger.info(f"✅ Using user-provided Symbol: {strategy['symbol']}")
-            
-            # Update strategy with merged parameters
+            # Update strategy with normalized parameters
             strategy['parameters'] = params
             if strategy.get('condition'):
                 strategy['condition']['parameters'] = params
             
-            # Also create risk object for compatibility
-            if request.take_profit or request.stop_loss:
-                strategy['risk'] = {}
-                if request.take_profit:
-                    strategy['risk']['take_profit'] = request.take_profit
-                if request.stop_loss:
-                    strategy['risk']['stop_loss'] = request.stop_loss
-                logger.info(f"✅ Risk object created with user TP/SL")
+            logger.info(f"✅ Using OpenAI response parameters (from prompt)")
             
             # Add user parameters to strategy for frontend display (runtime only - not stored)
             strategy['userParams'] = {
