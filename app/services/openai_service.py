@@ -197,49 +197,36 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
         # The user_message contains the complete merged prompt with all parameters
         # No other fields (symbol, timeframe, etc.) are sent separately
         
-        logger.info("=" * 80)
-        logger.info("📤 OPENAI API CALL - Payload Structure:")
-        logger.info(f"  Model: {OPENAI_MODEL}")
-        logger.info(f"  System Prompt: [Contains instructions]")
-        logger.info(f"  User Message: [Contains ONLY the merged prompt string]")
-        logger.info(f"  User Prompt Content: {user_prompt[:200]}...")
-        logger.info("  ✅ NO other fields sent (no symbol, timeframe, etc. as separate fields)")
-        logger.info("=" * 80)
+        # OpenAI API requires model + messages structure
+        # We send ONLY the merged prompt string in the user message
+        # The request body contains: model, messages (system + user prompt), temperature, response_format
+        # NO other user-provided fields (symbol, timeframe, chart_type, take_profit, stop_loss) are sent
         
-        # Call OpenAI API
-        # Note: response_format only works with certain models (gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106+)
-        # For other models, we'll parse the JSON from the response text
         api_params = {
             "model": OPENAI_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}  # ONLY the prompt string
+                {"role": "user", "content": user_message}  # ONLY the merged prompt string
             ],
-            "temperature": 0.8,  # Higher temperature to ensure different responses for different prompts
+            "temperature": 0.8,
         }
         
         # Only add response_format for compatible models
         if "gpt-4" in OPENAI_MODEL or "gpt-3.5-turbo" in OPENAI_MODEL:
             api_params["response_format"] = {"type": "json_object"}
         
-        # FINAL VALIDATION: Ensure we're only sending prompt
-        # api_params contains ONLY: model, messages (system + user prompt), temperature, response_format
+        # FINAL CHECK: api_params contains ONLY OpenAI-required fields
+        # - model (required by OpenAI)
+        # - messages (required by OpenAI, contains system prompt + user prompt)
+        # - temperature (optional)
+        # - response_format (optional, for JSON mode)
         # NO symbol, timeframe, chart_type, take_profit, stop_loss fields
-        logger.info("📤 Final OpenAI API params keys:", list(api_params.keys()))
-        logger.info("📤 Messages structure: system prompt + user prompt (merged string)")
         
         response = client.chat.completions.create(**api_params)
         
         # Extract and parse the response
         content = response.choices[0].message.content.strip()
-        logger.info("=" * 80)
-        logger.info("🤖 OPENAI RESPONSE RECEIVED")
-        logger.info(f"Response Content (FULL): {content}")
-        logger.info(f"Response Length: {len(content)}")
-        logger.info(f"Response Hash (first 200 chars): {content[:200]}")
-        logger.info(f"Model Used: {OPENAI_MODEL}")
-        logger.info(f"Temperature Used: 0.8")
-        logger.info("=" * 80)
+        logger.info("✅ OpenAI response received")
         
         # Try to extract JSON from the response (in case there's extra text)
         # First, try direct parsing

@@ -142,16 +142,12 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         # We send ONLY the merged prompt string - no other fields
         # The prompt contains: user description + symbol + timeframe + chart_type + take_profit + stop_loss + trailing_stop
         try:
-            logger.info("=" * 80)
-            logger.info("🤖 CALLING OPENAI - PROMPT ONLY")
-            logger.info(f"📝 Merged Prompt (complete): {final_prompt}")
-            logger.info(f"📝 Prompt Length: {len(final_prompt)}")
-            logger.info("✅ Sending ONLY prompt string to OpenAI")
-            logger.info("✅ NO other fields (symbol, timeframe, etc.) sent separately")
-            logger.info("=" * 80)
+            logger.info("🤖 Calling OpenAI with merged prompt (all parameters embedded)")
             
             # Call OpenAI with ONLY the merged prompt string
             # generate_strategy() receives only the prompt and sends it to OpenAI
+            # OpenAI API requires model + messages, but we only send the prompt in user message
+            # No other fields (symbol, timeframe, etc.) are sent separately
             strategy = generate_strategy(user_prompt=final_prompt)
             
             logger.info(f"✅ Strategy generated successfully")

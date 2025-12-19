@@ -101,10 +101,7 @@ def build_prompt(
     # Join all parts into a single prompt string
     final_prompt = ". ".join(prompt_parts) + "."
     
-    logger.info("=" * 80)
-    logger.info("📝 PROMPT BUILDER - Generated Prompt:")
-    logger.info(final_prompt)
-    logger.info(f"📝 Prompt Length: {len(final_prompt)}")
-    logger.info("=" * 80)
+    # Do not log the final prompt (as per requirements)
+    logger.info("✅ Prompt built successfully (all parameters merged)")
     
     return final_prompt
