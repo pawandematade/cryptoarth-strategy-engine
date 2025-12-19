@@ -122,51 +122,40 @@ IMPORTANT RULES:
 9. TP and SL percentages should be extracted and included in parameters
 10. Return ONLY valid JSON, no additional text or explanation."""
 
-        # The user_prompt now contains a structured format with all parameters
-        # Format: "Strategy Description: ...\nSymbol: ...\nTimeframe: ...\nTake Profit: ...\nStop Loss: ..."
+        # The user_prompt now contains ALL parameters in a single line format
+        # Format: "make super trend strategy value 7 3. Symbol: BTCUSD. Timeframe: 15MIN. Chart Type: Candles. Take Profit: 2000 points. Stop Loss: 2000 points."
         
-        user_message = f"""Convert this trading strategy into the JSON format.
-CRITICAL: The input below contains BOTH the strategy description AND all trading parameters.
-YOU MUST use ALL the parameters provided, not just the description.
+        user_message = f"""Convert this complete trading strategy description into JSON format.
+The description below contains the strategy logic AND all trading parameters in a single line.
+YOU MUST extract and use ALL parameters mentioned in the description.
 
 Request ID: {unique_id}
 
+Complete Strategy Description (all parameters included):
 {user_prompt}
 
-MANDATORY INSTRUCTIONS - YOU MUST FOLLOW THESE:
-1. Extract the strategy type from "Strategy Description:" line (e.g., EMA crossover, SuperTrend, etc.)
-2. Extract Symbol from "Symbol:" line - USE THIS EXACT SYMBOL in your response
-3. If "Timeframe:" is provided, note it (important context for the strategy)
-4. If "Chart Type:" is provided, note it (important context)
-5. If "Take Profit:" is provided, you MUST include it in parameters:
-   - If it says "points" → add "tp_point": [value] to parameters
-   - If it says "percentage" or "%" → add "tp_percent": [value] to parameters
-   - Example: "Take Profit: 2000 points" → "tp_point": 2000
-   - Example: "Take Profit: 1%" → "tp_percent": 1
-6. If "Stop Loss:" is provided, you MUST include it in parameters:
-   - If it says "points" → add "sl_point": [value] to parameters
-   - If it says "percentage" or "%" → add "sl_percent": [value] to parameters
-   - Example: "Stop Loss: 2000 points" → "sl_point": 2000
-   - Example: "Stop Loss: 1%" → "sl_percent": 1
-7. If "Trailing Stop:" is provided, include it similarly
-8. If "Strategy Description:" contains "candle close" or "high break" or "once", add:
+MANDATORY EXTRACTION RULES:
+1. Extract strategy type from the description (e.g., "make super trend" → supertrend, "EMA 9 cross" → ema_crossover)
+2. Extract Symbol if mentioned (e.g., "Symbol: BTCUSD" → use "BTCUSD")
+3. Extract Timeframe if mentioned (e.g., "Timeframe: 15MIN" → note it)
+4. Extract Chart Type if mentioned (e.g., "Chart Type: Candles" → note it)
+5. Extract Take Profit:
+   - "Take Profit: 2000 points" → add "tp_point": 2000 to parameters
+   - "Take Profit: 1%" → add "tp_percent": 1 to parameters
+6. Extract Stop Loss:
+   - "Stop Loss: 2000 points" → add "sl_point": 2000 to parameters
+   - "Stop Loss: 1%" → add "sl_percent": 1 to parameters
+7. Extract strategy-specific parameters:
+   - "value 7 3" or "period 7 multiplier 3" → period=7, multiplier=3
+   - "EMA 9 21" → ema_fast=9, ema_slow=21
+8. If description contains "candle close" or "high break" or "once", add:
    - "wait_candle_close": true (if candle close mentioned)
    - "require_high_break": true (if high break mentioned)
    - "entry_condition": "candle_close_high_break" (if both mentioned)
-9. For SuperTrend: Extract period and multiplier EXACTLY as mentioned
-   - "value 7 3" → period=7, multiplier=3
-   - "value 10 2" → period=10, multiplier=2
-10. Different inputs MUST result in DIFFERENT parameter structures
 
-EXAMPLE INPUT:
-Strategy Description: make super trend strategy value 7 3
-Symbol: BTCUSD
-Timeframe: 15MIN
-Chart Type: Candles
-Take Profit: 2000 points
-Stop Loss: 2000 points
-
-EXAMPLE OUTPUT:
+EXAMPLE 1 - SuperTrend with all parameters:
+Input: "make super trend strategy value 7 3. Symbol: BTCUSD. Timeframe: 15MIN. Chart Type: Candles. Take Profit: 2000 points. Stop Loss: 2000 points."
+Output:
 {{
   "symbol": "BTCUSD",
   "condition": {{
@@ -180,9 +169,30 @@ EXAMPLE OUTPUT:
   }}
 }}
 
-CRITICAL: If parameters are provided (TP, SL, Symbol, Timeframe), you MUST include them in your response.
-DO NOT ignore any parameters - they are part of the complete strategy requirements.
-Return only the JSON object with 'symbol' and 'condition' fields."""
+EXAMPLE 2 - EMA Crossover with all parameters:
+Input: "EMA 9 cross above 21 EMA buy and EMA 9 cross below 21 EMA sell. Symbol: BTCUSD. Timeframe: 1H. Take Profit: 2%. Stop Loss: 1%."
+Output:
+{{
+  "symbol": "BTCUSD",
+  "condition": {{
+    "type": "ema_crossover",
+    "parameters": {{
+      "ema_fast": 9,
+      "ema_slow": 21,
+      "tp_percent": 2,
+      "sl_percent": 1
+    }}
+  }}
+}}
+
+CRITICAL: 
+- Extract EVERY parameter mentioned in the description
+- Include ALL parameters in the response JSON
+- Use the exact values provided (2000 points, 1%, etc.)
+- DO NOT use default values if specific values are provided
+- Different descriptions MUST result in different parameter structures
+
+Return only the JSON object with 'symbol' and 'condition' fields. Include ALL extracted parameters."""
 
         # Call OpenAI API
         # Note: response_format only works with certain models (gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106+)
