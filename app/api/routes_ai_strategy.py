@@ -179,7 +179,7 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         try:
             logger.info("🤖 Calling OpenAI service to generate strategy...")
             logger.info(f"📝 Request ID: {request.request_id}")
-            logger.info(f"📝 Timestamp: {request._timestamp}")
+            logger.info(f"📝 Timestamp: {request.timestamp}")
             logger.info(f"📝 Sending to OpenAI - Original Prompt: {request.prompt}")
             logger.info(f"📝 Sending to OpenAI - Enhanced Prompt: {enhanced_prompt}")
             logger.info(f"📝 Enhanced Prompt Hash (first 200 chars): {enhanced_prompt[:200]}")
