@@ -125,18 +125,21 @@ IMPORTANT RULES:
 9. TP and SL percentages should be extracted and included in parameters
 10. Return ONLY valid JSON, no additional text or explanation."""
 
-        # The user_prompt now contains a structured format with all parameters
-        # Format: "Strategy Description: ...\nSymbol: ...\nTimeframe: ...\nTake Profit: ...\nStop Loss: ..."
+        # CRITICAL: user_prompt contains ALL parameters merged into ONE string
+        # Format: "strategy description. Symbol: BTCUSD. Timeframe: 15MIN. Chart Type: Candles. Take Profit: 2000 points. Stop Loss: 2000 points."
+        # OpenAI receives ONLY this prompt string - no other fields
         
         # Generate unique request ID for this call
         unique_id = str(uuid.uuid4())
         
-        user_message = f"""Convert this trading strategy into the JSON format.
-CRITICAL: The input below contains BOTH the strategy description AND all trading parameters.
-YOU MUST use ALL the parameters provided, not just the description.
+        # Build user message - the prompt contains EVERYTHING
+        user_message = f"""Convert this complete trading strategy description into JSON format.
+The description below contains the strategy logic AND all trading parameters in a single line.
+YOU MUST extract and use ALL parameters mentioned in the description.
 
 Request ID: {unique_id}
 
+Complete Strategy Description (all parameters included):
 {user_prompt}
 
 MANDATORY INSTRUCTIONS - YOU MUST FOLLOW THESE:
@@ -190,6 +193,19 @@ CRITICAL: If parameters are provided (TP, SL, Symbol, Timeframe), you MUST inclu
 DO NOT ignore any parameters - they are part of the complete strategy requirements.
 Return only the JSON object with 'symbol' and 'condition' fields."""
 
+        # CRITICAL: OpenAI API call - we send ONLY the prompt
+        # The user_message contains the complete merged prompt with all parameters
+        # No other fields (symbol, timeframe, etc.) are sent separately
+        
+        logger.info("=" * 80)
+        logger.info("📤 OPENAI API CALL - Payload Structure:")
+        logger.info(f"  Model: {OPENAI_MODEL}")
+        logger.info(f"  System Prompt: [Contains instructions]")
+        logger.info(f"  User Message: [Contains ONLY the merged prompt string]")
+        logger.info(f"  User Prompt Content: {user_prompt[:200]}...")
+        logger.info("  ✅ NO other fields sent (no symbol, timeframe, etc. as separate fields)")
+        logger.info("=" * 80)
+        
         # Call OpenAI API
         # Note: response_format only works with certain models (gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106+)
         # For other models, we'll parse the JSON from the response text
@@ -197,7 +213,7 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
             "model": OPENAI_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": user_message}  # ONLY the prompt string
             ],
             "temperature": 0.8,  # Higher temperature to ensure different responses for different prompts
         }
@@ -205,6 +221,12 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
         # Only add response_format for compatible models
         if "gpt-4" in OPENAI_MODEL or "gpt-3.5-turbo" in OPENAI_MODEL:
             api_params["response_format"] = {"type": "json_object"}
+        
+        # FINAL VALIDATION: Ensure we're only sending prompt
+        # api_params contains ONLY: model, messages (system + user prompt), temperature, response_format
+        # NO symbol, timeframe, chart_type, take_profit, stop_loss fields
+        logger.info("📤 Final OpenAI API params keys:", list(api_params.keys()))
+        logger.info("📤 Messages structure: system prompt + user prompt (merged string)")
         
         response = client.chat.completions.create(**api_params)
         
