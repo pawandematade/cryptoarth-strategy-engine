@@ -3,12 +3,16 @@ from pydantic import BaseModel, Field, ValidationError
 from typing import Optional, Dict, Any
 import logging
 import json
+import copy
+import pandas as pd
+from datetime import datetime, timedelta
 from app.services.openai_service import generate_strategy
 from app.services.backtest_service import run_backtest
 from app.services.prompt_builder import build_prompt
 from app.store.redis_client import redis_client
 from app.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
-from app.api.routes_strategy_performance import _run_backtest, _apply_brokerage_to_performance
+from app.engine.backtest_engine import BacktestEngine
+from app.feed.delta_history import fetch_ohlcv
 
 logger = logging.getLogger(__name__)
 
