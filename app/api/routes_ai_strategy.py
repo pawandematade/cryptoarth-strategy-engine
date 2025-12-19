@@ -221,6 +221,12 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                 del strategy['condition']['value']
                 logger.info("Removed condition.value from final response")
             
+            # CRITICAL: Remove userParams if it exists (security violation)
+            # userParams contains frontend request data and must NEVER be in strategy object
+            if 'userParams' in strategy:
+                del strategy['userParams']
+                logger.warning("⚠️ Removed userParams from strategy object (security violation)")
+            
             # CRITICAL: Ensure single source of truth for parameters
             # Both condition.parameters and root parameters should reference the same object
             condition = strategy.get('condition', {})
@@ -237,6 +243,20 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                     condition['parameters'] = params
                     strategy['condition'] = condition
             
+            # CRITICAL: Final validation - strategy must contain ONLY AI-generated data
+            # Allowed fields: symbol, condition, parameters
+            # Forbidden fields: userParams, prompt, chart_type, timeframe (from request)
+            allowed_strategy_fields = {'symbol', 'condition', 'parameters'}
+            strategy_keys = set(strategy.keys())
+            forbidden_fields = strategy_keys - allowed_strategy_fields
+            
+            if forbidden_fields:
+                logger.error(f"❌ SECURITY VIOLATION: Strategy contains forbidden fields: {forbidden_fields}")
+                # Remove all forbidden fields
+                for field in forbidden_fields:
+                    del strategy[field]
+                    logger.warning(f"⚠️ Removed forbidden field '{field}' from strategy object")
+            
             logger.info(f"✅ Using OpenAI response parameters (from prompt)")
             
             # CRITICAL: Do NOT include request payload data in response
@@ -244,6 +264,13 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             # Response contains ONLY the parsed strategy from OpenAI (symbol, condition, parameters)
             # No userParams, no request data, no builder/internal fields
             # Condition must contain ONLY: type and parameters (no value field)
+            
+            # Final check: Verify strategy structure is clean
+            final_strategy_keys = set(strategy.keys())
+            if 'userParams' in final_strategy_keys:
+                raise ValueError("CRITICAL ERROR: userParams still present in strategy after cleanup")
+            if not final_strategy_keys.issubset(allowed_strategy_fields):
+                raise ValueError(f"CRITICAL ERROR: Strategy contains unexpected fields: {final_strategy_keys - allowed_strategy_fields}")
             
             # Log final strategy parameters (for debugging only - not in response)
             logger.info("=" * 80)
