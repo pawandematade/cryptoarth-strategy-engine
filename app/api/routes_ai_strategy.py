@@ -283,26 +283,46 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         logger.info("✅ STRATEGY GENERATION COMPLETED SUCCESSFULLY (Runtime Only - No Storage)")
         logger.info(f"Strategy Type: {strategy.get('strategy_type') if strategy else 'None'}")
         
-        # FINAL SECURITY CHECK: Verify strategy contains ONLY allowed fields (unified schema)
+        # FINAL VALIDATION: Verify strategy contains all required sections (unified schema)
         if strategy:
+            # REQUIRED sections - must be present
+            required_sections = {'symbol', 'strategy_type', 'logic', 'risk', 'meta'}
             final_keys = set(strategy.keys())
+            
+            # Check for missing required sections
+            missing_sections = required_sections - final_keys
+            if missing_sections:
+                logger.error(f"❌ CRITICAL ERROR: Strategy missing required sections: {missing_sections}")
+                raise ValueError(f"Strategy must contain all required sections: {required_sections}. Missing: {missing_sections}")
+            
+            # Check for forbidden fields (but don't remove required sections)
             allowed = {'symbol', 'strategy_type', 'logic', 'risk', 'meta'}
-            if not final_keys.issubset(allowed):
-                logger.error(f"❌ SECURITY VIOLATION: Strategy contains unexpected fields: {final_keys - allowed}")
-                # Remove any remaining forbidden fields
-                for key in list(strategy.keys()):
-                    if key not in allowed:
+            forbidden_fields = final_keys - allowed
+            if forbidden_fields:
+                logger.warning(f"⚠️ Strategy contains unexpected fields: {forbidden_fields}")
+                # Remove only if not required
+                for key in list(forbidden_fields):
+                    if key not in required_sections:
                         del strategy[key]
                         logger.warning(f"⚠️ Removed forbidden field '{key}' from final strategy")
+            
             if 'userParams' in strategy:
                 raise ValueError("CRITICAL SECURITY ERROR: userParams found in final strategy object")
             
             # Final validation: Check for forbidden fields in logic section
             logic = strategy.get('logic', {})
+            if not logic:
+                raise ValueError("CRITICAL ERROR: logic section is empty")
             if 'ema_fast' in logic or 'ema_slow' in logic:
                 raise ValueError("CRITICAL ERROR: ema_fast or ema_slow found in logic section - use emas array instead")
             if 'timeframe' in logic or 'chart_type' in logic:
                 raise ValueError("CRITICAL ERROR: timeframe or chart_type found in logic section - must be in meta section")
+            
+            # Verify required sections are not empty
+            if not strategy.get('logic'):
+                raise ValueError("CRITICAL ERROR: logic section must not be empty")
+            if not isinstance(strategy.get('logic', {}).get('emas'), list) or len(strategy.get('logic', {}).get('emas', [])) == 0:
+                raise ValueError("CRITICAL ERROR: logic.emas must be a non-empty array")
         
         logger.info("=" * 80)
         
