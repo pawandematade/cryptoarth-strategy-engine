@@ -29,7 +29,7 @@ class AIStrategyRequest(BaseModel):
     trailing_stop: Optional[Dict[str, Any]] = Field(default=None, description="Trailing stop settings: {enabled: bool, type: 'percent'|'point', value: number}")
     # Cache-busting parameters (ignored but logged)
     request_id: Optional[str] = Field(default=None, description="Unique request ID for tracking")
-    _timestamp: Optional[int] = Field(default=None, description="Timestamp for cache-busting")
+    timestamp: Optional[int] = Field(default=None, description="Timestamp for cache-busting", alias="_timestamp")
     force_refresh: Optional[bool] = Field(default=False, description="Force refresh flag")
 
 
@@ -59,7 +59,7 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         logger.info("=" * 80)
         logger.info("🔄 NEW STRATEGY GENERATION REQUEST RECEIVED")
         logger.info(f"Request ID: {request.request_id}")
-        logger.info(f"Timestamp: {request._timestamp}")
+        logger.info(f"Timestamp: {request.timestamp}")
         logger.info(f"Force Refresh: {request.force_refresh}")
         logger.info(f"Prompt (first 100 chars): {request.prompt[:100] if request.prompt else 'None'}...")
         logger.info(f"Full Prompt: {request.prompt}")
@@ -112,66 +112,61 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             except Exception as e:
                 logger.warning(f"Could not retrieve current price from Redis: {e}")
         
-        # CRITICAL: Create a COMPREHENSIVE prompt that includes ALL payload parameters in a single, clear format
-        # OpenAI will build the complete strategy based on this enhanced prompt
+        # CRITICAL: Create a STRUCTURED prompt that includes ALL payload parameters
+        # OpenAI needs to see ALL parameters clearly, not just appended to description
         original_prompt = request.prompt.strip()
         
         logger.info(f"📝 Original User Prompt: {original_prompt}")
         logger.info(f"📝 Original Prompt Length: {len(original_prompt)}")
         
-        # Build a comprehensive prompt that includes ALL parameters in a natural language format
-        # Format: "Strategy description. Symbol: X. Timeframe: Y. Chart Type: Z. Take Profit: A points/%. Stop Loss: B points/%."
-        enhanced_prompt_parts = [original_prompt]
+        # Build a structured prompt that clearly separates description from parameters
+        # This format makes it crystal clear to OpenAI what parameters to use
+        structured_prompt_parts = []
+        structured_prompt_parts.append(f"Strategy Description: {original_prompt}")
         
-        # Add symbol
+        # Add all parameters in a clear, structured format
         if request.symbol:
-            symbol_upper = request.symbol.strip().upper()
-            enhanced_prompt_parts.append(f"Symbol: {symbol_upper}")
-            logger.info(f"📝 Adding to prompt - Symbol: {symbol_upper}")
+            structured_prompt_parts.append(f"Symbol: {request.symbol.strip().upper()}")
+            logger.info(f"📝 Parameter - Symbol: {request.symbol.strip().upper()}")
         
-        # Add timeframe
         if request.timeframe:
-            enhanced_prompt_parts.append(f"Timeframe: {request.timeframe}")
-            logger.info(f"📝 Adding to prompt - Timeframe: {request.timeframe}")
+            structured_prompt_parts.append(f"Timeframe: {request.timeframe}")
+            logger.info(f"📝 Parameter - Timeframe: {request.timeframe}")
         
-        # Add chart type
         if request.chart_type:
             chart_type_name = "Heikin Ashi" if request.chart_type == "heikin_ashi" else "Candles"
-            enhanced_prompt_parts.append(f"Chart Type: {chart_type_name}")
-            logger.info(f"📝 Adding to prompt - Chart Type: {chart_type_name}")
+            structured_prompt_parts.append(f"Chart Type: {chart_type_name}")
+            logger.info(f"📝 Parameter - Chart Type: {chart_type_name}")
         
-        # Add take profit
         if request.take_profit and request.take_profit.get('value'):
             tp_type = request.take_profit.get('type', 'percent')
             tp_value = request.take_profit.get('value')
             if tp_type == 'percent':
-                enhanced_prompt_parts.append(f"Take Profit: {tp_value}%")
+                structured_prompt_parts.append(f"Take Profit: {tp_value}% (percentage)")
             else:
-                enhanced_prompt_parts.append(f"Take Profit: {tp_value} points")
-            logger.info(f"📝 Adding to prompt - Take Profit: {tp_value} {tp_type}")
+                structured_prompt_parts.append(f"Take Profit: {tp_value} points")
+            logger.info(f"📝 Parameter - Take Profit: {tp_value} {tp_type}")
         
-        # Add stop loss
         if request.stop_loss and request.stop_loss.get('value'):
             sl_type = request.stop_loss.get('type', 'percent')
             sl_value = request.stop_loss.get('value')
             if sl_type == 'percent':
-                enhanced_prompt_parts.append(f"Stop Loss: {sl_value}%")
+                structured_prompt_parts.append(f"Stop Loss: {sl_value}% (percentage)")
             else:
-                enhanced_prompt_parts.append(f"Stop Loss: {sl_value} points")
-            logger.info(f"📝 Adding to prompt - Stop Loss: {sl_value} {sl_type}")
+                structured_prompt_parts.append(f"Stop Loss: {sl_value} points")
+            logger.info(f"📝 Parameter - Stop Loss: {sl_value} {sl_type}")
         
-        # Add trailing stop
         if request.trailing_stop and request.trailing_stop.get('enabled') and request.trailing_stop.get('value'):
             tr_type = request.trailing_stop.get('type', 'percent')
             tr_value = request.trailing_stop.get('value')
             if tr_type == 'percent':
-                enhanced_prompt_parts.append(f"Trailing Stop: {tr_value}%")
+                structured_prompt_parts.append(f"Trailing Stop: {tr_value}% (percentage)")
             else:
-                enhanced_prompt_parts.append(f"Trailing Stop: {tr_value} points")
-            logger.info(f"📝 Adding to prompt - Trailing Stop: {tr_value} {tr_type}")
+                structured_prompt_parts.append(f"Trailing Stop: {tr_value} points")
+            logger.info(f"📝 Parameter - Trailing Stop: {tr_value} {tr_type}")
         
-        # Create the final comprehensive prompt - single line format with all parameters
-        enhanced_prompt = ". ".join(enhanced_prompt_parts) + "."
+        # Create the final structured prompt
+        enhanced_prompt = "\n".join(structured_prompt_parts)
         
         # Log the final structured prompt
         logger.info("=" * 80)
