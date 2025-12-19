@@ -282,6 +282,21 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         logger.info("=" * 80)
         logger.info("✅ STRATEGY GENERATION COMPLETED SUCCESSFULLY (Runtime Only - No Storage)")
         logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
+        
+        # FINAL SECURITY CHECK: Verify strategy contains ONLY allowed fields
+        if strategy:
+            final_keys = set(strategy.keys())
+            allowed = {'symbol', 'condition', 'parameters'}
+            if not final_keys.issubset(allowed):
+                logger.error(f"❌ SECURITY VIOLATION: Strategy contains unexpected fields: {final_keys - allowed}")
+                # Remove any remaining forbidden fields
+                for key in list(strategy.keys()):
+                    if key not in allowed:
+                        del strategy[key]
+                        logger.warning(f"⚠️ Removed forbidden field '{key}' from final strategy")
+            if 'userParams' in strategy:
+                raise ValueError("CRITICAL SECURITY ERROR: userParams found in final strategy object")
+        
         logger.info("=" * 80)
         
         return AIStrategyResponse(
