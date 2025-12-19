@@ -195,21 +195,17 @@ CRITICAL RULES:
                 else:
                     raise json.JSONDecodeError("Could not find valid JSON in response", content, 0)
         
-        # Validate structure
-        if "symbol" not in strategy_data or "condition" not in strategy_data:
-            logger.error("Invalid strategy structure from OpenAI")
-            return None
+        # Validate structure - check for new unified schema or old schema
+        has_unified_schema = "logic" in strategy_data and "risk" in strategy_data and "meta" in strategy_data
+        has_old_schema = "condition" in strategy_data
         
-        condition = strategy_data.get("condition", {})
-        if "type" not in condition:
-            logger.error("Missing condition type in strategy")
+        if not has_unified_schema and not has_old_schema:
+            logger.error("Invalid strategy structure from OpenAI - missing both unified and old schema")
             return None
         
         # Extract symbol from OpenAI response or prompt
-        # Symbol should be in OpenAI's response, but if not, extract from prompt
         if "symbol" not in strategy_data or not strategy_data.get("symbol"):
             # Try to extract from prompt (look for "Symbol: XXX" pattern)
-            import re
             symbol_match = re.search(r'Symbol:\s*([A-Z0-9]+)', user_prompt, re.IGNORECASE)
             if symbol_match:
                 strategy_data["symbol"] = symbol_match.group(1).upper()
@@ -221,72 +217,14 @@ CRITICAL RULES:
             # Ensure symbol is uppercase
             strategy_data["symbol"] = str(strategy_data["symbol"]).upper()
         
-        # Normalize strategy type - handle moving_average as ema_crossover if it has EMA parameters
-        if condition.get("type") == "moving_average":
-            params = condition.get("parameters", {}) or strategy_data.get("parameters", {})
-            if params.get("ema_fast") or params.get("fast_period") or params.get("period_fast") or \
-               (params.get("period") and params.get("period2")) or (params.get("fast") and params.get("slow")):
-                condition["type"] = "ema_crossover"
-                strategy_data["condition"]["type"] = "ema_crossover"
-                logger.info("Normalized moving_average to ema_crossover based on parameters")
+        # If OpenAI returned old schema, transform to unified schema
+        if has_old_schema and not has_unified_schema:
+            strategy_data = _transform_to_unified_schema(strategy_data, user_prompt)
+        elif has_unified_schema:
+            # Validate and clean unified schema
+            strategy_data = _validate_unified_schema(strategy_data, user_prompt)
         
-        # CRITICAL: Remove condition.value completely - condition must contain ONLY type and parameters
-        if "value" in condition:
-            del condition["value"]
-            logger.info("Removed condition.value - condition now contains only type and parameters")
-        
-        # Normalize parameters structure - single source of truth
-        # Use condition.parameters as the source, ensure root-level parameters references the same object
-        if condition.get("type") in ["supertrend", "ema_crossover", "moving_average", "rsi", "macd", "bollinger_bands"]:
-            # Get parameters from condition (preferred) or root level
-            if "parameters" in condition:
-                params = condition.get("parameters", {})
-            elif "parameters" in strategy_data:
-                params = strategy_data.get("parameters", {})
-            else:
-                params = {}
-            
-            # Normalize EMA parameter naming - avoid ema_slow_2, use consistent naming
-            if condition.get("type") == "ema_crossover":
-                # Normalize EMA parameter names
-                normalized_params = {}
-                
-                # Handle various EMA naming patterns
-                if params.get("ema_fast") or params.get("fast_period") or params.get("period_fast"):
-                    normalized_params["ema_fast"] = params.get("ema_fast") or params.get("fast_period") or params.get("period_fast")
-                elif params.get("fast"):
-                    normalized_params["ema_fast"] = params.get("fast")
-                
-                if params.get("ema_slow") or params.get("slow_period") or params.get("period_slow"):
-                    normalized_params["ema_slow"] = params.get("ema_slow") or params.get("slow_period") or params.get("period_slow")
-                elif params.get("slow"):
-                    normalized_params["ema_slow"] = params.get("slow")
-                
-                # Handle multiple EMAs - normalize ema_slow_2, ema_medium, etc.
-                if params.get("ema_slow_2") or params.get("ema_medium"):
-                    normalized_params["ema_medium"] = params.get("ema_slow_2") or params.get("ema_medium")
-                
-                # Copy all other parameters (TP, SL, etc.)
-                for key, value in params.items():
-                    if key not in ["ema_fast", "ema_slow", "ema_slow_2", "ema_medium", "fast_period", "slow_period", "period_fast", "period_slow", "fast", "slow"]:
-                        normalized_params[key] = value
-                
-                # Set defaults only if not provided
-                if "ema_fast" not in normalized_params:
-                    normalized_params["ema_fast"] = 9
-                    logger.info("Setting default ema_fast: 9 (not provided by OpenAI)")
-                if "ema_slow" not in normalized_params:
-                    normalized_params["ema_slow"] = 21
-                    logger.info("Setting default ema_slow: 21 (not provided by OpenAI)")
-                
-                params = normalized_params
-            
-            # CRITICAL: Single source of truth - both condition.parameters and root parameters reference same object
-            # This ensures no duplication and both always stay in sync
-            strategy_data["parameters"] = params
-            condition["parameters"] = params
-        
-        logger.info(f"Successfully generated strategy: {strategy_data}")
+        logger.info(f"Successfully generated strategy with unified schema: {strategy_data}")
         return strategy_data
         
     except json.JSONDecodeError as e:
