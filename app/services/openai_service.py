@@ -1,7 +1,8 @@
 import json
 import logging
 import uuid
-from typing import Dict, Optional
+import re
+from typing import Dict, Optional, Any
 from openai import OpenAI
 from app.config import OPENAI_API_KEY, OPENAI_MODEL
 
@@ -83,13 +84,53 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
         # - Market Context
         # - Any future fields added from frontend
         
-        # Build user message with merged prompt and minimal format instruction
-        # The merged prompt contains all user inputs, we just need to tell OpenAI to return JSON
-        user_message = f"""Convert this trading strategy description into JSON format:
+        # Build user message with merged prompt and unified schema format instruction
+        # The merged prompt contains all user inputs, we need OpenAI to return the unified schema
+        user_message = f"""Convert this trading strategy description into the following unified JSON schema:
 
 {user_prompt}
 
-Return JSON with structure: {{"symbol": "...", "condition": {{"type": "...", "parameters": {{...}}}}}}"""
+Return JSON with this EXACT structure:
+{{
+  "symbol": "BTCUSD",
+  "strategy_type": "ema_crossover",
+  "logic": {{
+    "emas": [10, 20, 50],
+    "entry": {{
+      "buy": {{
+        "crossover": "ema_10_above_all",
+        "confirmation": {{
+          "type": "candle_high_break",
+          "reference": "second_candle",
+          "max_wait_candles": 3
+        }}
+      }},
+      "sell": {{
+        "crossover": "ema_10_below_all",
+        "confirmation": {{
+          "type": "candle_low_break",
+          "reference": "second_candle",
+          "max_wait_candles": 3
+        }}
+      }}
+    }}
+  }},
+  "risk": {{
+    "take_profit_points": 4000,
+    "stop_loss_points": 4000
+  }},
+  "meta": {{
+    "timeframe": "30MIN",
+    "chart_type": "candles"
+  }}
+}}
+
+CRITICAL RULES:
+- Extract EMA periods from prompt (e.g. [10,20,50]) - do NOT use defaults
+- Use ONLY POINTS for take_profit_points and stop_loss_points (not percentage)
+- Extract timeframe and chart_type from prompt
+- Do NOT add ema_fast or ema_slow fields
+- Do NOT create condition + sell_condition - use unified entry.buy and entry.sell"""
         
         # Build OpenAI API payload
         # Send ONLY the merged prompt string in user message (with minimal format instruction)
@@ -264,6 +305,170 @@ Return JSON with structure: {{"symbol": "...", "condition": {{"type": "...", "pa
         logger.error(f"Exception type: {type(e).__name__}")
         logger.error(f"Exception message: {str(e)}")
         return None
+
+
+def _transform_to_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) -> Dict[str, Any]:
+    """
+    Transform old schema (condition.type, condition.parameters) to unified schema (logic, risk, meta).
+    
+    CRITICAL: Do NOT inject default EMA values. Use ONLY what's in the prompt.
+    """
+    unified = {
+        "symbol": strategy_data.get("symbol", "BTCUSD").upper(),
+        "strategy_type": None,
+        "logic": {},
+        "risk": {},
+        "meta": {}
+    }
+    
+    # Extract strategy type
+    condition = strategy_data.get("condition", {})
+    strategy_type = condition.get("type") or strategy_data.get("strategy_type")
+    if strategy_type == "moving_average":
+        strategy_type = "ema_crossover"
+    unified["strategy_type"] = strategy_type or "ema_crossover"
+    
+    # Extract parameters
+    params = condition.get("parameters", {}) or strategy_data.get("parameters", {})
+    
+    # Extract EMAs - CRITICAL: NO defaults, use ONLY what's in prompt
+    emas = []
+    if params.get("emas") and isinstance(params.get("emas"), list):
+        emas = params["emas"]
+    else:
+        # Try to extract from various field names, but NO defaults
+        if params.get("ema_fast"):
+            emas.append(params["ema_fast"])
+        if params.get("ema_slow"):
+            emas.append(params["ema_slow"])
+        if params.get("ema_medium"):
+            emas.append(params["ema_medium"])
+        # Extract from prompt if not in params
+        if not emas:
+            ema_matches = re.findall(r'EMA\s+(\d+)|(\d+)\s+EMA|ema[_\s]+(\d+)', user_prompt, re.IGNORECASE)
+            for match in ema_matches:
+                period = int(match[0] or match[1] or match[2])
+                if period not in emas:
+                    emas.append(period)
+            emas.sort()
+    
+    # CRITICAL: If no EMAs found, return error - do NOT use defaults
+    if not emas:
+        logger.error("❌ No EMA periods found in strategy - cannot generate unified schema")
+        raise ValueError("No EMA periods found in strategy. Strategy must specify EMA periods explicitly.")
+    
+    # Build logic section
+    unified["logic"] = {
+        "emas": emas,
+        "entry": {
+            "buy": {
+                "crossover": f"ema_{emas[0]}_above_all",
+                "confirmation": {
+                    "type": "candle_high_break" if params.get("require_high_break") else "immediate",
+                    "reference": "second_candle",
+                    "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
+                }
+            },
+            "sell": {
+                "crossover": f"ema_{emas[0]}_below_all",
+                "confirmation": {
+                    "type": "candle_low_break" if params.get("require_low_break") else "immediate",
+                    "reference": "second_candle",
+                    "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
+                }
+            }
+        }
+    }
+    
+    # Build risk section - POINTS only (preferred), fallback to percent if needed
+    risk = {}
+    if params.get("tp_point") is not None:
+        risk["take_profit_points"] = params["tp_point"]
+    elif params.get("tp_percent") is not None:
+        # Convert percent to points (approximate - would need current price)
+        logger.warning("⚠️ TP provided as percentage, converting to points (approximate)")
+        risk["take_profit_points"] = None  # Will need to be calculated with price
+    
+    if params.get("sl_point") is not None:
+        risk["stop_loss_points"] = params["sl_point"]
+    elif params.get("sl_percent") is not None:
+        logger.warning("⚠️ SL provided as percentage, converting to points (approximate)")
+        risk["stop_loss_points"] = None  # Will need to be calculated with price
+    
+    unified["risk"] = risk
+    
+    # Build meta section - extract from prompt
+    meta = {}
+    timeframe_match = re.search(r'Timeframe:\s*([A-Z0-9]+)', user_prompt, re.IGNORECASE)
+    if timeframe_match:
+        meta["timeframe"] = timeframe_match.group(1).upper()
+    
+    chart_type_match = re.search(r'Chart Type:\s*([A-Za-z\s]+)', user_prompt, re.IGNORECASE)
+    if chart_type_match:
+        chart_type_str = chart_type_match.group(1).strip().lower()
+        meta["chart_type"] = "heikin_ashi" if "heikin" in chart_type_str else "candles"
+    
+    unified["meta"] = meta
+    
+    return unified
+
+
+def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) -> Dict[str, Any]:
+    """
+    Validate and clean unified schema - ensure it matches exact requirements.
+    """
+    # Ensure required sections exist
+    if "logic" not in strategy_data:
+        strategy_data["logic"] = {}
+    if "risk" not in strategy_data:
+        strategy_data["risk"] = {}
+    if "meta" not in strategy_data:
+        strategy_data["meta"] = {}
+    
+    # CRITICAL: Remove any ema_fast or ema_slow fields (forbidden)
+    if "ema_fast" in strategy_data.get("logic", {}):
+        del strategy_data["logic"]["ema_fast"]
+        logger.warning("⚠️ Removed forbidden ema_fast field from logic")
+    if "ema_slow" in strategy_data.get("logic", {}):
+        del strategy_data["logic"]["ema_slow"]
+        logger.warning("⚠️ Removed forbidden ema_slow field from logic")
+    
+    # Ensure emas is an array
+    if "emas" not in strategy_data.get("logic", {}):
+        # Try to extract from prompt
+        ema_matches = re.findall(r'EMA\s+(\d+)|(\d+)\s+EMA|ema[_\s]+(\d+)', user_prompt, re.IGNORECASE)
+        emas = []
+        for match in ema_matches:
+            period = int(match[0] or match[1] or match[2])
+            if period not in emas:
+                emas.append(period)
+        emas.sort()
+        if emas:
+            strategy_data["logic"]["emas"] = emas
+        else:
+            raise ValueError("No EMA periods found in strategy or prompt")
+    
+    # Ensure entry structure exists
+    if "entry" not in strategy_data.get("logic", {}):
+        strategy_data["logic"]["entry"] = {"buy": {}, "sell": {}}
+    
+    # Ensure timeframe and chart_type are in meta, not logic
+    if "timeframe" in strategy_data.get("logic", {}):
+        if "timeframe" not in strategy_data["meta"]:
+            strategy_data["meta"]["timeframe"] = strategy_data["logic"]["timeframe"]
+        del strategy_data["logic"]["timeframe"]
+    if "chart_type" in strategy_data.get("logic", {}):
+        if "chart_type" not in strategy_data["meta"]:
+            strategy_data["meta"]["chart_type"] = strategy_data["logic"]["chart_type"]
+        del strategy_data["logic"]["chart_type"]
+    
+    # Remove any old schema fields if present
+    for field in ["condition", "parameters", "sell_condition"]:
+        if field in strategy_data:
+            del strategy_data[field]
+            logger.warning(f"⚠️ Removed old schema field '{field}' from strategy")
+    
+    return strategy_data
 
 
 def generate_strategy_with_context(

@@ -281,12 +281,12 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         # NO DATABASE STORAGE - Runtime only
         logger.info("=" * 80)
         logger.info("✅ STRATEGY GENERATION COMPLETED SUCCESSFULLY (Runtime Only - No Storage)")
-        logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
+        logger.info(f"Strategy Type: {strategy.get('strategy_type') if strategy else 'None'}")
         
-        # FINAL SECURITY CHECK: Verify strategy contains ONLY allowed fields
+        # FINAL SECURITY CHECK: Verify strategy contains ONLY allowed fields (unified schema)
         if strategy:
             final_keys = set(strategy.keys())
-            allowed = {'symbol', 'condition', 'parameters'}
+            allowed = {'symbol', 'strategy_type', 'logic', 'risk', 'meta'}
             if not final_keys.issubset(allowed):
                 logger.error(f"❌ SECURITY VIOLATION: Strategy contains unexpected fields: {final_keys - allowed}")
                 # Remove any remaining forbidden fields
@@ -296,6 +296,13 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                         logger.warning(f"⚠️ Removed forbidden field '{key}' from final strategy")
             if 'userParams' in strategy:
                 raise ValueError("CRITICAL SECURITY ERROR: userParams found in final strategy object")
+            
+            # Final validation: Check for forbidden fields in logic section
+            logic = strategy.get('logic', {})
+            if 'ema_fast' in logic or 'ema_slow' in logic:
+                raise ValueError("CRITICAL ERROR: ema_fast or ema_slow found in logic section - use emas array instead")
+            if 'timeframe' in logic or 'chart_type' in logic:
+                raise ValueError("CRITICAL ERROR: timeframe or chart_type found in logic section - must be in meta section")
         
         logger.info("=" * 80)
         
