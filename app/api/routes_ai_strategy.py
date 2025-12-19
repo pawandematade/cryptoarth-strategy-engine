@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import Optional, Dict, Any
 import logging
 import json
-from app.services.openai_service import generate_strategy, generate_strategy_with_context
+from app.services.openai_service import generate_strategy
 from app.services.backtest_service import run_backtest
-from app.strategies.loader import load_strategies, save_strategy
+from app.services.prompt_builder import build_prompt
 from app.store.redis_client import redis_client
 from app.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
 
@@ -15,30 +15,37 @@ router = APIRouter()
 
 
 class AIStrategyRequest(BaseModel):
-    """Request model for AI strategy generation"""
+    """
+    Request model for AI strategy generation.
+    
+    SYSTEM RULE: All parameters are converted to a single prompt string.
+    Only the prompt is sent to OpenAI - no separate fields.
+    """
     prompt: str = Field(..., description="Natural language description of the trading strategy")
-    symbol: str = Field(default="BTCUSD", description="Trading symbol (e.g., BTCUSD)")
-    current_price: Optional[float] = Field(default=None, description="Current market price for context")
-    market_context: Optional[str] = Field(default=None, description="Additional market context")
-    save_strategy: bool = Field(default=False, description="Whether to save the strategy to strategies.json")
-    # New trading parameters
+    symbol: Optional[str] = Field(default="BTCUSD", description="Trading symbol (e.g., BTCUSD)")
     timeframe: Optional[str] = Field(default=None, description="Trading timeframe (e.g., 15MIN, 1H, 1D)")
     chart_type: Optional[str] = Field(default=None, description="Chart type (candles or heikin_ashi)")
     take_profit: Optional[Dict[str, Any]] = Field(default=None, description="Take profit settings: {type: 'percent'|'point', value: number}")
     stop_loss: Optional[Dict[str, Any]] = Field(default=None, description="Stop loss settings: {type: 'percent'|'point', value: number}")
     trailing_stop: Optional[Dict[str, Any]] = Field(default=None, description="Trailing stop settings: {enabled: bool, type: 'percent'|'point', value: number}")
-    # Cache-busting parameters (ignored but logged)
-    request_id: Optional[str] = Field(default=None, description="Unique request ID for tracking")
-    timestamp: Optional[int] = Field(default=None, description="Timestamp for cache-busting", alias="_timestamp")
-    force_refresh: Optional[bool] = Field(default=False, description="Force refresh flag")
+    current_price: Optional[float] = Field(default=None, description="Current market price for context")
+    market_context: Optional[str] = Field(default=None, description="Additional market context")
+    
+    class Config:
+        # Allow extra fields but we'll validate and reject them
+        extra = "allow"
 
 
 class AIStrategyResponse(BaseModel):
-    """Response model for AI strategy generation"""
+    """
+    Response model for AI strategy generation.
+    
+    NOTE: strategy_id is always None - no database storage (runtime only).
+    """
     success: bool
     strategy: Optional[dict] = None
     message: str
-    strategy_id: Optional[int] = None
+    strategy_id: Optional[int] = None  # Always None - no database
 
 
 @router.post("/ai-strategy/generate", response_model=AIStrategyResponse)
@@ -46,40 +53,41 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
     """
     Generate a trading strategy using AI based on natural language description.
     
-    Example requests:
-    - "Buy when BTC price goes above 90000"
-    - "Alert me when price drops below 85000"
-    - "Notify when price is between 88000 and 92000"
+    SYSTEM RULES:
+    1. All payload parameters are converted to a single prompt string via PromptBuilder
+    2. Only { "prompt": "..." } is sent to OpenAI
+    3. No database storage - runtime only
+    4. Extra keys in payload are rejected
     
     Returns:
         AIStrategyResponse: Generated strategy in structured format
     """
     try:
-        # Log incoming request for debugging
+        # VALIDATION: Reject extra keys (guard against unauthorized fields)
+        allowed_fields = {
+            'prompt', 'symbol', 'timeframe', 'chart_type', 
+            'take_profit', 'stop_loss', 'trailing_stop',
+            'current_price', 'market_context'
+        }
+        request_dict = request.model_dump(exclude_unset=True)
+        extra_keys = set(request_dict.keys()) - allowed_fields
+        if extra_keys:
+            logger.error(f"❌ REJECTED: Extra keys in payload: {extra_keys}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid payload: Extra keys not allowed: {list(extra_keys)}. Allowed keys: {list(allowed_fields)}"
+            )
+        
+        # Log incoming request
         logger.info("=" * 80)
         logger.info("🔄 NEW STRATEGY GENERATION REQUEST RECEIVED")
-        logger.info(f"Request ID: {request.request_id}")
-        logger.info(f"Timestamp: {request.timestamp}")
-        logger.info(f"Force Refresh: {request.force_refresh}")
-        logger.info(f"Prompt (first 100 chars): {request.prompt[:100] if request.prompt else 'None'}...")
-        logger.info(f"Full Prompt: {request.prompt}")
-        logger.info(f"Prompt Length: {len(request.prompt) if request.prompt else 0}")
-        logger.info(f"Symbol: {request.symbol}")
-        logger.info(f"Timeframe: {request.timeframe}")
-        logger.info(f"Chart Type: {request.chart_type}")
-        logger.info(f"Take Profit: {request.take_profit}")
-        logger.info(f"Stop Loss: {request.stop_loss}")
-        logger.info(f"Trailing Stop: {request.trailing_stop}")
+        logger.info(f"Payload: {json.dumps(request_dict, indent=2)}")
         logger.info("=" * 80)
         
-        # Validate input
+        # Validate required fields
         if not request.prompt or not request.prompt.strip():
             logger.error("❌ Validation failed: Prompt is empty")
             raise HTTPException(status_code=400, detail="Prompt is required")
-        
-        if not request.symbol or not request.symbol.strip():
-            logger.error("❌ Validation failed: Symbol is empty")
-            raise HTTPException(status_code=400, detail="Symbol is required")
         
         # CREDIT FACILITY DISABLED FOR TESTING - Code kept for future enablement
         # Check and consume credits
@@ -318,10 +326,10 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                     strategy['risk']['stop_loss'] = request.stop_loss
                 logger.info(f"✅ Risk object created with user TP/SL")
             
-            # Add user parameters to strategy for frontend display
+            # Add user parameters to strategy for frontend display (runtime only - not stored)
             strategy['userParams'] = {
-                'prompt': request.prompt.strip(),  # Store original prompt
-                'symbol': request.symbol.strip().upper(),
+                'prompt': request.prompt.strip(),
+                'symbol': request.symbol.strip().upper() if request.symbol else None,
                 'timeframe': request.timeframe,
                 'chartType': request.chart_type,
                 'tpValue': request.take_profit.get('value') if request.take_profit else None,
@@ -338,25 +346,10 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             logger.info("📊 FINAL STRATEGY PARAMETERS:")
             logger.info(f"{json.dumps(strategy.get('parameters', {}), indent=2)}")
             logger.info("=" * 80)
-            logger.info(f"✅ User parameters added to strategy")
         
-        # Save strategy if requested
-        strategy_id = None
-        if request.save_strategy:
-            try:
-                strategy_id = save_strategy(strategy)
-                logger.info(f"✅ Strategy saved with ID: {strategy_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to save strategy: {e}")
-                return AIStrategyResponse(
-                    success=True,
-                    strategy=strategy,
-                    message=f"Strategy generated successfully but failed to save: {str(e)}"
-                )
-        
+        # NO DATABASE STORAGE - Runtime only
         logger.info("=" * 80)
-        logger.info("✅ STRATEGY GENERATION COMPLETED SUCCESSFULLY")
-        logger.info(f"Strategy ID: {strategy_id}")
+        logger.info("✅ STRATEGY GENERATION COMPLETED SUCCESSFULLY (Runtime Only - No Storage)")
         logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
         logger.info("=" * 80)
         
@@ -364,7 +357,7 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             success=True,
             strategy=strategy,
             message="Strategy generated successfully",
-            strategy_id=strategy_id
+            strategy_id=None  # No database - always None
         )
         
     except HTTPException:

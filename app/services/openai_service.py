@@ -40,16 +40,18 @@ else:
     logger.warning("OPENAI_API_KEY not set. AI strategy builder will not work.")
 
 
-def generate_strategy(user_prompt: str, symbol: str = "BTCUSD") -> Optional[Dict]:
+def generate_strategy(user_prompt: str) -> Optional[Dict]:
     """
     Generate a trading strategy using OpenAI based on user's natural language prompt.
     
+    IMPORTANT: This function receives ONLY a prompt string.
+    All trading parameters (symbol, timeframe, TP, SL, etc.) must be embedded in the prompt.
+    
     Args:
-        user_prompt: User's description of the strategy they want (e.g., "Buy when price goes above 90000")
-        symbol: Trading symbol (default: BTCUSD)
+        user_prompt: Complete prompt string with all trading parameters embedded
     
     Returns:
-        dict: Strategy object with id, symbol, and condition, or None if generation fails
+        dict: Strategy object with symbol and condition, or None if generation fails
     """
     # Reinitialize client if needed (in case .env was updated)
     if not client:
@@ -316,18 +318,19 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
 
 def generate_strategy_with_context(
     user_prompt: str, 
-    symbol: str = "BTCUSD",
     current_price: Optional[float] = None,
     market_context: Optional[str] = None
 ) -> Optional[Dict]:
     """
     Generate a trading strategy with additional market context.
     
+    DEPRECATED: Use PromptBuilder to build complete prompt instead.
+    This function is kept for backward compatibility but should not be used.
+    
     Args:
-        user_prompt: User's description of the strategy
-        symbol: Trading symbol
-        current_price: Current market price (optional)
-        market_context: Additional market context (optional)
+        user_prompt: Complete prompt string (should already include all parameters)
+        current_price: Current market price (optional - should be in prompt)
+        market_context: Additional market context (optional - should be in prompt)
     
     Returns:
         dict: Strategy object or None if generation fails
@@ -336,12 +339,7 @@ def generate_strategy_with_context(
         logger.error("OpenAI client not initialized.")
         return None
     
-    # Enhance prompt with context
-    enhanced_prompt = user_prompt
-    if current_price:
-        enhanced_prompt += f" (Current {symbol} price: ${current_price:,.2f})"
-    if market_context:
-        enhanced_prompt += f" Market context: {market_context}"
-    
-    return generate_strategy(enhanced_prompt, symbol)
+    # Note: Context should already be in the prompt from PromptBuilder
+    # This function just passes through to generate_strategy
+    return generate_strategy(user_prompt)
 
