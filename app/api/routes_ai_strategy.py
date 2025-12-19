@@ -21,6 +21,16 @@ class AIStrategyRequest(BaseModel):
     current_price: Optional[float] = Field(default=None, description="Current market price for context")
     market_context: Optional[str] = Field(default=None, description="Additional market context")
     save_strategy: bool = Field(default=False, description="Whether to save the strategy to strategies.json")
+    # New trading parameters
+    timeframe: Optional[str] = Field(default=None, description="Trading timeframe (e.g., 15MIN, 1H, 1D)")
+    chart_type: Optional[str] = Field(default=None, description="Chart type (candles or heikin_ashi)")
+    take_profit: Optional[Dict[str, Any]] = Field(default=None, description="Take profit settings: {type: 'percent'|'point', value: number}")
+    stop_loss: Optional[Dict[str, Any]] = Field(default=None, description="Stop loss settings: {type: 'percent'|'point', value: number}")
+    trailing_stop: Optional[Dict[str, Any]] = Field(default=None, description="Trailing stop settings: {enabled: bool, type: 'percent'|'point', value: number}")
+    # Cache-busting parameters (ignored but logged)
+    request_id: Optional[str] = Field(default=None, description="Unique request ID for tracking")
+    _timestamp: Optional[int] = Field(default=None, description="Timestamp for cache-busting")
+    force_refresh: Optional[bool] = Field(default=False, description="Force refresh flag")
 
 
 class AIStrategyResponse(BaseModel):
@@ -45,30 +55,50 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         AIStrategyResponse: Generated strategy in structured format
     """
     try:
+        # Log incoming request for debugging
+        logger.info("=" * 80)
+        logger.info("🔄 NEW STRATEGY GENERATION REQUEST RECEIVED")
+        logger.info(f"Request ID: {request.request_id}")
+        logger.info(f"Timestamp: {request._timestamp}")
+        logger.info(f"Force Refresh: {request.force_refresh}")
+        logger.info(f"Prompt (first 100 chars): {request.prompt[:100] if request.prompt else 'None'}...")
+        logger.info(f"Full Prompt: {request.prompt}")
+        logger.info(f"Prompt Length: {len(request.prompt) if request.prompt else 0}")
+        logger.info(f"Symbol: {request.symbol}")
+        logger.info(f"Timeframe: {request.timeframe}")
+        logger.info(f"Chart Type: {request.chart_type}")
+        logger.info(f"Take Profit: {request.take_profit}")
+        logger.info(f"Stop Loss: {request.stop_loss}")
+        logger.info(f"Trailing Stop: {request.trailing_stop}")
+        logger.info("=" * 80)
+        
         # Validate input
         if not request.prompt or not request.prompt.strip():
+            logger.error("❌ Validation failed: Prompt is empty")
             raise HTTPException(status_code=400, detail="Prompt is required")
         
         if not request.symbol or not request.symbol.strip():
+            logger.error("❌ Validation failed: Symbol is empty")
             raise HTTPException(status_code=400, detail="Symbol is required")
         
+        # CREDIT FACILITY DISABLED FOR TESTING - Code kept for future enablement
         # Check and consume credits
-        user_id = get_user_id_from_header(authorization)
-        credit_check = check_credits_available(user_id, 'ai_generate')
-        
-        if not credit_check['has_credits']:
-            raise HTTPException(
-                status_code=402,  # Payment Required
-                detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to continue."
-            )
-        
-        # Consume credits before generating
-        credit_result = consume_credits(user_id, 'ai_generate')
-        if not credit_result['success']:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Failed to process credits: {credit_result['message']}"
-            )
+        # user_id = get_user_id_from_header(authorization)
+        # credit_check = check_credits_available(user_id, 'ai_generate')
+        # 
+        # if not credit_check['has_credits']:
+        #     raise HTTPException(
+        #         status_code=402,  # Payment Required
+        #         detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to continue."
+        #     )
+        # 
+        # # Consume credits before generating
+        # credit_result = consume_credits(user_id, 'ai_generate')
+        # if not credit_result['success']:
+        #     raise HTTPException(
+        #         status_code=402,
+        #         detail=f"Failed to process credits: {credit_result['message']}"
+        #     )
         
         # Get current price from Redis if not provided
         current_price = request.current_price
@@ -104,25 +134,48 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             )
         
         if not strategy:
-            logger.error("Strategy generation returned None. Check OpenAI service logs.")
+            logger.error("❌ Strategy generation returned None. Check OpenAI service logs.")
             return AIStrategyResponse(
                 success=False,
                 message="Failed to generate strategy. Please check your OpenAI API key and try again."
             )
+        
+        # Add user parameters to strategy for frontend display
+        if strategy:
+            strategy['userParams'] = {
+                'prompt': request.prompt.strip(),  # Store original prompt
+                'symbol': request.symbol.strip().upper(),
+                'timeframe': request.timeframe,
+                'chartType': request.chart_type,
+                'tpValue': request.take_profit.get('value') if request.take_profit else None,
+                'tpType': request.take_profit.get('type') if request.take_profit else None,
+                'slValue': request.stop_loss.get('value') if request.stop_loss else None,
+                'slType': request.stop_loss.get('type') if request.stop_loss else None,
+                'trailingEnabled': request.trailing_stop.get('enabled') if request.trailing_stop else False,
+                'trailingValue': request.trailing_stop.get('value') if request.trailing_stop else None,
+                'trailingType': request.trailing_stop.get('type') if request.trailing_stop else None,
+            }
+            logger.info(f"✅ User parameters added to strategy")
         
         # Save strategy if requested
         strategy_id = None
         if request.save_strategy:
             try:
                 strategy_id = save_strategy(strategy)
-                logger.info(f"Strategy saved with ID: {strategy_id}")
+                logger.info(f"✅ Strategy saved with ID: {strategy_id}")
             except Exception as e:
-                logger.error(f"Failed to save strategy: {e}")
+                logger.error(f"❌ Failed to save strategy: {e}")
                 return AIStrategyResponse(
                     success=True,
                     strategy=strategy,
                     message=f"Strategy generated successfully but failed to save: {str(e)}"
                 )
+        
+        logger.info("=" * 80)
+        logger.info("✅ STRATEGY GENERATION COMPLETED SUCCESSFULLY")
+        logger.info(f"Strategy ID: {strategy_id}")
+        logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
+        logger.info("=" * 80)
         
         return AIStrategyResponse(
             success=True,
@@ -210,23 +263,24 @@ def run_strategy_backtest(request: BacktestRequest, authorization: Optional[str]
         if request.period not in ['year', 'month', 'day']:
             raise HTTPException(status_code=400, detail="Period must be 'year', 'month', or 'day'")
         
+        # CREDIT FACILITY DISABLED FOR TESTING - Code kept for future enablement
         # Check and consume credits
-        user_id = get_user_id_from_header(authorization)
-        credit_check = check_credits_available(user_id, 'backtest')
-        
-        if not credit_check['has_credits']:
-            raise HTTPException(
-                status_code=402,  # Payment Required
-                detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to run backtest."
-            )
-        
-        # Consume credits before running backtest
-        credit_result = consume_credits(user_id, 'backtest')
-        if not credit_result['success']:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Failed to process credits: {credit_result['message']}"
-            )
+        # user_id = get_user_id_from_header(authorization)
+        # credit_check = check_credits_available(user_id, 'backtest')
+        # 
+        # if not credit_check['has_credits']:
+        #     raise HTTPException(
+        #         status_code=402,  # Payment Required
+        #         detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to run backtest."
+        #     )
+        # 
+        # # Consume credits before running backtest
+        # credit_result = consume_credits(user_id, 'backtest')
+        # if not credit_result['success']:
+        #     raise HTTPException(
+        #         status_code=402,
+        #         detail=f"Failed to process credits: {credit_result['message']}"
+        #     )
         
         # Validate strategy structure
         strategy = request.strategy

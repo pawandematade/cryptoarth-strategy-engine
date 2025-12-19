@@ -74,7 +74,7 @@ def on_delta_message(ws, message):
     try:
         data = json.loads(message)
         
-        # Handle pong response (heartbeat)
+        # Handle pong response (heartbeat) from Delta Exchange
         if data.get('type') in ('pong', 'ping', 'heartbeat'):
             return
         
@@ -159,21 +159,18 @@ def on_delta_open(ws):
     """Handle Delta WebSocket open - subscribe to symbols"""
     logger.info("✅ Delta WebSocket connection opened successfully")
     
-    # Auto-subscribe to default symbols (BTCUSD, ETHUSD) for live prices
-    # This ensures prices are always available even if no frontend is connected
-    default_symbols = ['BTCUSD', 'ETHUSD']
-    logger.info(f"Auto-subscribing to default symbols: {default_symbols}")
-    # Subscribe IMMEDIATELY - no delay
-    subscribe_to_symbols(ws, default_symbols)
-    subscribed_symbols.update(default_symbols)
-    
-    # Also subscribe to any additional symbols that were requested
-    if len(subscribed_symbols) > len(default_symbols):
-        additional_symbols = [s for s in subscribed_symbols if s not in default_symbols]
-        if additional_symbols:
-            logger.info(f"Subscribing to additional symbols: {additional_symbols}")
-            # Subscribe IMMEDIATELY - no delay
-            subscribe_to_symbols(ws, additional_symbols)
+    # Re-subscribe to ALL previously subscribed symbols (including defaults and user-requested)
+    # This ensures prices continue flowing after reconnection
+    if subscribed_symbols:
+        symbols_list = list(subscribed_symbols)
+        logger.info(f"Re-subscribing to {len(symbols_list)} symbols on Delta WebSocket reconnect: {symbols_list}")
+        subscribe_to_symbols(ws, symbols_list)
+    else:
+        # First time connection - subscribe to default symbols
+        default_symbols = ['BTCUSD', 'ETHUSD']
+        logger.info(f"Auto-subscribing to default symbols: {default_symbols}")
+        subscribe_to_symbols(ws, default_symbols)
+        subscribed_symbols.update(default_symbols)
 
 
 def subscribe_to_delta(ws, symbols: List[str]):
@@ -292,11 +289,17 @@ async def websocket_endpoint(websocket: WebSocket):
         })
         
         while True:
-            # Receive messages from client (subscriptions, etc.)
+            # Receive messages from client (subscriptions, heartbeat, etc.)
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                 try:
                     message = json.loads(data)
+                    
+                    # Handle ping requests from frontend - respond with pong immediately
+                    if message.get('type') == 'ping':
+                        await websocket.send_json({'type': 'pong'})
+                        logger.debug("Responded to ping with pong")
+                        continue
                     
                     # Handle subscription requests
                     if message.get('type') == 'subscribe':
