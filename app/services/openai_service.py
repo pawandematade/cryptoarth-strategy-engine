@@ -290,36 +290,61 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
                 strategy_data["condition"]["type"] = "ema_crossover"
                 logger.info("Normalized moving_average to ema_crossover based on parameters")
         
-        # Ensure parameters field exists (even if empty) for indicator-based strategies
+        # CRITICAL: Remove condition.value completely - condition must contain ONLY type and parameters
+        if "value" in condition:
+            del condition["value"]
+            logger.info("Removed condition.value - condition now contains only type and parameters")
+        
+        # Normalize parameters structure - single source of truth
+        # Use condition.parameters as the source, ensure root-level parameters references the same object
         if condition.get("type") in ["supertrend", "ema_crossover", "moving_average", "rsi", "macd", "bollinger_bands"]:
-            if "parameters" not in strategy_data:
-                strategy_data["parameters"] = {}
-            # Also check if parameters are in condition
+            # Get parameters from condition (preferred) or root level
             if "parameters" in condition:
-                strategy_data["parameters"] = condition.get("parameters", {})
-            # Move parameters from condition to root level if needed
-            if "parameters" in condition and "parameters" not in strategy_data:
-                strategy_data["parameters"] = condition.get("parameters", {})
-            
-            # For ema_crossover, ensure all required parameters exist with defaults
-            # BUT: Only set defaults if OpenAI didn't provide them - don't override OpenAI's response
-            if condition.get("type") == "ema_crossover":
+                params = condition.get("parameters", {})
+            elif "parameters" in strategy_data:
                 params = strategy_data.get("parameters", {})
-                # Only set EMA defaults if not provided by OpenAI
-                if not params.get("ema_fast") and not params.get("fast_period"):
-                    params["ema_fast"] = 9
-                    logger.info("Setting default ema_fast: 9 (not provided by OpenAI)")
-                if not params.get("ema_slow") and not params.get("slow_period"):
-                    params["ema_slow"] = 21
-                    logger.info("Setting default ema_slow: 21 (not provided by OpenAI)")
-                # DO NOT set default TP/SL here - they will be set from request if provided
-                # Only set defaults if OpenAI didn't provide AND request doesn't have them
-                # (This will be handled in routes_ai_strategy.py after merging user params)
-                strategy_data["parameters"] = params
-                condition["parameters"] = params
+            else:
+                params = {}
+            
+            # Normalize EMA parameter naming - avoid ema_slow_2, use consistent naming
+            if condition.get("type") == "ema_crossover":
+                # Normalize EMA parameter names
+                normalized_params = {}
                 
-                # Log what OpenAI returned
-                logger.info(f"OpenAI returned parameters: {json.dumps(params, indent=2)}")
+                # Handle various EMA naming patterns
+                if params.get("ema_fast") or params.get("fast_period") or params.get("period_fast"):
+                    normalized_params["ema_fast"] = params.get("ema_fast") or params.get("fast_period") or params.get("period_fast")
+                elif params.get("fast"):
+                    normalized_params["ema_fast"] = params.get("fast")
+                
+                if params.get("ema_slow") or params.get("slow_period") or params.get("period_slow"):
+                    normalized_params["ema_slow"] = params.get("ema_slow") or params.get("slow_period") or params.get("period_slow")
+                elif params.get("slow"):
+                    normalized_params["ema_slow"] = params.get("slow")
+                
+                # Handle multiple EMAs - normalize ema_slow_2, ema_medium, etc.
+                if params.get("ema_slow_2") or params.get("ema_medium"):
+                    normalized_params["ema_medium"] = params.get("ema_slow_2") or params.get("ema_medium")
+                
+                # Copy all other parameters (TP, SL, etc.)
+                for key, value in params.items():
+                    if key not in ["ema_fast", "ema_slow", "ema_slow_2", "ema_medium", "fast_period", "slow_period", "period_fast", "period_slow", "fast", "slow"]:
+                        normalized_params[key] = value
+                
+                # Set defaults only if not provided
+                if "ema_fast" not in normalized_params:
+                    normalized_params["ema_fast"] = 9
+                    logger.info("Setting default ema_fast: 9 (not provided by OpenAI)")
+                if "ema_slow" not in normalized_params:
+                    normalized_params["ema_slow"] = 21
+                    logger.info("Setting default ema_slow: 21 (not provided by OpenAI)")
+                
+                params = normalized_params
+            
+            # CRITICAL: Single source of truth - both condition.parameters and root parameters reference same object
+            # This ensures no duplication and both always stay in sync
+            strategy_data["parameters"] = params
+            condition["parameters"] = params
         
         logger.info(f"Successfully generated strategy: {strategy_data}")
         return strategy_data

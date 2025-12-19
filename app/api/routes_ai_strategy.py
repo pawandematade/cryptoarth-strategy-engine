@@ -194,16 +194,26 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         # All trading rules come from OpenAI response based on the prompt
         # No overrides - we trust OpenAI to extract all parameters from the prompt
         if strategy:
-            # Normalize parameters structure (ensure they're accessible)
-            params = strategy.get('parameters', {})
-            condition_params = strategy.get('condition', {}).get('parameters', {})
-            if condition_params:
-                params.update(condition_params)
+            # CRITICAL: Final normalization - ensure condition.value is removed
+            if strategy.get('condition') and 'value' in strategy.get('condition', {}):
+                del strategy['condition']['value']
+                logger.info("Removed condition.value from final response")
             
-            # Update strategy with normalized parameters
-            strategy['parameters'] = params
-            if strategy.get('condition'):
+            # CRITICAL: Ensure single source of truth for parameters
+            # Both condition.parameters and root parameters should reference the same object
+            condition = strategy.get('condition', {})
+            if condition and 'parameters' in condition:
+                # Use condition.parameters as source of truth
+                params = condition['parameters']
+                strategy['parameters'] = params
+                # Ensure both reference the same object (no duplication)
                 strategy['condition']['parameters'] = params
+            elif 'parameters' in strategy:
+                # If only root parameters exist, sync to condition
+                params = strategy['parameters']
+                if condition:
+                    condition['parameters'] = params
+                    strategy['condition'] = condition
             
             logger.info(f"✅ Using OpenAI response parameters (from prompt)")
             
@@ -211,6 +221,7 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             # Request payload (prompt, symbol, timeframe, chart_type, take_profit, stop_loss, etc.) is INTERNAL ONLY
             # Response contains ONLY the parsed strategy from OpenAI (symbol, condition, parameters)
             # No userParams, no request data, no builder/internal fields
+            # Condition must contain ONLY: type and parameters (no value field)
             
             # Log final strategy parameters (for debugging only - not in response)
             logger.info("=" * 80)
