@@ -216,8 +216,54 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                 message="Failed to generate strategy. Please check your OpenAI API key and try again."
             )
         
-        # Add user parameters to strategy for frontend display
+        # CRITICAL: Merge user-provided TP/SL into strategy parameters
+        # This ensures user's TP/SL values override any defaults
         if strategy:
+            params = strategy.get('parameters', {})
+            condition_params = strategy.get('condition', {}).get('parameters', {})
+            if condition_params:
+                params.update(condition_params)
+            
+            # Merge user-provided TP/SL into parameters
+            if request.take_profit and request.take_profit.get('value'):
+                tp_type = request.take_profit.get('type', 'percent')
+                tp_value = request.take_profit.get('value')
+                if tp_type == 'percent':
+                    params['tp_percent'] = tp_value
+                    params['tp'] = tp_value  # Also set tp for compatibility
+                    logger.info(f"✅ Using user-provided TP: {tp_value}%")
+                else:  # point
+                    params['tp_point'] = tp_value
+                    params['tp'] = tp_value
+                    logger.info(f"✅ Using user-provided TP: {tp_value} points")
+            
+            if request.stop_loss and request.stop_loss.get('value'):
+                sl_type = request.stop_loss.get('type', 'percent')
+                sl_value = request.stop_loss.get('value')
+                if sl_type == 'percent':
+                    params['sl_percent'] = sl_value
+                    params['sl'] = sl_value  # Also set sl for compatibility
+                    logger.info(f"✅ Using user-provided SL: {sl_value}%")
+                else:  # point
+                    params['sl_point'] = sl_value
+                    params['sl'] = sl_value
+                    logger.info(f"✅ Using user-provided SL: {sl_value} points")
+            
+            # Update strategy with merged parameters
+            strategy['parameters'] = params
+            if strategy.get('condition'):
+                strategy['condition']['parameters'] = params
+            
+            # Also create risk object for compatibility
+            if request.take_profit or request.stop_loss:
+                strategy['risk'] = {}
+                if request.take_profit:
+                    strategy['risk']['take_profit'] = request.take_profit
+                if request.stop_loss:
+                    strategy['risk']['stop_loss'] = request.stop_loss
+                logger.info(f"✅ Risk object created with user TP/SL")
+            
+            # Add user parameters to strategy for frontend display
             strategy['userParams'] = {
                 'prompt': request.prompt.strip(),  # Store original prompt
                 'symbol': request.symbol.strip().upper(),
@@ -231,6 +277,12 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                 'trailingValue': request.trailing_stop.get('value') if request.trailing_stop else None,
                 'trailingType': request.trailing_stop.get('type') if request.trailing_stop else None,
             }
+            
+            # Log final strategy parameters
+            logger.info("=" * 80)
+            logger.info("📊 FINAL STRATEGY PARAMETERS:")
+            logger.info(f"{json.dumps(strategy.get('parameters', {}), indent=2)}")
+            logger.info("=" * 80)
             logger.info(f"✅ User parameters added to strategy")
         
         # Save strategy if requested

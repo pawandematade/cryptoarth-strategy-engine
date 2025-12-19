@@ -229,18 +229,24 @@ Return only the JSON object with 'symbol' and 'condition' fields. Include ALL co
                 strategy_data["parameters"] = condition.get("parameters", {})
             
             # For ema_crossover, ensure all required parameters exist with defaults
+            # BUT: Only set defaults if OpenAI didn't provide them - don't override OpenAI's response
             if condition.get("type") == "ema_crossover":
                 params = strategy_data.get("parameters", {})
+                # Only set EMA defaults if not provided by OpenAI
                 if not params.get("ema_fast") and not params.get("fast_period"):
                     params["ema_fast"] = 9
+                    logger.info("Setting default ema_fast: 9 (not provided by OpenAI)")
                 if not params.get("ema_slow") and not params.get("slow_period"):
                     params["ema_slow"] = 21
-                if not params.get("tp_percent") and not params.get("tp"):
-                    params["tp_percent"] = 1
-                if not params.get("sl_percent") and not params.get("sl"):
-                    params["sl_percent"] = 1
+                    logger.info("Setting default ema_slow: 21 (not provided by OpenAI)")
+                # DO NOT set default TP/SL here - they will be set from request if provided
+                # Only set defaults if OpenAI didn't provide AND request doesn't have them
+                # (This will be handled in routes_ai_strategy.py after merging user params)
                 strategy_data["parameters"] = params
                 condition["parameters"] = params
+                
+                # Log what OpenAI returned
+                logger.info(f"OpenAI returned parameters: {json.dumps(params, indent=2)}")
         
         logger.info(f"Successfully generated strategy: {strategy_data}")
         return strategy_data
