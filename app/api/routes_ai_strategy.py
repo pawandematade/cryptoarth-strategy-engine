@@ -28,6 +28,8 @@ class AIStrategyRequest(BaseModel):
     take_profit: Optional[Dict[str, Any]] = Field(default=None, description="Take profit settings: {type: 'percent'|'point', value: number}")
     stop_loss: Optional[Dict[str, Any]] = Field(default=None, description="Stop loss settings: {type: 'percent'|'point', value: number}")
     trailing_stop: Optional[Dict[str, Any]] = Field(default=None, description="Trailing stop settings: {enabled: bool, type: 'percent'|'point', value: number}")
+    trading_session: Optional[str] = Field(default=None, description="Trading session (e.g., 'asian', 'european', 'american', 'all')")
+    max_trades_per_day: Optional[int] = Field(default=None, description="Maximum trades per day")
     current_price: Optional[float] = Field(default=None, description="Current market price for context")
     market_context: Optional[str] = Field(default=None, description="Additional market context")
     
@@ -67,6 +69,7 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         allowed_fields = {
             'prompt', 'symbol', 'timeframe', 'chart_type', 
             'take_profit', 'stop_loss', 'trailing_stop',
+            'trading_session', 'max_trades_per_day',
             'current_price', 'market_context'
         }
         request_dict = request.model_dump(exclude_unset=True)
@@ -149,6 +152,8 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                 take_profit=request.take_profit,
                 stop_loss=request.stop_loss,
                 trailing_stop=request.trailing_stop,
+                trading_session=request.trading_session,
+                max_trades_per_day=request.max_trades_per_day,
                 current_price=current_price,
                 market_context=request.market_context
             )

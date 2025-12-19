@@ -290,8 +290,12 @@ def _transform_to_unified_schema(strategy_data: Dict[str, Any], user_prompt: str
                     emas.append(period)
             emas.sort()
     
-    # CRITICAL: If no EMAs found, return error - do NOT use defaults
-    if not emas:
+    # Get strategy type to determine if EMA validation is needed
+    strategy_type = unified.get("strategy_type", "").lower()
+    is_ema_strategy = "ema" in strategy_type or "moving_average" in strategy_type or "crossover" in strategy_type
+    
+    # CRITICAL: Only validate EMAs for EMA-based strategies
+    if is_ema_strategy and not emas:
         logger.error("❌ No EMA periods found in strategy - cannot generate unified schema")
         raise ValueError("No EMA periods found in strategy. Strategy must specify EMA periods explicitly.")
     
@@ -371,20 +375,26 @@ def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) ->
         del strategy_data["logic"]["ema_slow"]
         logger.warning("⚠️ Removed forbidden ema_slow field from logic")
     
-    # Ensure emas is an array
-    if "emas" not in strategy_data.get("logic", {}):
-        # Try to extract from prompt
-        ema_matches = re.findall(r'EMA\s+(\d+)|(\d+)\s+EMA|ema[_\s]+(\d+)', user_prompt, re.IGNORECASE)
-        emas = []
-        for match in ema_matches:
-            period = int(match[0] or match[1] or match[2])
-            if period not in emas:
-                emas.append(period)
-        emas.sort()
-        if emas:
-            strategy_data["logic"]["emas"] = emas
-        else:
-            raise ValueError("No EMA periods found in strategy or prompt")
+    # Get strategy type to determine if EMA validation is needed
+    strategy_type = strategy_data.get("strategy_type", "").lower()
+    is_ema_strategy = "ema" in strategy_type or "moving_average" in strategy_type or "crossover" in strategy_type
+    
+    # Only validate EMAs for EMA-based strategies
+    if is_ema_strategy:
+        # Ensure emas is an array
+        if "emas" not in strategy_data.get("logic", {}):
+            # Try to extract from prompt
+            ema_matches = re.findall(r'EMA\s+(\d+)|(\d+)\s+EMA|ema[_\s]+(\d+)', user_prompt, re.IGNORECASE)
+            emas = []
+            for match in ema_matches:
+                period = int(match[0] or match[1] or match[2])
+                if period not in emas:
+                    emas.append(period)
+            emas.sort()
+            if emas:
+                strategy_data["logic"]["emas"] = emas
+            else:
+                raise ValueError("No EMA periods found in strategy or prompt")
     
     # Ensure entry structure exists
     if "entry" not in strategy_data.get("logic", {}):

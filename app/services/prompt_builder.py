@@ -17,6 +17,8 @@ def build_prompt(
     take_profit: Optional[Dict[str, Any]] = None,
     stop_loss: Optional[Dict[str, Any]] = None,
     trailing_stop: Optional[Dict[str, Any]] = None,
+    trading_session: Optional[str] = None,
+    max_trades_per_day: Optional[int] = None,
     current_price: Optional[float] = None,
     market_context: Optional[str] = None
 ) -> str:
@@ -34,6 +36,8 @@ def build_prompt(
         take_profit: TP settings {type: 'percent'|'point', value: number}
         stop_loss: SL settings {type: 'percent'|'point', value: number}
         trailing_stop: Trailing stop settings {enabled: bool, type: 'percent'|'point', value: number}
+        trading_session: Trading session (e.g., 'asian', 'european', 'american', 'all')
+        max_trades_per_day: Maximum trades per day
         current_price: Current market price (optional context)
         market_context: Additional market context (optional)
     
@@ -88,6 +92,15 @@ def build_prompt(
             prompt_parts.append(f"Trailing Stop: {tr_value}%")
         else:
             prompt_parts.append(f"Trailing Stop: {tr_value} points")
+    
+    # Add trading session
+    if trading_session:
+        session_name = trading_session.capitalize() if trading_session != 'all' else 'All Sessions'
+        prompt_parts.append(f"Trading Session: {session_name}")
+    
+    # Add max trades per day
+    if max_trades_per_day:
+        prompt_parts.append(f"Maximum Trades Per Day: {max_trades_per_day}")
     
     # Add current price context (if provided)
     if current_price:

@@ -474,7 +474,7 @@ def post_strategy_performance(strategy_id: int, request: BacktestSettingsRequest
 
 def _get_strategy_performance_internal(strategy_id: int, backtest_settings: Optional[Dict[str, Any]]):
     """
-    Get strategy performance metrics.
+    Internal function to get strategy performance metrics.
     
     Behavior:
     - If strategy is LIVE (deployed): Return LIVE performance from runtime store
@@ -483,16 +483,12 @@ def _get_strategy_performance_internal(strategy_id: int, backtest_settings: Opti
     
     Args:
         strategy_id: Strategy ID
-        request: Optional BacktestSettingsRequest with backtest_settings
+        backtest_settings: Optional dict with backtest settings
     
     Returns:
         PerformanceResponse with summary and trades
     """
     try:
-        # Extract backtest settings if provided
-        backtest_settings = None
-        if request and request.backtest_settings:
-            backtest_settings = request.backtest_settings
         # Load strategy by ID
         strategy = _get_strategy_by_id(strategy_id)
         
