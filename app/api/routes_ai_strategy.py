@@ -112,60 +112,67 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             except Exception as e:
                 logger.warning(f"Could not retrieve current price from Redis: {e}")
         
-        # CRITICAL: Enhance prompt with additional parameters if provided
-        # Start with the original user prompt - DO NOT MODIFY IT DIRECTLY
-        enhanced_prompt = request.prompt.strip()
-        original_prompt_length = len(enhanced_prompt)
+        # CRITICAL: Create a STRUCTURED prompt that includes ALL payload parameters
+        # OpenAI needs to see ALL parameters clearly, not just appended to description
+        original_prompt = request.prompt.strip()
         
-        logger.info(f"📝 Starting with Original Prompt: {enhanced_prompt}")
-        logger.info(f"📝 Original Prompt Length: {original_prompt_length}")
+        logger.info(f"📝 Original User Prompt: {original_prompt}")
+        logger.info(f"📝 Original Prompt Length: {len(original_prompt)}")
         
-        # Add timeframe to prompt if provided
+        # Build a structured prompt that clearly separates description from parameters
+        # This format makes it crystal clear to OpenAI what parameters to use
+        structured_prompt_parts = []
+        structured_prompt_parts.append(f"Strategy Description: {original_prompt}")
+        
+        # Add all parameters in a clear, structured format
+        if request.symbol:
+            structured_prompt_parts.append(f"Symbol: {request.symbol.strip().upper()}")
+            logger.info(f"📝 Parameter - Symbol: {request.symbol.strip().upper()}")
+        
         if request.timeframe:
-            enhanced_prompt += f" Timeframe: {request.timeframe}."
-            logger.info(f"📝 Added Timeframe: {request.timeframe}")
+            structured_prompt_parts.append(f"Timeframe: {request.timeframe}")
+            logger.info(f"📝 Parameter - Timeframe: {request.timeframe}")
         
-        # Add chart type to prompt if provided
         if request.chart_type:
             chart_type_name = "Heikin Ashi" if request.chart_type == "heikin_ashi" else "Candles"
-            enhanced_prompt += f" Chart Type: {chart_type_name}."
-            logger.info(f"📝 Added Chart Type: {chart_type_name}")
+            structured_prompt_parts.append(f"Chart Type: {chart_type_name}")
+            logger.info(f"📝 Parameter - Chart Type: {chart_type_name}")
         
-        # Add take profit to prompt if provided
         if request.take_profit and request.take_profit.get('value'):
             tp_type = request.take_profit.get('type', 'percent')
             tp_value = request.take_profit.get('value')
             if tp_type == 'percent':
-                enhanced_prompt += f" Take Profit: {tp_value}%."
+                structured_prompt_parts.append(f"Take Profit: {tp_value}% (percentage)")
             else:
-                enhanced_prompt += f" Take Profit: {tp_value} points."
-            logger.info(f"📝 Added Take Profit: {tp_value} {tp_type}")
+                structured_prompt_parts.append(f"Take Profit: {tp_value} points")
+            logger.info(f"📝 Parameter - Take Profit: {tp_value} {tp_type}")
         
-        # Add stop loss to prompt if provided
         if request.stop_loss and request.stop_loss.get('value'):
             sl_type = request.stop_loss.get('type', 'percent')
             sl_value = request.stop_loss.get('value')
             if sl_type == 'percent':
-                enhanced_prompt += f" Stop Loss: {sl_value}%."
+                structured_prompt_parts.append(f"Stop Loss: {sl_value}% (percentage)")
             else:
-                enhanced_prompt += f" Stop Loss: {sl_value} points."
-            logger.info(f"📝 Added Stop Loss: {sl_value} {sl_type}")
+                structured_prompt_parts.append(f"Stop Loss: {sl_value} points")
+            logger.info(f"📝 Parameter - Stop Loss: {sl_value} {sl_type}")
         
-        # Add trailing stop to prompt if provided
         if request.trailing_stop and request.trailing_stop.get('enabled') and request.trailing_stop.get('value'):
             tr_type = request.trailing_stop.get('type', 'percent')
             tr_value = request.trailing_stop.get('value')
             if tr_type == 'percent':
-                enhanced_prompt += f" Trailing Stop: {tr_value}%."
+                structured_prompt_parts.append(f"Trailing Stop: {tr_value}% (percentage)")
             else:
-                enhanced_prompt += f" Trailing Stop: {tr_value} points."
-            logger.info(f"📝 Added Trailing Stop: {tr_value} {tr_type}")
+                structured_prompt_parts.append(f"Trailing Stop: {tr_value} points")
+            logger.info(f"📝 Parameter - Trailing Stop: {tr_value} {tr_type}")
         
-        # Log the final enhanced prompt
+        # Create the final structured prompt
+        enhanced_prompt = "\n".join(structured_prompt_parts)
+        
+        # Log the final structured prompt
         logger.info("=" * 80)
-        logger.info(f"📝 FINAL ENHANCED PROMPT: {enhanced_prompt}")
+        logger.info(f"📝 FINAL STRUCTURED PROMPT (with ALL parameters):")
+        logger.info(enhanced_prompt)
         logger.info(f"📝 Enhanced Prompt Length: {len(enhanced_prompt)}")
-        logger.info(f"📝 Characters Added: {len(enhanced_prompt) - original_prompt_length}")
         logger.info("=" * 80)
         
         # Generate strategy using OpenAI
