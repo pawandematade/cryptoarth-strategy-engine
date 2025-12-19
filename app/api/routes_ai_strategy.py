@@ -171,8 +171,16 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         # Generate strategy using OpenAI
         try:
             logger.info("🤖 Calling OpenAI service to generate strategy...")
+            logger.info(f"📝 Request ID: {request.request_id}")
+            logger.info(f"📝 Timestamp: {request._timestamp}")
             logger.info(f"📝 Sending to OpenAI - Original Prompt: {request.prompt}")
             logger.info(f"📝 Sending to OpenAI - Enhanced Prompt: {enhanced_prompt}")
+            logger.info(f"📝 Enhanced Prompt Hash (first 200 chars): {enhanced_prompt[:200]}")
+            
+            # Log prompt comparison if this is not the first request
+            # This helps identify if same prompt is being sent
+            logger.info(f"📝 Full Enhanced Prompt Length: {len(enhanced_prompt)}")
+            logger.info(f"📝 Enhanced Prompt (FULL): {enhanced_prompt}")
             
             if current_price or request.market_context:
                 strategy = generate_strategy_with_context(

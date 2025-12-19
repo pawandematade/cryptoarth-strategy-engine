@@ -151,8 +151,16 @@ CRITICAL INSTRUCTIONS - READ CAREFULLY:
 
 5. Different descriptions MUST result in DIFFERENT parameter structures.
 6. Pay attention to EVERY word - "once", "candle close", "high break", "then take trade" are all important.
+7. For SuperTrend: Extract period and multiplier EXACTLY as mentioned. 
+   - "value 7 3" means period=7, multiplier=3
+   - "value 10 2" means period=10, multiplier=2
+   - DO NOT use default values if different values are specified.
+8. CRITICAL: If the description says "value 7 3", return period=7, multiplier=3.
+   If it says "value 10 2", return period=10, multiplier=2.
+   These are DIFFERENT strategies and MUST have DIFFERENT parameters.
 
-Return only the JSON object with 'symbol' and 'condition' fields. Include ALL conditions from the description."""
+Return only the JSON object with 'symbol' and 'condition' fields. Include ALL conditions from the description.
+IMPORTANT: Generate a UNIQUE strategy for THIS specific description. Do not reuse previous responses."""
 
         # Call OpenAI API
         # Note: response_format only works with certain models (gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106+)
@@ -163,7 +171,7 @@ Return only the JSON object with 'symbol' and 'condition' fields. Include ALL co
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.3,  # Lower temperature for more consistent, structured output
+            "temperature": 0.8,  # Higher temperature to ensure different responses for different prompts
         }
         
         # Only add response_format for compatible models
@@ -176,8 +184,11 @@ Return only the JSON object with 'symbol' and 'condition' fields. Include ALL co
         content = response.choices[0].message.content.strip()
         logger.info("=" * 80)
         logger.info("🤖 OPENAI RESPONSE RECEIVED")
-        logger.info(f"Response Content: {content}")
+        logger.info(f"Response Content (FULL): {content}")
         logger.info(f"Response Length: {len(content)}")
+        logger.info(f"Response Hash (first 200 chars): {content[:200]}")
+        logger.info(f"Model Used: {OPENAI_MODEL}")
+        logger.info(f"Temperature Used: 0.8")
         logger.info("=" * 80)
         
         # Try to extract JSON from the response (in case there's extra text)
