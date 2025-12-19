@@ -225,37 +225,57 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             )
         
         # CRITICAL: Merge user-provided TP/SL into strategy parameters
-        # This ensures user's TP/SL values override any defaults
+        # This ensures user's TP/SL values override any defaults or OpenAI response
         if strategy:
             params = strategy.get('parameters', {})
             condition_params = strategy.get('condition', {}).get('parameters', {})
             if condition_params:
                 params.update(condition_params)
             
-            # Merge user-provided TP/SL into parameters
+            # CRITICAL: Always use user-provided TP/SL from request (they override OpenAI response)
+            # This ensures the strategy uses the exact values from the payload
             if request.take_profit and request.take_profit.get('value'):
                 tp_type = request.take_profit.get('type', 'percent')
                 tp_value = request.take_profit.get('value')
+                # Remove any existing TP values from OpenAI response
+                params.pop('tp_percent', None)
+                params.pop('tp_point', None)
+                params.pop('tp', None)
+                # Set the user-provided TP
                 if tp_type == 'percent':
                     params['tp_percent'] = tp_value
                     params['tp'] = tp_value  # Also set tp for compatibility
-                    logger.info(f"✅ Using user-provided TP: {tp_value}%")
+                    logger.info(f"✅ OVERRIDING with user-provided TP: {tp_value}%")
                 else:  # point
                     params['tp_point'] = tp_value
                     params['tp'] = tp_value
-                    logger.info(f"✅ Using user-provided TP: {tp_value} points")
+                    logger.info(f"✅ OVERRIDING with user-provided TP: {tp_value} points")
+            else:
+                logger.info("⚠️ No user-provided TP - using OpenAI response or defaults")
             
             if request.stop_loss and request.stop_loss.get('value'):
                 sl_type = request.stop_loss.get('type', 'percent')
                 sl_value = request.stop_loss.get('value')
+                # Remove any existing SL values from OpenAI response
+                params.pop('sl_percent', None)
+                params.pop('sl_point', None)
+                params.pop('sl', None)
+                # Set the user-provided SL
                 if sl_type == 'percent':
                     params['sl_percent'] = sl_value
                     params['sl'] = sl_value  # Also set sl for compatibility
-                    logger.info(f"✅ Using user-provided SL: {sl_value}%")
+                    logger.info(f"✅ OVERRIDING with user-provided SL: {sl_value}%")
                 else:  # point
                     params['sl_point'] = sl_value
                     params['sl'] = sl_value
-                    logger.info(f"✅ Using user-provided SL: {sl_value} points")
+                    logger.info(f"✅ OVERRIDING with user-provided SL: {sl_value} points")
+            else:
+                logger.info("⚠️ No user-provided SL - using OpenAI response or defaults")
+            
+            # Also ensure symbol matches the request
+            if request.symbol:
+                strategy['symbol'] = request.symbol.strip().upper()
+                logger.info(f"✅ Using user-provided Symbol: {strategy['symbol']}")
             
             # Update strategy with merged parameters
             strategy['parameters'] = params

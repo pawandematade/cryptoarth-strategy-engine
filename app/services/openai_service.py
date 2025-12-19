@@ -159,8 +159,32 @@ CRITICAL INSTRUCTIONS - READ CAREFULLY:
    If it says "value 10 2", return period=10, multiplier=2.
    These are DIFFERENT strategies and MUST have DIFFERENT parameters.
 
-Return only the JSON object with 'symbol' and 'condition' fields. Include ALL conditions from the description.
-IMPORTANT: Generate a UNIQUE strategy for THIS specific description. Do not reuse previous responses."""
+9. MANDATORY: Extract and include ALL parameters from the description:
+   - If "Take Profit: 2000 points" is mentioned → add "tp_point": 2000 to parameters
+   - If "Take Profit: 1%" is mentioned → add "tp_percent": 1 to parameters
+   - If "Stop Loss: 2000 points" is mentioned → add "sl_point": 2000 to parameters
+   - If "Stop Loss: 1%" is mentioned → add "sl_percent": 1 to parameters
+   - If "Timeframe: 15MIN" is mentioned → this is important context (may be stored separately)
+   - DO NOT ignore these parameters - they are part of the strategy requirements
+
+10. EXAMPLE with parameters:
+    Description: "make super trend strategy value 7 3 Timeframe: 15MIN. Chart Type: Candles. Take Profit: 2000 points. Stop Loss: 2000 points."
+    MUST return: {{
+      "symbol": "BTCUSD",
+      "condition": {{
+        "type": "supertrend",
+        "parameters": {{
+          "period": 7,
+          "multiplier": 3,
+          "tp_point": 2000,
+          "sl_point": 2000
+        }}
+      }}
+    }}
+
+Return only the JSON object with 'symbol' and 'condition' fields. Include ALL conditions and parameters from the description.
+IMPORTANT: Generate a UNIQUE strategy for THIS specific description. Do not reuse previous responses.
+CRITICAL: Include ALL parameters mentioned in the description (TP, SL, timeframe context, etc.)."""
 
         # Call OpenAI API
         # Note: response_format only works with certain models (gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106+)
