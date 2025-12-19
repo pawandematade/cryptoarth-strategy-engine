@@ -381,12 +381,14 @@ def _apply_brokerage_to_performance(
     This is a TRANSFORMER - it modifies the display values only.
     Does NOT modify StrategyRunner or BacktestEngine outputs.
     
+    Calculates BOTH Maker and Taker brokerage scenarios.
+    
     Args:
         performance: Performance dict with summary and trades
-        backtest_settings: Dict with initialCapital, leverage, capitalPerTrade, orderType
+        backtest_settings: Dict with initialCapital, leverage, capitalPerTrade (NO orderType)
     
     Returns:
-        Transformed performance dict with brokerage applied
+        Transformed performance dict with brokerage applied (both maker and taker)
     """
     if not backtest_settings:
         return performance
@@ -394,17 +396,19 @@ def _apply_brokerage_to_performance(
     initial_capital = float(backtest_settings.get('initialCapital', 100000))
     leverage = float(backtest_settings.get('leverage', 1))
     capital_per_trade_pct = float(backtest_settings.get('capitalPerTrade', 10)) / 100.0
-    order_type = backtest_settings.get('orderType', 'maker')
     
     # Brokerage rates
-    brokerage_rate = 0.0002 if order_type == 'maker' else 0.0005  # 0.02% or 0.05%
+    maker_rate = 0.0002  # 0.02%
+    taker_rate = 0.0005  # 0.05%
     
     # Capital per trade
     capital_per_trade = initial_capital * capital_per_trade_pct
     
-    # Transform trades
+    # Transform trades - calculate for both maker and taker
     transformed_trades = []
-    total_brokerage = 0.0
+    total_brokerage_maker = 0.0
+    total_brokerage_taker = 0.0
+    gross_pnl_currency = 0.0
     
     for trade in performance.get('trades', []):
         entry_price = float(trade.get('entry_price', 0))
@@ -413,24 +417,38 @@ def _apply_brokerage_to_performance(
         pnl_points = float(trade.get('pnl', 0))
         
         # Calculate position size (in units)
-        # Capital per trade with leverage
+        # Position size = capital × leverage × (capital_percent / 100)
         leveraged_capital = capital_per_trade * leverage
         position_size = leveraged_capital / entry_price if entry_price > 0 else 0
         
-        # Calculate brokerage (on both entry and exit)
-        entry_brokerage = leveraged_capital * brokerage_rate
-        exit_brokerage = position_size * exit_price * brokerage_rate
-        trade_brokerage = entry_brokerage + exit_brokerage
-        total_brokerage += trade_brokerage
+        # Calculate gross PnL in currency (before brokerage)
+        gross_pnl_trade = pnl_points * position_size
+        gross_pnl_currency += gross_pnl_trade
         
-        # Calculate PnL in currency (points * position_size - brokerage)
-        pnl_currency = (pnl_points * position_size) - trade_brokerage
+        # Calculate brokerage for Maker (0.02%)
+        entry_brokerage_maker = leveraged_capital * maker_rate
+        exit_brokerage_maker = position_size * exit_price * maker_rate
+        trade_brokerage_maker = entry_brokerage_maker + exit_brokerage_maker
+        total_brokerage_maker += trade_brokerage_maker
+        
+        # Calculate brokerage for Taker (0.05%)
+        entry_brokerage_taker = leveraged_capital * taker_rate
+        exit_brokerage_taker = position_size * exit_price * taker_rate
+        trade_brokerage_taker = entry_brokerage_taker + exit_brokerage_taker
+        total_brokerage_taker += trade_brokerage_taker
+        
+        # Calculate Net PnL for both scenarios
+        net_pnl_maker = gross_pnl_trade - trade_brokerage_maker
+        net_pnl_taker = gross_pnl_trade - trade_brokerage_taker
         
         # Create transformed trade
         transformed_trade = trade.copy()
-        transformed_trade['pnl_currency'] = round(pnl_currency, 2)
         transformed_trade['pnl_points'] = pnl_points  # Keep original points
-        transformed_trade['brokerage'] = round(trade_brokerage, 2)
+        transformed_trade['gross_pnl_currency'] = round(gross_pnl_trade, 2)
+        transformed_trade['brokerage_maker'] = round(trade_brokerage_maker, 2)
+        transformed_trade['brokerage_taker'] = round(trade_brokerage_taker, 2)
+        transformed_trade['net_pnl_maker'] = round(net_pnl_maker, 2)
+        transformed_trade['net_pnl_taker'] = round(net_pnl_taker, 2)
         transformed_trade['position_size'] = round(position_size, 4)
         
         transformed_trades.append(transformed_trade)
@@ -438,16 +456,22 @@ def _apply_brokerage_to_performance(
     # Transform summary
     summary = performance.get('summary', {}).copy()
     
-    # Calculate net PnL in currency
-    net_pnl_currency = sum(t.get('pnl_currency', 0) for t in transformed_trades)
+    # Calculate net PnL in currency for both scenarios
+    net_pnl_currency_maker = gross_pnl_currency - total_brokerage_maker
+    net_pnl_currency_taker = gross_pnl_currency - total_brokerage_taker
     
     # Update summary with currency values
-    summary['net_pnl_currency'] = round(net_pnl_currency, 2)
+    summary['gross_pnl_currency'] = round(gross_pnl_currency, 2)
+    summary['net_pnl_currency_maker'] = round(net_pnl_currency_maker, 2)
+    summary['net_pnl_currency_taker'] = round(net_pnl_currency_taker, 2)
+    summary['total_brokerage_maker'] = round(total_brokerage_maker, 2)
+    summary['total_brokerage_taker'] = round(total_brokerage_taker, 2)
     summary['net_pnl_points'] = summary.get('net_pnl', 0)  # Keep original points
-    summary['total_brokerage'] = round(total_brokerage, 2)
     summary['initial_capital'] = initial_capital
-    summary['final_capital'] = round(initial_capital + net_pnl_currency, 2)
-    summary['return_pct'] = round((net_pnl_currency / initial_capital) * 100, 2) if initial_capital > 0 else 0
+    summary['final_capital_maker'] = round(initial_capital + net_pnl_currency_maker, 2)
+    summary['final_capital_taker'] = round(initial_capital + net_pnl_currency_taker, 2)
+    summary['return_pct_maker'] = round((net_pnl_currency_maker / initial_capital) * 100, 2) if initial_capital > 0 else 0
+    summary['return_pct_taker'] = round((net_pnl_currency_taker / initial_capital) * 100, 2) if initial_capital > 0 else 0
     
     return {
         'summary': summary,
