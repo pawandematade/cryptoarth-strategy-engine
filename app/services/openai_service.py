@@ -278,8 +278,21 @@ Return only the JSON object with 'symbol' and 'condition' fields."""
             logger.error("Missing condition type in strategy")
             return None
         
-        # Ensure symbol matches
-        strategy_data["symbol"] = symbol
+        # Extract symbol from OpenAI response or prompt
+        # Symbol should be in OpenAI's response, but if not, extract from prompt
+        if "symbol" not in strategy_data or not strategy_data.get("symbol"):
+            # Try to extract from prompt (look for "Symbol: XXX" pattern)
+            import re
+            symbol_match = re.search(r'Symbol:\s*([A-Z0-9]+)', user_prompt, re.IGNORECASE)
+            if symbol_match:
+                strategy_data["symbol"] = symbol_match.group(1).upper()
+                logger.info(f"✅ Extracted symbol from prompt: {strategy_data['symbol']}")
+            else:
+                strategy_data["symbol"] = "BTCUSD"  # Default fallback
+                logger.warning("⚠️ Could not extract symbol, using default: BTCUSD")
+        else:
+            # Ensure symbol is uppercase
+            strategy_data["symbol"] = str(strategy_data["symbol"]).upper()
         
         # Normalize strategy type - handle moving_average as ema_crossover if it has EMA parameters
         if condition.get("type") == "moving_average":
