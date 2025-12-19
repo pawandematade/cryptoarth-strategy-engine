@@ -291,36 +291,73 @@ def _transform_to_unified_schema(strategy_data: Dict[str, Any], user_prompt: str
             emas.sort()
     
     # Get strategy type to determine if EMA validation is needed
-    strategy_type = unified.get("strategy_type", "").lower()
-    is_ema_strategy = "ema" in strategy_type or "moving_average" in strategy_type or "crossover" in strategy_type
+    strategy_type = str(unified.get("strategy_type", "")).lower()
+    # Check if it's an EMA-based strategy
+    is_ema_strategy = (
+        "ema" in strategy_type or 
+        "moving_average" in strategy_type or 
+        "crossover" in strategy_type or
+        "moving average" in strategy_type
+    )
     
-    # CRITICAL: Only validate EMAs for EMA-based strategies
-    if is_ema_strategy and not emas:
+    # Check if it's a non-EMA strategy (SuperTrend, RSI, etc.)
+    is_non_ema_strategy = (
+        "supertrend" in strategy_type or
+        "super trend" in strategy_type or
+        "rsi" in strategy_type or
+        "macd" in strategy_type or
+        "bollinger" in strategy_type
+    )
+    
+    # CRITICAL: Only validate EMAs for EMA-based strategies (skip for SuperTrend and other non-EMA strategies)
+    if is_ema_strategy and not is_non_ema_strategy and not emas:
         logger.error("❌ No EMA periods found in strategy - cannot generate unified schema")
-        raise ValueError("No EMA periods found in strategy. Strategy must specify EMA periods explicitly.")
+        raise ValueError("No EMA periods found in strategy. For EMA-based strategies, please specify EMA periods explicitly (e.g., EMA 10, 20, 50).")
     
     # Build logic section
-    unified["logic"] = {
-        "emas": emas,
-        "entry": {
-            "buy": {
-                "crossover": f"ema_{emas[0]}_above_all",
-                "confirmation": {
-                    "type": "candle_high_break" if params.get("require_high_break") else "immediate",
-                    "reference": "second_candle",
-                    "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
+    # For non-EMA strategies (SuperTrend, etc.), preserve original logic structure from OpenAI
+    if is_non_ema_strategy:
+        # For SuperTrend and other non-EMA strategies, preserve the original logic from OpenAI
+        # Don't force EMA structure - use what OpenAI generated
+        if strategy_data.get("logic"):
+            unified["logic"] = strategy_data["logic"].copy()
+        else:
+            # If no logic from OpenAI, create minimal structure
+            unified["logic"] = {
+                "entry": {
+                    "buy": {},
+                    "sell": {}
                 }
-            },
-            "sell": {
-                "crossover": f"ema_{emas[0]}_below_all",
-                "confirmation": {
-                    "type": "candle_low_break" if params.get("require_low_break") else "immediate",
-                    "reference": "second_candle",
-                    "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
+            }
+        # Ensure entry structure exists
+        if "entry" not in unified["logic"]:
+            unified["logic"]["entry"] = {"buy": {}, "sell": {}}
+    else:
+        # For EMA-based strategies, build EMA logic structure
+        if not emas:
+            # This should not happen due to validation above, but add safety check
+            raise ValueError("Cannot build EMA logic without EMA periods")
+        unified["logic"] = {
+            "emas": emas,
+            "entry": {
+                "buy": {
+                    "crossover": f"ema_{emas[0]}_above_all",
+                    "confirmation": {
+                        "type": "candle_high_break" if params.get("require_high_break") else "immediate",
+                        "reference": "second_candle",
+                        "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
+                    }
+                },
+                "sell": {
+                    "crossover": f"ema_{emas[0]}_below_all",
+                    "confirmation": {
+                        "type": "candle_low_break" if params.get("require_low_break") else "immediate",
+                        "reference": "second_candle",
+                        "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
+                    }
                 }
             }
         }
-    }
     
     # Build risk section - POINTS only (preferred), fallback to percent if needed
     risk = {}
@@ -376,11 +413,26 @@ def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) ->
         logger.warning("⚠️ Removed forbidden ema_slow field from logic")
     
     # Get strategy type to determine if EMA validation is needed
-    strategy_type = strategy_data.get("strategy_type", "").lower()
-    is_ema_strategy = "ema" in strategy_type or "moving_average" in strategy_type or "crossover" in strategy_type
+    strategy_type = str(strategy_data.get("strategy_type", "")).lower()
+    # Check if it's an EMA-based strategy
+    is_ema_strategy = (
+        "ema" in strategy_type or 
+        "moving_average" in strategy_type or 
+        "crossover" in strategy_type or
+        "moving average" in strategy_type
+    )
     
-    # Only validate EMAs for EMA-based strategies
-    if is_ema_strategy:
+    # Check if it's a non-EMA strategy (SuperTrend, RSI, etc.)
+    is_non_ema_strategy = (
+        "supertrend" in strategy_type or
+        "super trend" in strategy_type or
+        "rsi" in strategy_type or
+        "macd" in strategy_type or
+        "bollinger" in strategy_type
+    )
+    
+    # Only validate EMAs for EMA-based strategies (skip for SuperTrend and other non-EMA strategies)
+    if is_ema_strategy and not is_non_ema_strategy:
         # Ensure emas is an array
         if "emas" not in strategy_data.get("logic", {}):
             # Try to extract from prompt
@@ -394,7 +446,7 @@ def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) ->
             if emas:
                 strategy_data["logic"]["emas"] = emas
             else:
-                raise ValueError("No EMA periods found in strategy or prompt")
+                raise ValueError("No EMA periods found in strategy or prompt. For EMA-based strategies, please specify EMA periods (e.g., EMA 10, 20, 50).")
     
     # Ensure entry structure exists
     if "entry" not in strategy_data.get("logic", {}):

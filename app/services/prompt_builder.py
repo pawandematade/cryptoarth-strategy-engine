@@ -94,12 +94,12 @@ def build_prompt(
             prompt_parts.append(f"Trailing Stop: {tr_value} points")
     
     # Add trading session
-    if trading_session:
-        session_name = trading_session.capitalize() if trading_session != 'all' else 'All Sessions'
+    if trading_session and str(trading_session).strip():
+        session_name = str(trading_session).strip().capitalize() if str(trading_session).strip().lower() != 'all' else 'All Sessions'
         prompt_parts.append(f"Trading Session: {session_name}")
     
     # Add max trades per day
-    if max_trades_per_day:
+    if max_trades_per_day and max_trades_per_day > 0:
         prompt_parts.append(f"Maximum Trades Per Day: {max_trades_per_day}")
     
     # Add current price context (if provided)

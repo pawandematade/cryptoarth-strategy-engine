@@ -184,6 +184,14 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
             # Log parameters to verify all conditions are captured
             if strategy and strategy.get('parameters'):
                 logger.info(f"Strategy Parameters: {json.dumps(strategy.get('parameters'), indent=2)}")
+        except ValueError as e:
+            # Handle validation errors (like EMA validation for SuperTrend)
+            error_msg = str(e)
+            logger.error(f"❌ Strategy validation error: {error_msg}")
+            return AIStrategyResponse(
+                success=False,
+                message=f"Strategy validation failed: {error_msg}. Please check your strategy description and try again."
+            )
         except Exception as e:
             logger.error(f"Error generating strategy: {e}", exc_info=True)
             error_msg = str(e)
@@ -198,10 +206,15 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                     success=False,
                     message=f"OpenAI API rate limit exceeded. Please try again in a few moments. Error: {error_msg}"
                 )
+            elif "No EMA periods" in error_msg:
+                return AIStrategyResponse(
+                    success=False,
+                    message=f"Strategy validation error: {error_msg}. For SuperTrend or other non-EMA strategies, please ensure your prompt clearly describes the strategy type."
+                )
             else:
                 return AIStrategyResponse(
                     success=False,
-                    message=f"Error generating strategy: {error_msg}"
+                    message=f"Error generating strategy: {error_msg}. Please check server logs for details."
                 )
         
         if not strategy:
