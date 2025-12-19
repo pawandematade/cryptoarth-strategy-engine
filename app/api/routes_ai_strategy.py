@@ -219,16 +219,36 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                     logger.info(f"✅ Entry condition: {params.get('entry_condition')}")
         except Exception as e:
             logger.error(f"Error generating strategy: {e}", exc_info=True)
-            return AIStrategyResponse(
-                success=False,
-                message=f"Error generating strategy: {str(e)}"
-            )
+            error_msg = str(e)
+            # Provide more specific error messages
+            if "API key" in error_msg or "authentication" in error_msg.lower() or "401" in error_msg or "403" in error_msg:
+                return AIStrategyResponse(
+                    success=False,
+                    message=f"OpenAI API authentication failed. Please check your OPENAI_API_KEY in .env file. Error: {error_msg}"
+                )
+            elif "rate limit" in error_msg.lower() or "429" in error_msg:
+                return AIStrategyResponse(
+                    success=False,
+                    message=f"OpenAI API rate limit exceeded. Please try again in a few moments. Error: {error_msg}"
+                )
+            else:
+                return AIStrategyResponse(
+                    success=False,
+                    message=f"Error generating strategy: {error_msg}"
+                )
         
         if not strategy:
             logger.error("❌ Strategy generation returned None. Check OpenAI service logs.")
+            # Check if client is initialized
+            from app.services.openai_service import client
+            if not client:
+                return AIStrategyResponse(
+                    success=False,
+                    message="OpenAI client not initialized. Please check OPENAI_API_KEY in .env file and restart the server."
+                )
             return AIStrategyResponse(
                 success=False,
-                message="Failed to generate strategy. Please check your OpenAI API key and try again."
+                message="Failed to generate strategy. Please check server logs for details. Possible issues: Invalid API key, network error, or OpenAI service unavailable."
             )
         
         # CRITICAL: Merge user-provided TP/SL into strategy parameters
