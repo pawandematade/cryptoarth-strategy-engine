@@ -114,18 +114,39 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         
         # Generate strategy using OpenAI
         try:
+            logger.info("🤖 Calling OpenAI service to generate strategy...")
+            logger.info(f"📝 Original Prompt: {request.prompt}")
+            logger.info(f"📝 Enhanced Prompt: {enhanced_prompt}")
+            logger.info(f"📝 Prompt Difference: {len(enhanced_prompt) - len(request.prompt)} characters added")
+            
             if current_price or request.market_context:
                 strategy = generate_strategy_with_context(
-                    user_prompt=request.prompt,
+                    user_prompt=enhanced_prompt,  # Use enhanced prompt with all parameters
                     symbol=request.symbol.strip().upper(),
                     current_price=current_price,
                     market_context=request.market_context
                 )
             else:
                 strategy = generate_strategy(
-                    user_prompt=request.prompt,
+                    user_prompt=enhanced_prompt,  # Use enhanced prompt with all parameters
                     symbol=request.symbol.strip().upper()
                 )
+            
+            logger.info(f"✅ Strategy generated successfully")
+            logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
+            logger.info(f"Strategy Symbol: {strategy.get('symbol') if strategy else 'None'}")
+            
+            # Log parameters to verify all conditions are captured
+            if strategy and strategy.get('parameters'):
+                logger.info(f"Strategy Parameters: {json.dumps(strategy.get('parameters'), indent=2)}")
+                # Check if additional conditions are present
+                params = strategy.get('parameters', {})
+                if params.get('wait_candle_close'):
+                    logger.info("✅ Candle close condition detected in parameters")
+                if params.get('require_high_break'):
+                    logger.info("✅ High break condition detected in parameters")
+                if params.get('entry_condition'):
+                    logger.info(f"✅ Entry condition: {params.get('entry_condition')}")
         except Exception as e:
             logger.error(f"Error generating strategy: {e}", exc_info=True)
             return AIStrategyResponse(
