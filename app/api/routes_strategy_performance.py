@@ -341,11 +341,13 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         if not candles_list:
             # Log detailed error for debugging (backend only) - WARNING, not ERROR
             logger.warning(f"No historical candles available for {symbol} {timeframe} - Delta Exchange returned empty response")
-            # Return structured error response (broker-agnostic)
+            # Return structured error response (broker-agnostic) - DO NOT raise exception
             return {
                 "success": False,
-                "error_code": "NO_HISTORICAL_DATA",
-                "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+                "error": {
+                    "code": "NO_HISTORICAL_DATA",
+                    "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+                }
             }
         
         # Convert to DataFrame (with order safety)
@@ -354,16 +356,29 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         if len(candles_df) == 0:
             # Log detailed error for debugging (backend only) - WARNING, not ERROR
             logger.warning(f"Empty candles DataFrame for {symbol} {timeframe} after conversion")
-            # Return structured error response (broker-agnostic)
+            # Return structured error response (broker-agnostic) - DO NOT raise exception
             return {
                 "success": False,
-                "error_code": "NO_HISTORICAL_DATA",
-                "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+                "error": {
+                    "code": "NO_HISTORICAL_DATA",
+                    "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+                }
             }
         
         # Run BacktestEngine (immutable - doesn't modify strategy_copy or candles_df)
-        engine = BacktestEngine(strategy_copy)
-        results = engine.run(candles_df)
+        try:
+            engine = BacktestEngine(strategy_copy)
+            results = engine.run(candles_df)
+        except Exception as e:
+            # BacktestEngine error - log but return structured error response (don't crash)
+            logger.error(f"BacktestEngine error for {symbol} {timeframe}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": {
+                    "code": "BACKTEST_ENGINE_ERROR",
+                    "message": "An error occurred while running the backtest. Please try again or contact support."
+                }
+            }
         
         # Group trades by date (Year → Month → Day)
         # Use original candles_list to map indices to timestamps
@@ -377,9 +392,15 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         return results
         
     except Exception as e:
-        # Only log actual system errors (not missing data)
-        logger.error(f"System error running backtest: {e}", exc_info=True)
-        raise
+        # Catch any unexpected errors and return structured response (don't crash server)
+        logger.error(f"Unexpected error running backtest: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": {
+                "code": "UNEXPECTED_ERROR",
+                "message": "An unexpected error occurred. Please try again or contact support."
+            }
+        }
 
 
 class BacktestSettingsRequest(BaseModel):
@@ -621,12 +642,13 @@ def _get_strategy_performance_internal(strategy_id: int, backtest_settings: Opti
             # Run BacktestEngine (immutable - doesn't modify strategy)
             backtest_results = _run_backtest(strategy)
             
-            # Check if backtest returned an error response (missing data)
+            # Check if backtest returned an error response (missing data or other errors)
             if not backtest_results.get('success', True):
-                # Return error response with 422 status (Unprocessable Entity - valid request but data unavailable)
+                # Return error response with 200 status for business logic errors to prevent server crashes
+                # Frontend will check success=false to display error
                 from fastapi.responses import JSONResponse
                 return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_200_OK,
                     content=backtest_results
                 )
             
@@ -659,11 +681,19 @@ def _get_strategy_performance_internal(strategy_id: int, backtest_settings: Opti
         )
         
     except HTTPException:
+        # Re-raise HTTPException as-is (validation errors, etc.)
         raise
     except Exception as e:
-        # Only log actual system errors (not missing data cases)
-        logger.error(f"System error getting strategy performance for {strategy_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get strategy performance: {str(e)}"
+        # Catch any unexpected errors and return structured response (don't crash server)
+        logger.error(f"Unexpected error getting strategy performance for {strategy_id}: {e}", exc_info=True)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": False,
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred. Please try again or contact support."
+                }
+            }
         )
