@@ -19,6 +19,14 @@ class StrategyStatus(enum.Enum):
     ARCHIVED = "archived"
 
 
+class ExecutionStatus(enum.Enum):
+    """Execution status enum"""
+    INACTIVE = "inactive"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+
+
 class User(Base):
     """
     Local snapshot of user data from auth backend.
@@ -103,3 +111,32 @@ class StrategyVersion(Base):
 
     def __repr__(self):
         return f"<StrategyVersion(id={self.id}, strategy_id={self.strategy_id}, version={self.version})>"
+
+
+class StrategyExecution(Base):
+    """
+    Strategy execution activation records.
+    
+    Tracks which version of a strategy is currently active for execution.
+    Only one ACTIVE execution per strategy_id is allowed.
+    """
+    __tablename__ = "strategy_executions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True)
+    strategy_version = Column(Integer, nullable=False, comment="Version number from strategy_versions")
+    status = Column(Enum(ExecutionStatus), nullable=False, default=ExecutionStatus.INACTIVE, index=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True, comment="UTC timestamp when activated")
+    deactivated_at = Column(DateTime(timezone=True), nullable=True, comment="UTC timestamp when deactivated")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    strategy = relationship("Strategy", backref="executions")
+
+    __table_args__ = (
+        {"comment": "Strategy execution activation. Only one ACTIVE execution per strategy_id allowed."}
+    )
+
+    def __repr__(self):
+        return f"<StrategyExecution(id={self.id}, strategy_id={self.strategy_id}, strategy_version={self.strategy_version}, status={self.status.value})>"

@@ -9,6 +9,7 @@ from app.api.routes_strategy import router as strategy_router
 from app.api.routes_strategy_performance import router as strategy_performance_router
 from app.api.routes_strategy_save import router as strategy_save_router
 from app.api.routes_strategy_edit import router as strategy_edit_router
+from app.api.routes_strategy_execution import router as strategy_execution_router
 from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
 from app.api.routes_websocket import router as websocket_router
@@ -75,6 +76,7 @@ app.include_router(strategy_router, prefix="/auth")  # Strategy performance metr
 app.include_router(strategy_performance_router, prefix="/auth")  # Strategy performance API
 app.include_router(strategy_save_router, prefix="", tags=["Strategy Save"])  # Strategy save (TEMP → SAVED)
 app.include_router(strategy_edit_router, prefix="", tags=["Strategy Edit"])  # Strategy edit (create new version)
+app.include_router(strategy_execution_router, prefix="", tags=["Strategy Execution"])  # Strategy execution activation
 app.include_router(credits_router, prefix="/auth")  # Credits management
 app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
 app.include_router(websocket_router, prefix="/auth")  # WebSocket for live prices
