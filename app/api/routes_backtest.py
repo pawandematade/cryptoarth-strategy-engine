@@ -120,7 +120,23 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         
         symbol = strategy_copy.get('symbol', 'BTCUSD')
         meta = strategy_copy.get('meta', {})
-        timeframe = meta.get('timeframe', '15MIN')
+        
+        # Get timeframe from multiple possible locations
+        timeframe = (
+            meta.get('timeframe') or
+            strategy_copy.get('userParams', {}).get('timeframe') or
+            strategy_copy.get('timeframe') or
+            '15MIN'  # Default fallback
+        )
+        
+        # Validate timeframe is present (even if defaulted)
+        if not timeframe or timeframe == '15MIN' and not meta.get('timeframe') and not strategy_copy.get('userParams', {}).get('timeframe'):
+            logger.warning(f"Strategy missing explicit timeframe, using default: {timeframe}")
+        
+        # Ensure timeframe is in meta for consistency
+        if not meta.get('timeframe'):
+            meta['timeframe'] = timeframe
+            strategy_copy['meta'] = meta
         
         # Fetch historical candles
         # Note: fetch_ohlcv now handles UI → Delta mapping automatically
@@ -312,6 +328,27 @@ def preview_backtest(request: PreviewBacktestRequest):
             raise HTTPException(
                 status_code=400,
                 detail="Strategy missing required 'risk' section"
+            )
+        
+        # Validate timeframe is present
+        meta = strategy.get('meta', {})
+        timeframe = (
+            meta.get('timeframe') or
+            strategy.get('userParams', {}).get('timeframe') or
+            strategy.get('timeframe')
+        )
+        
+        if not timeframe:
+            logger.warning(f"Strategy missing timeframe: symbol={strategy.get('symbol', 'UNKNOWN')}")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "success": False,
+                    "error": {
+                        "code": "MISSING_TIMEFRAME",
+                        "message": "Please select a timeframe before running backtest."
+                    }
+                }
             )
         
         # Validate backtest settings

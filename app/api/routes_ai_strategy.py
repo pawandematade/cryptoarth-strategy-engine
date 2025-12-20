@@ -806,7 +806,23 @@ def _run_preview_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         
         symbol = strategy_copy.get('symbol', 'BTCUSD')
         meta = strategy_copy.get('meta', {})
-        timeframe = meta.get('timeframe', '15MIN')
+        
+        # Get timeframe from multiple possible locations
+        timeframe = (
+            meta.get('timeframe') or
+            strategy_copy.get('userParams', {}).get('timeframe') or
+            strategy_copy.get('timeframe') or
+            '15MIN'  # Default fallback
+        )
+        
+        # Validate timeframe is present (even if defaulted)
+        if not timeframe or (timeframe == '15MIN' and not meta.get('timeframe') and not strategy_copy.get('userParams', {}).get('timeframe')):
+            logger.warning(f"Strategy missing explicit timeframe, using default: {timeframe}")
+        
+        # Ensure timeframe is in meta for consistency
+        if not meta.get('timeframe'):
+            meta['timeframe'] = timeframe
+            strategy_copy['meta'] = meta
         
         # Fetch historical candles
         # Note: fetch_ohlcv now handles UI → Delta mapping automatically
