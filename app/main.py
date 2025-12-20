@@ -14,6 +14,7 @@ from app.api.routes_strategy_execution import router as strategy_execution_route
 from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
 from app.api.routes_websocket import router as websocket_router
+from app.api.routes_backtest import router as backtest_router
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
@@ -144,6 +145,7 @@ app.include_router(strategy_execution_router, prefix="", tags=["Strategy Executi
 app.include_router(credits_router, prefix="/auth")  # Credits management
 app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
 app.include_router(websocket_router, prefix="/auth")  # WebSocket for live prices
+app.include_router(backtest_router, prefix="", tags=["Backtest"])  # Backtest (no /auth prefix - direct Strategy Engine endpoint)
 
 @app.get("/")
 def health():
