@@ -141,19 +141,53 @@ def fetch_ohlcv(
         
         data = response.json()
         
-        # Validate API response success
-        if not data.get('success', False):
-            error_msg = data.get('error', {}).get('message', 'Unknown error') if isinstance(data.get('error'), dict) else 'API returned success=false'
-            logger.warning(f"Delta Exchange API returned success=false: {error_msg}")
-            logger.warning(f"  Requested: symbol={delta_symbol}, resolution={delta_resolution}")
+        # Validate API response success (only if data is a dict)
+        if isinstance(data, dict):
+            if not data.get('success', True):  # Default to True if 'success' key doesn't exist
+                error_msg = data.get('error', {}).get('message', 'Unknown error') if isinstance(data.get('error'), dict) else 'API returned success=false'
+                logger.warning(f"Delta Exchange API returned success=false: {error_msg}")
+                logger.warning(f"  Requested: symbol={delta_symbol}, resolution={delta_resolution}")
+                return []
+        
+        # SAFELY extract candles from response - handle ALL possible formats
+        candles = []
+        
+        if isinstance(data, list):
+            # Case 1: Response is a list directly (candles array)
+            candles = data
+            logger.debug(f"Delta Exchange returned list directly (not wrapped in dict)")
+        elif isinstance(data, dict):
+            # Case 2: Response is a dict - check multiple possible locations
+            result = data.get('result')
+            
+            if isinstance(result, list):
+                # Case 2a: result is a list (candles array)
+                candles = result
+                logger.debug(f"Delta Exchange returned candles in data['result'] (list)")
+            elif isinstance(result, dict):
+                # Case 2b: result is a dict, check for 'candles' key
+                candles = result.get('candles', [])
+                logger.debug(f"Delta Exchange returned candles in data['result']['candles']")
+            else:
+                # Case 2c: result doesn't exist or is None, check for 'candles' at top level
+                candles = data.get('candles', [])
+                if candles:
+                    logger.debug(f"Delta Exchange returned candles in data['candles'] (top level)")
+                else:
+                    logger.debug(f"Delta Exchange response structure: data keys = {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
+        else:
+            # Case 3: Unexpected response type
+            logger.warning(f"Delta Exchange returned unexpected response type: {type(data)}")
+            logger.warning(f"  Response: {str(data)[:200]}...")  # Log first 200 chars
             return []
         
-        # Extract candles from response
-        result = data.get('result', {})
-        candles = result.get('candles', [])
+        # Ensure candles is a list (safety check)
+        if not isinstance(candles, list):
+            logger.warning(f"Delta Exchange returned candles as non-list type: {type(candles)}")
+            return []
         
         candle_count = len(candles) if candles else 0
-        logger.info(f"Delta Exchange returned {candle_count} candles for {delta_symbol} {delta_resolution}")
+        logger.info(f"Delta Exchange returned {candle_count} candles for {delta_symbol} {delta_resolution} (UI: {original_symbol} {original_resolution})")
         
         if not candles:
             logger.warning(f"No candles returned from Delta Exchange for {delta_symbol} {delta_resolution}")
@@ -163,6 +197,11 @@ def fetch_ohlcv(
         # Format candles to standard structure
         formatted_candles = []
         for candle in candles:
+            # Safety check: ensure candle is a dict before calling .get()
+            if not isinstance(candle, dict):
+                logger.warning(f"Skipping invalid candle format (not a dict): {type(candle)}")
+                continue
+            
             formatted_candles.append({
                 'time': candle.get('time'),
                 'open': candle.get('open'),
