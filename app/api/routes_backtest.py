@@ -2,7 +2,8 @@
 Backtest API Routes
 Direct endpoints on Strategy Engine (no /auth prefix)
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Dict, Any
 import logging
@@ -106,7 +107,14 @@ def _group_trades_by_date(trades, candles_list):
 
 
 def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
-    """Run BacktestEngine on strategy."""
+    """
+    Run BacktestEngine on strategy.
+    
+    Returns:
+        Dict with either:
+        - Success: {'success': True, 'mode': 'BACKTEST', 'summary': {...}, 'trades': [...], 'monthly_performance': {...}}
+        - Error: {'success': False, 'error_code': 'NO_HISTORICAL_DATA', 'message': '...'}
+    """
     try:
         strategy_copy = copy.deepcopy(strategy)
         
@@ -126,24 +134,26 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         candles_list = fetch_ohlcv(symbol, timeframe, start_timestamp, end_timestamp, auto_map=True)
         
         if not candles_list:
-            # Log detailed error for debugging (backend only)
+            # Log detailed error for debugging (backend only) - WARNING, not ERROR
             logger.warning(f"No historical data available for {symbol} {timeframe} - Delta Exchange returned empty response")
-            # Return generic error message to frontend (broker-agnostic)
-            raise ValueError(
-                "Backtest data is not available for the selected symbol and timeframe. "
-                "Please try a different timeframe or symbol."
-            )
+            # Return structured error response (broker-agnostic)
+            return {
+                "success": False,
+                "error_code": "NO_HISTORICAL_DATA",
+                "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+            }
         
         candles_df = _convert_candles_to_dataframe(candles_list)
         
         if len(candles_df) == 0:
-            # Log detailed error for debugging (backend only)
+            # Log detailed error for debugging (backend only) - WARNING, not ERROR
             logger.warning(f"Empty candles DataFrame for {symbol} {timeframe} after conversion")
-            # Return generic error message to frontend (broker-agnostic)
-            raise ValueError(
-                "Backtest data is not available for the selected symbol and timeframe. "
-                "Please try a different timeframe or symbol."
-            )
+            # Return structured error response (broker-agnostic)
+            return {
+                "success": False,
+                "error_code": "NO_HISTORICAL_DATA",
+                "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+            }
         
         # Run BacktestEngine
         engine = BacktestEngine(strategy_copy)
@@ -154,11 +164,13 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         
         results['mode'] = 'BACKTEST'
         results['monthly_performance'] = monthly_perf
+        results['success'] = True  # Mark as successful
         
         return results
         
     except Exception as e:
-        logger.error(f"Error running backtest: {e}", exc_info=True)
+        # Only log actual system errors (not missing data)
+        logger.error(f"System error running backtest: {e}", exc_info=True)
         raise
 
 
@@ -315,6 +327,14 @@ def preview_backtest(request: PreviewBacktestRequest):
         # Run backtest
         backtest_results = _run_backtest(strategy)
         
+        # Check if backtest returned an error response (missing data)
+        if not backtest_results.get('success', True):
+            # Return error response with 422 status (Unprocessable Entity - valid request but data unavailable)
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content=backtest_results
+            )
+        
         # Apply brokerage calculations
         transformed_results = _apply_brokerage(backtest_results, backtest_settings)
         
@@ -329,10 +349,8 @@ def preview_backtest(request: PreviewBacktestRequest):
         
     except HTTPException:
         raise
-    except ValueError as e:
-        logger.error(f"Validation error in preview backtest: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error running preview backtest: {e}", exc_info=True)
+        # Only log actual system errors (not missing data cases)
+        logger.error(f"System error running preview backtest: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
