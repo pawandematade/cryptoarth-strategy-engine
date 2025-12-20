@@ -339,13 +339,25 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         candles_list = _fetch_historical_candles(symbol, timeframe, days=365)  # 1 year for monthly view
         
         if not candles_list:
-            raise ValueError(f"No historical candles available for {symbol} {timeframe}")
+            # Log detailed error for debugging (backend only)
+            logger.warning(f"No historical candles available for {symbol} {timeframe} - Delta Exchange returned empty response")
+            # Return generic error message to frontend (broker-agnostic)
+            raise ValueError(
+                "Backtest data is not available for the selected symbol and timeframe. "
+                "Please try a different timeframe or symbol."
+            )
         
         # Convert to DataFrame (with order safety)
         candles_df = _convert_candles_to_dataframe(candles_list)
         
         if len(candles_df) == 0:
-            raise ValueError(f"Empty candles DataFrame for {symbol} {timeframe}")
+            # Log detailed error for debugging (backend only)
+            logger.warning(f"Empty candles DataFrame for {symbol} {timeframe} after conversion")
+            # Return generic error message to frontend (broker-agnostic)
+            raise ValueError(
+                "Backtest data is not available for the selected symbol and timeframe. "
+                "Please try a different timeframe or symbol."
+            )
         
         # Run BacktestEngine (immutable - doesn't modify strategy_copy or candles_df)
         engine = BacktestEngine(strategy_copy)

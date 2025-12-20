@@ -115,21 +115,35 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
         timeframe = meta.get('timeframe', '15MIN')
         
         # Fetch historical candles
-        resolution = TIMEFRAME_MAP.get(timeframe, '60')
+        # Note: fetch_ohlcv now handles UI → Delta mapping automatically
+        # Pass UI-friendly values, mapping happens inside fetch_ohlcv
         end_time = datetime.now()
         start_time = end_time - timedelta(days=365)
         start_timestamp = int(start_time.timestamp())
         end_timestamp = int(end_time.timestamp())
         
-        candles_list = fetch_ohlcv(symbol, resolution, start_timestamp, end_timestamp)
+        logger.info(f"Fetching historical candles for backtest: symbol={symbol}, timeframe={timeframe}")
+        candles_list = fetch_ohlcv(symbol, timeframe, start_timestamp, end_timestamp, auto_map=True)
         
         if not candles_list:
-            raise ValueError(f"No historical candles available for {symbol} {timeframe}")
+            # Log detailed error for debugging (backend only)
+            logger.warning(f"No historical data available for {symbol} {timeframe} - Delta Exchange returned empty response")
+            # Return generic error message to frontend (broker-agnostic)
+            raise ValueError(
+                "Backtest data is not available for the selected symbol and timeframe. "
+                "Please try a different timeframe or symbol."
+            )
         
         candles_df = _convert_candles_to_dataframe(candles_list)
         
         if len(candles_df) == 0:
-            raise ValueError(f"Empty candles DataFrame for {symbol} {timeframe}")
+            # Log detailed error for debugging (backend only)
+            logger.warning(f"Empty candles DataFrame for {symbol} {timeframe} after conversion")
+            # Return generic error message to frontend (broker-agnostic)
+            raise ValueError(
+                "Backtest data is not available for the selected symbol and timeframe. "
+                "Please try a different timeframe or symbol."
+            )
         
         # Run BacktestEngine
         engine = BacktestEngine(strategy_copy)
