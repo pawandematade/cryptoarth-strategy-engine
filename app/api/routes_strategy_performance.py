@@ -149,6 +149,67 @@ def _group_trades_by_date(trades: List[Dict[str, Any]], candles_list: List[Dict[
     return grouped
 
 
+def _calculate_max_indicator_period(strategy: Dict[str, Any]) -> int:
+    """
+    Calculate the maximum indicator period required for the strategy.
+    
+    Checks:
+    - EMA periods (logic.emas)
+    - SuperTrend period (logic.supertrend.period)
+    - RSI period (logic.rsi.period)
+    - MACD periods (logic.macd.fast_period, slow_period, signal_period)
+    - Bollinger Bands period (logic.bollinger_bands.period)
+    - Any other indicator periods
+    
+    Args:
+        strategy: Strategy dictionary
+    
+    Returns:
+        Maximum period required (default: 200 if no indicators found)
+    """
+    max_period = 0
+    logic = strategy.get('logic', {})
+    
+    # Check EMA periods
+    if 'emas' in logic and isinstance(logic['emas'], list):
+        ema_periods = [int(p) for p in logic['emas'] if isinstance(p, (int, float)) and p > 0]
+        if ema_periods:
+            max_period = max(max_period, max(ema_periods))
+    
+    # Check SuperTrend period
+    if 'supertrend' in logic and isinstance(logic['supertrend'], dict):
+        period = logic['supertrend'].get('period')
+        if isinstance(period, (int, float)) and period > 0:
+            max_period = max(max_period, int(period))
+    
+    # Check RSI period
+    if 'rsi' in logic and isinstance(logic['rsi'], dict):
+        period = logic['rsi'].get('period')
+        if isinstance(period, (int, float)) and period > 0:
+            max_period = max(max_period, int(period))
+    
+    # Check MACD periods
+    if 'macd' in logic and isinstance(logic['macd'], dict):
+        fast = logic['macd'].get('fast_period')
+        slow = logic['macd'].get('slow_period')
+        signal = logic['macd'].get('signal_period')
+        for period in [fast, slow, signal]:
+            if isinstance(period, (int, float)) and period > 0:
+                max_period = max(max_period, int(period))
+    
+    # Check Bollinger Bands period
+    if 'bollinger_bands' in logic and isinstance(logic['bollinger_bands'], dict):
+        period = logic['bollinger_bands'].get('period')
+        if isinstance(period, (int, float)) and period > 0:
+            max_period = max(max_period, int(period))
+    
+    # Default to 200 if no indicators found (safety buffer)
+    if max_period == 0:
+        max_period = 200
+    
+    return max_period
+
+
 def _convert_candles_to_dataframe(candles: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     Convert candles list to pandas DataFrame.
@@ -378,6 +439,26 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
                 "error": {
                     "code": "NO_HISTORICAL_DATA",
                     "message": "Backtest data is not available for the selected symbol and timeframe. Please try a different timeframe or symbol."
+                }
+            }
+        
+        # Validate minimum candle count based on indicator periods
+        max_period = _calculate_max_indicator_period(strategy_copy)
+        buffer = 50  # Safety buffer for indicator calculation
+        min_required_candles = max_period + buffer
+        
+        candle_count = len(candles_df)
+        
+        logger.info(f"Candle validation: count={candle_count}, max_period={max_period}, min_required={min_required_candles}")
+        
+        if candle_count < min_required_candles:
+            logger.warning(f"Insufficient historical data for {symbol} {timeframe}: {candle_count} candles < {min_required_candles} required (max indicator period: {max_period})")
+            # Return structured error response (broker-agnostic) - DO NOT raise exception
+            return {
+                "success": False,
+                "error": {
+                    "code": "INSUFFICIENT_HISTORICAL_DATA",
+                    "message": "Not enough historical data to run this strategy. Try a lower timeframe or fewer indicators."
                 }
             }
         
