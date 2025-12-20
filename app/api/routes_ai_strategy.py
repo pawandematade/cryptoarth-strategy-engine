@@ -14,7 +14,7 @@ from app.services.prompt_builder import build_prompt
 from app.store.redis_client import redis_client
 from app.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
 from app.engine.backtest_engine import BacktestEngine
-from app.feed.delta_history import fetch_ohlcv
+from app.feed.delta_history import fetch_ohlcv, get_default_lookback_days
 from app.database import get_db
 from app.services.strategy_save_service import save_strategy
 
@@ -886,16 +886,19 @@ def _run_preview_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
             meta['timeframe'] = timeframe
             strategy_copy['meta'] = meta
         
-        # Fetch historical candles
-        # Note: fetch_ohlcv now handles UI → Delta mapping automatically
-        # Pass UI-friendly values (symbol and timeframe), mapping happens inside fetch_ohlcv
-        end_time = datetime.now()
-        start_time = end_time - timedelta(days=365)
-        start_timestamp = int(start_time.timestamp())
-        end_timestamp = int(end_time.timestamp())
+        # Get lookback_days from strategy or use default based on timeframe
+        lookback_days = strategy_copy.get('lookback_days')
+        if lookback_days is None:
+            lookback_days = get_default_lookback_days(timeframe)
         
-        logger.info(f"Fetching historical candles for preview backtest: symbol={symbol}, timeframe={timeframe}")
-        candles_list = fetch_ohlcv(symbol, timeframe, start_timestamp, end_timestamp, auto_map=True)
+        # Fetch historical candles with controlled lookback window
+        # Note: fetch_ohlcv now handles UI → Delta mapping and chunked fetching automatically
+        end_time = datetime.now()
+        end_timestamp = int(end_time.timestamp())
+        start_timestamp = int((end_time - timedelta(days=lookback_days)).timestamp())
+        
+        logger.info(f"Fetching historical candles for preview backtest: symbol={symbol}, timeframe={timeframe}, lookback_days={lookback_days}")
+        candles_list = fetch_ohlcv(symbol, timeframe, start_timestamp, end_timestamp, auto_map=True, lookback_days=lookback_days)
         
         if not candles_list:
             # Log detailed error for debugging (backend only) - WARNING, not ERROR
@@ -923,23 +926,22 @@ def _run_preview_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
                 }
             }
         
-        # Validate minimum candle count based on indicator periods
+        # Pre-backtest safety validation: Calculate required candles
         max_period = _calculate_max_indicator_period(strategy_copy)
-        buffer = 50  # Safety buffer for indicator calculation
-        min_required_candles = max_period + buffer
+        required_candles = max_period * 2  # Require 2x max period for reliable backtest
         
         candle_count = len(candles_df)
         
-        logger.info(f"Candle validation: count={candle_count}, max_period={max_period}, min_required={min_required_candles}")
+        logger.info(f"Pre-backtest validation: count={candle_count}, max_period={max_period}, required={required_candles} (max_period * 2)")
         
-        if candle_count < min_required_candles:
-            logger.warning(f"Insufficient historical data for {symbol} {timeframe}: {candle_count} candles < {min_required_candles} required (max indicator period: {max_period})")
+        if candle_count < required_candles:
+            logger.warning(f"Insufficient historical data for {symbol} {timeframe}: {candle_count} candles < {required_candles} required (max indicator period: {max_period})")
             # Return structured error response (broker-agnostic) - DO NOT raise exception
             return {
                 "success": False,
                 "error": {
-                    "code": "INSUFFICIENT_HISTORICAL_DATA",
-                    "message": "Not enough historical data to run this strategy. Try a lower timeframe or fewer indicators."
+                    "code": "INSUFFICIENT_DATA",
+                    "message": "Not enough historical data to run this strategy. Try a shorter timeframe or reduce indicators."
                 }
             }
         

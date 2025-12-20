@@ -21,7 +21,7 @@ import copy
 from app.engine.backtest_engine import BacktestEngine
 from app.store.redis_client import redis_client
 from app.strategies.loader import load_strategies
-from app.feed.delta_history import fetch_ohlcv
+from app.feed.delta_history import fetch_ohlcv, get_default_lookback_days
 
 logger = logging.getLogger(__name__)
 
@@ -265,40 +265,41 @@ def _get_strategy_by_id(strategy_id: int) -> Optional[Dict[str, Any]]:
 def _fetch_historical_candles(
     symbol: str,
     timeframe: str,
-    days: int = 30
+    days: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
-    Fetch historical candles for backtesting.
+    Fetch historical candles for backtesting with chunked fetching.
     
     Args:
         symbol: Trading symbol (e.g., 'BTCUSD')
         timeframe: Strategy timeframe (e.g., '15MIN', '1H')
-        days: Number of days of history to fetch
+        days: Optional number of days of history to fetch (if None, uses default based on timeframe)
     
     Returns:
         List of candle dictionaries
     """
     try:
-        # Map strategy timeframe to Delta Exchange resolution
-        resolution = TIMEFRAME_MAP.get(timeframe, '60')  # Default to 1H
+        # Get lookback_days (use provided days or default based on timeframe)
+        if days is None:
+            lookback_days = get_default_lookback_days(timeframe)
+        else:
+            lookback_days = days
         
         # Calculate timestamps
         end_time = datetime.now()
-        start_time = end_time - timedelta(days=days)
-        
-        start_timestamp = int(start_time.timestamp())
         end_timestamp = int(end_time.timestamp())
+        start_timestamp = int((end_time - timedelta(days=lookback_days)).timestamp())
         
-        logger.info(f"Fetching candles for {symbol}: {timeframe} ({resolution}) from {start_time} to {end_time}")
+        logger.info(f"Fetching candles for {symbol}: {timeframe}, lookback_days={lookback_days}")
         
-        # Fetch candles
-        candles = fetch_ohlcv(symbol, resolution, start_timestamp, end_timestamp)
+        # Fetch candles with chunked fetching (respects 2000 candle limit)
+        candles = fetch_ohlcv(symbol, timeframe, start_timestamp, end_timestamp, auto_map=True, lookback_days=lookback_days)
         
         if not candles:
             logger.warning(f"No candles returned for {symbol} {timeframe}")
             return []
         
-        logger.info(f"Fetched {len(candles)} candles for {symbol}")
+        logger.info(f"Fetched {len(candles)} candles for {symbol} {timeframe}")
         return candles
         
     except Exception as e:
@@ -412,8 +413,13 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
             meta['timeframe'] = timeframe
             strategy_copy['meta'] = meta
         
-        # Fetch historical candles (keep original list for timestamp mapping)
-        candles_list = _fetch_historical_candles(symbol, timeframe, days=365)  # 1 year for monthly view
+        # Get lookback_days from strategy or use default based on timeframe
+        lookback_days = strategy_copy.get('lookback_days')
+        if lookback_days is None:
+            lookback_days = get_default_lookback_days(timeframe)
+        
+        # Fetch historical candles with controlled lookback window (chunked fetching)
+        candles_list = _fetch_historical_candles(symbol, timeframe, days=lookback_days)
         
         if not candles_list:
             # Log detailed error for debugging (backend only) - WARNING, not ERROR
@@ -442,23 +448,22 @@ def _run_backtest(strategy: Dict[str, Any]) -> Dict[str, Any]:
                 }
             }
         
-        # Validate minimum candle count based on indicator periods
+        # Pre-backtest safety validation: Calculate required candles
         max_period = _calculate_max_indicator_period(strategy_copy)
-        buffer = 50  # Safety buffer for indicator calculation
-        min_required_candles = max_period + buffer
+        required_candles = max_period * 2  # Require 2x max period for reliable backtest
         
         candle_count = len(candles_df)
         
-        logger.info(f"Candle validation: count={candle_count}, max_period={max_period}, min_required={min_required_candles}")
+        logger.info(f"Pre-backtest validation: count={candle_count}, max_period={max_period}, required={required_candles} (max_period * 2)")
         
-        if candle_count < min_required_candles:
-            logger.warning(f"Insufficient historical data for {symbol} {timeframe}: {candle_count} candles < {min_required_candles} required (max indicator period: {max_period})")
+        if candle_count < required_candles:
+            logger.warning(f"Insufficient historical data for {symbol} {timeframe}: {candle_count} candles < {required_candles} required (max indicator period: {max_period})")
             # Return structured error response (broker-agnostic) - DO NOT raise exception
             return {
                 "success": False,
                 "error": {
-                    "code": "INSUFFICIENT_HISTORICAL_DATA",
-                    "message": "Not enough historical data to run this strategy. Try a lower timeframe or fewer indicators."
+                    "code": "INSUFFICIENT_DATA",
+                    "message": "Not enough historical data to run this strategy. Try a shorter timeframe or reduce indicators."
                 }
             }
         
