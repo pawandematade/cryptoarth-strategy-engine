@@ -136,9 +136,9 @@ class ExecutionLoop:
                     if not current_execution:
                         logger.warning(f"Execution not found in DB: execution_id={self.execution_id}")
                         break
-                
-                # Handle status changes
-                if current_execution.status == ExecutionStatus.STOPPED:
+                    
+                    # Handle status changes
+                    if current_execution.status == ExecutionStatus.STOPPED:
                     log_state_change(strategy_code, version, "active", "stopped")
                     break
                 
