@@ -39,3 +39,18 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # Default to gpt-4o-min
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 
+# Database Configuration
+# IMPORTANT: In production, use a limited database user, not root
+# Create user: CREATE USER 'strategy_user'@'localhost' IDENTIFIED BY 'secure_password';
+# Grant permissions: GRANT SELECT, INSERT, UPDATE ON cryptoarth_strategy_engine.* TO 'strategy_user'@'localhost';
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", 3306))
+DB_USER = os.getenv("DB_USER", "root")  # Change to strategy_user in production
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_NAME = os.getenv("DB_NAME", "cryptoarth_strategy_engine")
+
+# Auth Backend Configuration
+# IMPORTANT: Auth backend is the source of truth for user data
+# Endpoint: GET https://trade-api.cryptoarth.in/auth/user/
+AUTH_BACKEND_URL = os.getenv("AUTH_BACKEND_URL", "https://trade-api.cryptoarth.in")
+
