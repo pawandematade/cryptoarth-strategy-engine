@@ -158,6 +158,12 @@ def sync_user_to_local_db(
             db.refresh(new_user)
             logger.info(f"Created user snapshot: external_user_id={external_user_id}, local_id={new_user.id}")
             return new_user
+            
+    except Exception as e:
+        # FAIL FAST: Re-raise exception (don't swallow errors)
+        logger.error(f"Error syncing user to local DB: {e}", exc_info=True)
+        db.rollback()
+        raise
 
 
 def get_or_sync_user(
