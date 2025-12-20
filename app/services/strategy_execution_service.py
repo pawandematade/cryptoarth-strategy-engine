@@ -484,6 +484,9 @@ def stop_strategy_execution(
         )
     
     try:
+        # Store previous status for logging
+        previous_status = execution.status.value
+        
         # 6 & 7. Update execution status to STOPPED and set deactivated_at
         execution.status = ExecutionStatus.STOPPED
         execution.deactivated_at = datetime.now(timezone.utc)
@@ -495,7 +498,7 @@ def stop_strategy_execution(
         logger.info(
             f"Strategy execution stopped (TERMINAL): strategy_code={strategy_code}, "
             f"strategy_id={strategy.id}, execution_id={execution.id}, "
-            f"previous_status={execution.status.value}"
+            f"previous_status={previous_status}"
         )
         
         # 9. Return success response
