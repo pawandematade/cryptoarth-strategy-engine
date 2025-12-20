@@ -76,7 +76,7 @@ class ExecutionLoop:
     def start(self):
         """Start execution loop in a separate thread"""
         if self.is_running:
-            logger.warning(f"Execution loop already running: execution_id={self.execution.id}")
+            logger.warning(f"Execution loop already running: execution_id={self.execution_id}")
             return
         
         self.should_stop = False
@@ -125,14 +125,17 @@ class ExecutionLoop:
             tick_count = 0
             
             while not self.should_stop:
-                # Check execution status in DB (read-only)
-                current_execution = self.db.query(StrategyExecution).filter(
-                    StrategyExecution.id == self.execution.id
-                ).first()
-                
-                if not current_execution:
-                    logger.warning(f"Execution not found in DB: execution_id={self.execution.id}")
-                    break
+                # Create fresh DB session for this iteration (read-only)
+                db = self.db_session_factory()
+                try:
+                    # Check execution status in DB (read-only)
+                    current_execution = db.query(StrategyExecution).filter(
+                        StrategyExecution.id == self.execution_id
+                    ).first()
+                    
+                    if not current_execution:
+                        logger.warning(f"Execution not found in DB: execution_id={self.execution_id}")
+                        break
                 
                 # Handle status changes
                 if current_execution.status == ExecutionStatus.STOPPED:
