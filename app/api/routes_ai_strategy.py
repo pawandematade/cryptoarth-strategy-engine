@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Header, Depends, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from typing import Optional, Dict, Any
 import logging
@@ -1101,9 +1102,20 @@ def auto_save_strategy(
         HTTPException: If validation fails or save fails
     """
     try:
-        # Validate authorization header
+        # Validate authorization header - silent failure for auto-save
         if not authorization:
-            raise HTTPException(status_code=401, detail="Authorization header required")
+            logger.warning("Auto-save skipped: Authorization header missing")
+            # Return controlled response (not HTTPException) - silent failure
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "success": False,
+                    "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Strategy auto-save skipped (user not authenticated)."
+                    }
+                }
+            )
         
         # Generate temp_strategy_id automatically
         temp_strategy_id = f"TEMP-{int(datetime.now().timestamp() * 1000)}"
