@@ -10,6 +10,7 @@ from typing import Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from app.models import Strategy, StrategyVersion, StrategyExecution, ExecutionStatus, User
 from app.services.user_sync_service import get_or_sync_user
 
@@ -30,24 +31,25 @@ def activate_strategy_execution(
     2. Fetch strategy by strategy_code
     3. Verify strategy ownership (user_id match)
     4. Verify requested version exists in strategy_versions
-    5. Start DB transaction
-    6. Deactivate existing active execution (if any)
-    7. Insert or update strategy_executions row:
+    5. Start DB transaction with row-level locking
+    6. Lock strategy row and existing executions (SELECT FOR UPDATE)
+    7. Deactivate existing active execution (if any)
+    8. Insert or update strategy_executions row:
        - strategy_id
        - strategy_version
        - status = ACTIVE
        - activated_at = now (UTC)
        - deactivated_at = NULL
-    8. Commit transaction
-    9. Return success response
+    9. Commit transaction
+    10. Return success response
     
     IMPORTANT:
     - TEMP strategies are NOT allowed (enforced at API level)
     - Execution must ALWAYS bind to a specific version
-    - Only one ACTIVE execution per strategy_id
+    - Only one ACTIVE execution per strategy_id (enforced by DB constraint + row locking)
     - Old active version must be deactivated before new activation
     - Ownership must be verified
-    - Use transaction for safety (rollback on error)
+    - Use transaction with row-level locking for safety (prevents race conditions)
     - Fail fast if auth backend unavailable
     
     Args:
@@ -66,6 +68,7 @@ def activate_strategy_execution(
     Raises:
         ValueError: If validation fails, strategy not found, ownership mismatch, or version not found
         requests.exceptions.RequestException: If auth backend unavailable
+        IntegrityError: If unique constraint violation occurs (handled and re-raised as ValueError)
     """
     # 1. Sync user from auth backend (FAIL FAST if unavailable)
     # get_or_sync_user will call auth backend API and sync user to local DB
@@ -95,11 +98,22 @@ def activate_strategy_execution(
         )
     
     try:
-        # 5 & 6. Start DB transaction and deactivate existing active execution (if any)
+        # 5 & 6. Start DB transaction with row-level locking
+        # Lock the strategy row to prevent concurrent modifications
+        # This ensures only one transaction can modify executions for this strategy at a time
+        locked_strategy = db.query(Strategy).filter(
+            Strategy.id == strategy.id
+        ).with_for_update().first()
+        
+        if not locked_strategy:
+            raise ValueError(f"Strategy not found after locking: strategy_code={strategy_code}")
+        
+        # 7. Lock and query existing active execution (if any)
+        # SELECT FOR UPDATE locks the rows, preventing concurrent access
         existing_active = db.query(StrategyExecution).filter(
             StrategyExecution.strategy_id == strategy.id,
             StrategyExecution.status == ExecutionStatus.ACTIVE
-        ).first()
+        ).with_for_update().first()
         
         if existing_active:
             existing_active.status = ExecutionStatus.INACTIVE
@@ -109,7 +123,7 @@ def activate_strategy_execution(
                 f"previous_version={existing_active.strategy_version}"
             )
         
-        # 7. Insert or update strategy_executions row
+        # 8. Insert or update strategy_executions row
         # Check if execution record already exists for this strategy_id + version
         execution = db.query(StrategyExecution).filter(
             StrategyExecution.strategy_id == strategy.id,
@@ -132,7 +146,8 @@ def activate_strategy_execution(
             )
             db.add(execution)
         
-        # 8. Commit transaction
+        # 9. Commit transaction
+        # The unique constraint will catch any race condition that somehow bypassed the lock
         db.commit()
         db.refresh(execution)
         
@@ -141,7 +156,7 @@ def activate_strategy_execution(
             f"strategy_id={strategy.id}, version={version}"
         )
         
-        # 9. Return success response
+        # 10. Return success response
         return {
             "strategy_code": strategy_code,
             "active_version": version,
@@ -150,6 +165,18 @@ def activate_strategy_execution(
         
     except IntegrityError as e:
         db.rollback()
+        # Check if it's a unique constraint violation
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        if 'unique_active_strategy' in error_msg.lower() or 'duplicate entry' in error_msg.lower():
+            logger.warning(
+                f"Unique constraint violation (concurrent activation prevented): "
+                f"strategy_code={strategy_code}, version={version}. "
+                f"This should be rare with row locking, but constraint caught it."
+            )
+            raise ValueError(
+                f"Another activation request for this strategy is in progress. "
+                f"Please wait a moment and try again."
+            )
         logger.error(f"Database integrity error activating strategy execution: {e}")
         raise ValueError(f"Failed to activate strategy execution: database constraint violation")
     except Exception as e:
