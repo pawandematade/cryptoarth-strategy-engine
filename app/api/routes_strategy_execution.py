@@ -17,7 +17,8 @@ from app.database import get_db
 from app.services.strategy_execution_service import (
     activate_strategy_execution,
     pause_strategy_execution,
-    resume_strategy_execution
+    resume_strategy_execution,
+    stop_strategy_execution
 )
 
 logger = logging.getLogger(__name__)
@@ -385,5 +386,117 @@ def resume_strategy_endpoint(
     except Exception as e:
         # Unexpected errors
         logger.error(f"Unexpected error resuming strategy execution: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+@router.post("/strategies/{strategy_code}/stop", response_model=PauseResumeResponse)
+def stop_strategy_endpoint(
+    strategy_code: str = Path(..., description="Strategy code (e.g., STRG-ABCD)"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db)
+):
+    """
+    Stop a strategy execution permanently (TERMINAL state).
+    
+    FLOW (STRICT ORDER):
+    1. Extract Authorization token
+    2. Call auth backend user API (via get_or_sync_user - FAILS FAST if unavailable)
+    3. Sync user into local DB
+    4. Fetch strategy by strategy_code
+    5. Verify strategy belongs to user
+    6. Fetch current execution for strategy
+    7. Validate current status is ACTIVE or PAUSED (or already STOPPED for idempotency)
+    8. Update execution status to STOPPED
+    9. Set deactivated_at timestamp
+    10. Commit transaction
+    11. Return success response
+    
+    IMPORTANT:
+    - TEMP strategies are NOT allowed (rejected with 400)
+    - Only updates execution status (no version changes)
+    - STOP is TERMINAL: stopped executions can NEVER be resumed
+    - Idempotent: if already stopped, returns success
+    - Ownership must be verified
+    - Use transaction for safety (rollback on error)
+    - Fail fast if auth backend unavailable
+    - STOP can be called from ACTIVE or PAUSED states only
+    
+    Args:
+        strategy_code: Strategy code (e.g., STRG-ABCD)
+        authorization: Authorization header (Bearer token)
+        db: Database session
+    
+    Returns:
+        PauseResumeResponse with strategy_code and status
+    
+    Raises:
+        HTTPException: If validation fails, strategy not found, ownership mismatch, execution not found, or stop fails
+    """
+    try:
+        # Validate authorization header
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        
+        # Validate strategy_code format (basic validation)
+        if not strategy_code or not isinstance(strategy_code, str):
+            raise HTTPException(status_code=400, detail="Invalid strategy_code format")
+        
+        # TEMP strategies are NOT allowed
+        if strategy_code.startswith("TEMP-"):
+            raise HTTPException(
+                status_code=400,
+                detail="TEMP strategies cannot be stopped. Please save the strategy first."
+            )
+        
+        # Stop strategy execution (includes user sync, ownership verification, validation, and DB update)
+        result = stop_strategy_execution(
+            db=db,
+            strategy_code=strategy_code,
+            authorization=authorization
+        )
+        
+        logger.info(
+            f"Strategy execution stopped successfully (TERMINAL): strategy_code={result['strategy_code']}, "
+            f"status={result['status']}"
+        )
+        
+        return PauseResumeResponse(
+            success=True,
+            strategy_code=result["strategy_code"],
+            status=result["status"],
+            message="Strategy execution stopped permanently."
+        )
+        
+    except ValueError as e:
+        # Validation errors, ownership mismatch, strategy not found, or execution not found
+        error_msg = str(e)
+        status_code = 400
+        
+        # Check for specific error types to return appropriate status codes
+        if "not found" in error_msg.lower():
+            status_code = 404
+        elif "ownership" in error_msg.lower() or "different user" in error_msg.lower():
+            status_code = 403
+        elif "cannot stop" in error_msg.lower() or "only active or paused" in error_msg.lower():
+            status_code = 400  # Invalid state transition
+        
+        logger.warning(f"Validation/ownership error stopping strategy execution: {e}")
+        raise HTTPException(status_code=status_code, detail=error_msg)
+    except requests.exceptions.RequestException as e:
+        # Auth backend unavailable - FAIL FAST
+        logger.error(f"Auth backend unavailable: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Auth backend unavailable. Cannot stop strategy execution without user verification. Error: {str(e)}"
+        )
+    except SQLAlchemyError as e:
+        # Database errors
+        logger.error(f"Database error stopping strategy execution: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database error occurred while stopping strategy execution")
+    except Exception as e:
+        # Unexpected errors
+        logger.error(f"Unexpected error stopping strategy execution: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
