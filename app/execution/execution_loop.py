@@ -139,8 +139,8 @@ class ExecutionLoop:
                     
                     # Handle status changes
                     if current_execution.status == ExecutionStatus.STOPPED:
-                    log_state_change(strategy_code, version, "active", "stopped")
-                    break
+                        log_state_change(strategy_code, version, "active", "stopped")
+                        break
                 
                     elif current_execution.status == ExecutionStatus.PAUSED:
                         if last_status != ExecutionStatus.PAUSED:
