@@ -14,18 +14,25 @@ client = None
 def initialize_client():
     """Initialize or reinitialize the OpenAI client"""
     global client
+    # Reload config to get latest API key (in case .env was updated)
+    import importlib
+    import app.config
+    importlib.reload(app.config)
     from app.config import OPENAI_API_KEY
-    if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here":
+    
+    if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here" and len(OPENAI_API_KEY) > 10:
         try:
             client = OpenAI(api_key=OPENAI_API_KEY)
-            logger.info("OpenAI client initialized successfully")
+            logger.info("✅ OpenAI client initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"❌ Failed to initialize OpenAI client: {e}")
             client = None
             return False
     else:
-        logger.warning("OPENAI_API_KEY not set. AI strategy builder will not work.")
+        logger.warning("⚠️  OPENAI_API_KEY not set or invalid. AI strategy builder will not work.")
+        logger.warning(f"   API Key present: {bool(OPENAI_API_KEY)}")
+        logger.warning(f"   API Key length: {len(OPENAI_API_KEY) if OPENAI_API_KEY else 0}")
         client = None
         return False
 
@@ -56,9 +63,9 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
     """
     # Reinitialize client if needed (in case .env was updated)
     if not client:
-        logger.warning("OpenAI client not initialized. Attempting to reinitialize...")
+        logger.warning("⚠️  OpenAI client not initialized. Attempting to reinitialize...")
         if not initialize_client():
-            logger.error("OpenAI client not initialized. Please set OPENAI_API_KEY in environment variables and restart the server.")
+            logger.error("❌ OpenAI client initialization failed. Please check OPENAI_API_KEY in .env file and restart the server.")
             return None
     
     try:

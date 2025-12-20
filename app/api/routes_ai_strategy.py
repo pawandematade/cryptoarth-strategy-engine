@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from pydantic import BaseModel, Field, ValidationError
 from typing import Optional, Dict, Any
 import logging
@@ -6,6 +6,7 @@ import json
 import copy
 import pandas as pd
 from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
 from app.services.openai_service import generate_strategy
 from app.services.backtest_service import run_backtest
 from app.services.prompt_builder import build_prompt
@@ -13,6 +14,8 @@ from app.store.redis_client import redis_client
 from app.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
 from app.engine.backtest_engine import BacktestEngine
 from app.feed.delta_history import fetch_ohlcv
+from app.database import get_db
+from app.services.strategy_save_service import save_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -224,13 +227,18 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         
         if not strategy:
             logger.error("❌ Strategy generation returned None. Check OpenAI service logs.")
-            # Check if client is initialized
-            from app.services.openai_service import client
+            # Check if client is initialized, try to reinitialize if needed
+            from app.services.openai_service import client, initialize_client
             if not client:
-                return AIStrategyResponse(
-                    success=False,
-                    message="OpenAI client not initialized. Please check OPENAI_API_KEY in .env file and restart the server."
-                )
+                # Try to reinitialize the client (in case API key was added after server start)
+                logger.warning("OpenAI client not initialized. Attempting to reinitialize...")
+                if initialize_client():
+                    logger.info("✅ OpenAI client reinitialized successfully")
+                else:
+                    return AIStrategyResponse(
+                        success=False,
+                        message="OpenAI client not initialized. Please check OPENAI_API_KEY in .env file and restart the server."
+                    )
             return AIStrategyResponse(
                 success=False,
                 message="Failed to generate strategy. Please check server logs for details. Possible issues: Invalid API key, network error, or OpenAI service unavailable."
@@ -883,4 +891,102 @@ def _apply_preview_brokerage(performance: Dict[str, Any], backtest_settings: Dic
         'trades': transformed_trades,
         'monthly_performance': performance.get('monthly_performance')
     }
+
+
+class AutoSaveStrategyRequest(BaseModel):
+    """Request model for auto-saving a strategy"""
+    strategy: Dict[str, Any] = Field(..., description="Full strategy JSON payload")
+
+
+class AutoSaveStrategyResponse(BaseModel):
+    """Response model for auto-saving a strategy"""
+    success: bool
+    strategy_id: int
+    strategy_code: str
+    version: int
+    message: str
+
+
+@router.post("/ai-strategy/save/", response_model=AutoSaveStrategyResponse)
+def auto_save_strategy(
+    request: AutoSaveStrategyRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db)
+):
+    """
+    Auto-save a strategy silently (no user interaction required).
+    
+    This endpoint is called automatically after strategy generation.
+    It generates a temp_strategy_id and name automatically.
+    
+    FLOW:
+    1. Extract Authorization token
+    2. Generate temp_strategy_id (TEMP-{timestamp})
+    3. Generate strategy name from strategy data (or use default)
+    4. Call save_strategy service
+    5. Return strategy_id, strategy_code, version
+    
+    Args:
+        request: AutoSaveStrategyRequest with strategy payload
+        authorization: Authorization header (Bearer token)
+        db: Database session
+    
+    Returns:
+        AutoSaveStrategyResponse with strategy_id, strategy_code, version
+    
+    Raises:
+        HTTPException: If validation fails or save fails
+    """
+    try:
+        # Validate authorization header
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        
+        # Generate temp_strategy_id automatically
+        temp_strategy_id = f"TEMP-{int(datetime.now().timestamp() * 1000)}"
+        
+        # Generate strategy name from strategy data
+        strategy = request.strategy
+        symbol = strategy.get('symbol') or strategy.get('userParams', {}).get('symbol') or 'UNKNOWN'
+        timeframe = strategy.get('timeframe') or strategy.get('userParams', {}).get('timeframe') or ''
+        strategy_type = strategy.get('strategy_type') or strategy.get('condition', {}).get('type') or 'Strategy'
+        
+        # Create a descriptive name
+        name = f"{symbol} {timeframe} {strategy_type}".strip()
+        if not name or name == 'Strategy':
+            name = f"Strategy {symbol} {timeframe}".strip() or "Auto-saved Strategy"
+        
+        # Save strategy using existing service
+        result = save_strategy(
+            db=db,
+            temp_strategy_id=temp_strategy_id,
+            name=name,
+            strategy_payload=strategy,
+            authorization=authorization,
+            description=None,  # No description for auto-save
+            backtest_snapshot=None  # No backtest snapshot for auto-save
+        )
+        
+        logger.info(f"Strategy auto-saved successfully: strategy_id={result['strategy_id']}, strategy_code={result['strategy_code']}")
+        
+        return AutoSaveStrategyResponse(
+            success=True,
+            strategy_id=result["strategy_id"],
+            strategy_code=result["strategy_code"],
+            version=result["version"],
+            message="Strategy auto-saved successfully"
+        )
+        
+    except ValueError as e:
+        # Validation errors
+        logger.warning(f"Validation error auto-saving strategy: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # All other errors (including auth backend unavailable, DB errors, etc.)
+        logger.error(f"Error auto-saving strategy: {e}", exc_info=True)
+        if hasattr(e, 'status_code'):
+            # Re-raise HTTPException as-is
+            raise e
+        # Convert other exceptions to HTTPException
+        raise HTTPException(status_code=500, detail=f"Failed to auto-save strategy: {str(e)}")
 

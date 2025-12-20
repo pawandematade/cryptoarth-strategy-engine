@@ -1,32 +1,51 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load environment-specific .env file based on APP_ENV
+# First, check APP_ENV from environment (before loading .env files)
+APP_ENV = os.getenv("APP_ENV", "local").lower()  # local or production
 
-# Environment Configuration
-APP_ENV = os.getenv("APP_ENV", "local")  # local or production
+# Load the appropriate .env file
+if APP_ENV == "production":
+    env_file = ".env.production"
+else:
+    env_file = ".env.local"
+
+# Load environment-specific file (with fallback to .env if specific file doesn't exist)
+load_dotenv(env_file, override=False)  # Don't override if already set
+load_dotenv(".env", override=False)  # Fallback to .env if exists
+
+# Re-read APP_ENV after loading env files (in case it was set in the file)
+APP_ENV = os.getenv("APP_ENV", "local").lower()
 IS_PRODUCTION = APP_ENV == "production"
 IS_LOCAL = not IS_PRODUCTION
 
-# API Configuration
-BASE_API_URL = os.getenv("BASE_API_URL")
-if not BASE_API_URL:
-    if IS_PRODUCTION:
-        BASE_API_URL = "https://aistrategy.cryptoarth.in"
-    else:
-        BASE_API_URL = "http://localhost:8000"
+# Strategy Engine Environment
+STRATEGY_ENGINE_ENV = os.getenv("STRATEGY_ENGINE_ENV", APP_ENV)
 
-# Frontend URL for CORS
-FRONTEND_URL = os.getenv("FRONTEND_URL")
-if not FRONTEND_URL:
-    if IS_PRODUCTION:
-        FRONTEND_URL = "https://aistrategy.cryptoarth.in"
-    else:
-        FRONTEND_URL = "http://localhost:5173"
+# API Configuration (using STRATEGY_ prefixed names)
+STRATEGY_ENGINE_BASE_URL = os.getenv("STRATEGY_ENGINE_BASE_URL")
+if not STRATEGY_ENGINE_BASE_URL:
+    raise ValueError(f"STRATEGY_ENGINE_BASE_URL must be set in {env_file}")
 
-# Redis Configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+# Frontend URL for CORS (using STRATEGY_ prefixed name)
+STRATEGY_ENGINE_FRONTEND_URL = os.getenv("STRATEGY_ENGINE_FRONTEND_URL")
+if not STRATEGY_ENGINE_FRONTEND_URL:
+    raise ValueError(f"STRATEGY_ENGINE_FRONTEND_URL must be set in {env_file}")
+
+# Backward compatibility aliases (for existing code)
+BASE_API_URL = STRATEGY_ENGINE_BASE_URL
+FRONTEND_URL = STRATEGY_ENGINE_FRONTEND_URL
+
+# Redis Configuration (using STRATEGY_ prefixed names)
+STRATEGY_REDIS_HOST = os.getenv("STRATEGY_REDIS_HOST")
+STRATEGY_REDIS_PORT = int(os.getenv("STRATEGY_REDIS_PORT", "6379"))
+if not STRATEGY_REDIS_HOST:
+    raise ValueError(f"STRATEGY_REDIS_HOST must be set in {env_file}")
+
+# Backward compatibility aliases
+REDIS_HOST = STRATEGY_REDIS_HOST
+REDIS_PORT = STRATEGY_REDIS_PORT
 
 # Delta Exchange Configuration
 DELTA_BASE_URL = os.getenv("DELTA_BASE_URL", "https://api.india.delta.exchange")
@@ -39,15 +58,27 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # Default to gpt-4o-min
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 
-# Database Configuration
-# IMPORTANT: In production, use a limited database user, not root
-# Create user: CREATE USER 'strategy_user'@'localhost' IDENTIFIED BY 'secure_password';
-# Grant permissions: GRANT SELECT, INSERT, UPDATE ON cryptoarth_strategy_engine.* TO 'strategy_user'@'localhost';
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", 3306))
-DB_USER = os.getenv("DB_USER", "root")  # Change to strategy_user in production
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
-DB_NAME = os.getenv("DB_NAME", "cryptoarth_strategy_engine")
+# Database Configuration (using STRATEGY_ prefixed names)
+STRATEGY_DB_HOST = os.getenv("STRATEGY_DB_HOST")
+STRATEGY_DB_PORT = int(os.getenv("STRATEGY_DB_PORT", "3306"))
+STRATEGY_DB_USER = os.getenv("STRATEGY_DB_USER")
+STRATEGY_DB_PASSWORD = os.getenv("STRATEGY_DB_PASSWORD", "")
+STRATEGY_DB_NAME = os.getenv("STRATEGY_DB_NAME")
+
+# Validate required database variables
+if not STRATEGY_DB_HOST:
+    raise ValueError(f"STRATEGY_DB_HOST must be set in {env_file}")
+if not STRATEGY_DB_USER:
+    raise ValueError(f"STRATEGY_DB_USER must be set in {env_file}")
+if not STRATEGY_DB_NAME:
+    raise ValueError(f"STRATEGY_DB_NAME must be set in {env_file}")
+
+# Backward compatibility aliases
+DB_HOST = STRATEGY_DB_HOST
+DB_PORT = STRATEGY_DB_PORT
+DB_USER = STRATEGY_DB_USER
+DB_PASSWORD = STRATEGY_DB_PASSWORD
+DB_NAME = STRATEGY_DB_NAME
 
 # Auth Backend Configuration
 # IMPORTANT: Auth backend is the source of truth for user data

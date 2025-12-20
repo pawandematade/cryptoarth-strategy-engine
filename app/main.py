@@ -16,8 +16,9 @@ from app.api.routes_payment import router as payment_router
 from app.api.routes_websocket import router as websocket_router
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
-from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL
+from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
 from app.execution.execution_manager import ExecutionManager
+from app.database import init_db, test_db_connection
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,26 +31,54 @@ execution_manager: ExecutionManager = None
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for startup and shutdown events.
-    Manages execution manager lifecycle.
+    Manages database initialization and execution manager lifecycle.
     """
     global execution_manager
     
+    # Startup: Initialize database (safe - won't crash if DB unavailable)
+    logger.info("=" * 60)
+    logger.info(f"Starting CryptoArth Strategy Engine (APP_ENV={APP_ENV})")
+    logger.info("=" * 60)
+    
+    # Test database connection
+    db_connected = test_db_connection()
+    
+    if db_connected:
+        # Initialize database tables (safe - returns False on error, doesn't raise)
+        db_initialized = init_db()
+        if not db_initialized:
+            logger.warning("⚠️  Database initialization failed, but continuing startup...")
+            logger.warning("   Some features may not work until database is available")
+    else:
+        logger.warning("⚠️  Database connection failed, but continuing startup...")
+        logger.warning("   Some features may not work until database is available")
+        logger.warning("   Make sure MySQL/MariaDB is running and database exists")
+    
     # Startup: Initialize and start execution manager
     logger.info("Starting Execution Manager...")
-    execution_manager = ExecutionManager(
-        poll_interval_seconds=10.0,  # Poll DB every 10 seconds
-        tick_interval_seconds=5.0    # Generate ticks every 5 seconds
-    )
-    execution_manager.start()
-    logger.info("Execution Manager started")
+    try:
+        execution_manager = ExecutionManager(
+            poll_interval_seconds=10.0,  # Poll DB every 10 seconds
+            tick_interval_seconds=5.0    # Generate ticks every 5 seconds
+        )
+        execution_manager.start()
+        logger.info("Execution Manager started")
+    except Exception as e:
+        logger.error(f"Failed to start Execution Manager: {e}")
+        logger.warning("Execution Manager will not be available")
+        execution_manager = None
     
     yield
     
     # Shutdown: Stop execution manager
     logger.info("Stopping Execution Manager...")
     if execution_manager:
-        execution_manager.stop()
-    logger.info("Execution Manager stopped")
+        try:
+            execution_manager.stop()
+            logger.info("Execution Manager stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Execution Manager: {e}")
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(title="CryptoArth Strategy Engine", lifespan=lifespan)
@@ -128,3 +157,19 @@ def test_redis():
         return {"Redis test output": result}
     except RedisConnectionError:
         return {"Redis test output": False, "error": "Could not connect to Redis"}
+
+
+@app.get("/test-db")
+def test_db():
+    """Test database connection and return status"""
+    from app.database import test_db_connection
+    from app.config import DB_HOST, DB_PORT, DB_NAME, APP_ENV
+    
+    is_connected = test_db_connection()
+    return {
+        "database_test": is_connected,
+        "environment": APP_ENV,
+        "database": DB_NAME,
+        "host": f"{DB_HOST}:{DB_PORT}",
+        "status": "connected" if is_connected else "disconnected"
+    }
