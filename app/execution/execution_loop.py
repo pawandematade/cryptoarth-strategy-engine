@@ -142,56 +142,59 @@ class ExecutionLoop:
                     log_state_change(strategy_code, version, "active", "stopped")
                     break
                 
-                elif current_execution.status == ExecutionStatus.PAUSED:
-                    if last_status != ExecutionStatus.PAUSED:
-                        log_execution_pause(strategy_code, version, self.execution_id)
-                    last_status = ExecutionStatus.PAUSED
-                    # Sleep longer when paused
-                    time.sleep(self.tick_interval_seconds * 2)
-                    continue
-                
-                elif current_execution.status == ExecutionStatus.ACTIVE:
-                    if last_status == ExecutionStatus.PAUSED:
-                        log_execution_resume(strategy_code, version, self.execution_id)
-                        log_state_change(strategy_code, version, "paused", "active")
-                    last_status = ExecutionStatus.ACTIVE
+                    elif current_execution.status == ExecutionStatus.PAUSED:
+                        if last_status != ExecutionStatus.PAUSED:
+                            log_execution_pause(strategy_code, version, self.execution_id)
+                        last_status = ExecutionStatus.PAUSED
+                        # Sleep longer when paused
+                        time.sleep(self.tick_interval_seconds * 2)
+                        continue
                     
-                    # Generate mock market data
-                    tick_count += 1
-                    mock_price = base_price + price_amplitude * (tick_count % 100) / 100
-                    timestamp = datetime.now(timezone.utc).isoformat()
+                    elif current_execution.status == ExecutionStatus.ACTIVE:
+                        if last_status == ExecutionStatus.PAUSED:
+                            log_execution_resume(strategy_code, version, self.execution_id)
+                            log_state_change(strategy_code, version, "paused", "active")
+                        last_status = ExecutionStatus.ACTIVE
+                        
+                        # Generate mock market data
+                        tick_count += 1
+                        mock_price = base_price + price_amplitude * (tick_count % 100) / 100
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                        
+                        market_data = {
+                            "symbol": symbol,
+                            "price": mock_price,
+                            "timestamp": timestamp,
+                            "tick_count": tick_count
+                        }
+                        
+                        # Add execution context to strategy payload for logging
+                        strategy_with_context = strategy_payload.copy()
+                        strategy_with_context["execution_context"] = {
+                            "strategy_code": strategy_code,
+                            "version": version,
+                            "execution_id": self.execution_id
+                        }
+                        
+                        # Log tick
+                        log_tick_processed(strategy_code, version, symbol, timestamp, mock_price)
+                        
+                        # Evaluate strategy and get decision
+                        decision, reason = evaluate_strategy(strategy_with_context, market_data)
+                        
+                        # DRY-RUN: Decision is logged, no action taken
+                        # In real implementation, decision would trigger order placement
                     
-                    market_data = {
-                        "symbol": symbol,
-                        "price": mock_price,
-                        "timestamp": timestamp,
-                        "tick_count": tick_count
-                    }
-                    
-                    # Add execution context to strategy payload for logging
-                    strategy_with_context = strategy_payload.copy()
-                    strategy_with_context["execution_context"] = {
-                        "strategy_code": strategy_code,
-                        "version": version,
-                        "execution_id": self.execution_id
-                    }
-                    
-                    # Log tick
-                    log_tick_processed(strategy_code, version, symbol, timestamp, mock_price)
-                    
-                    # Evaluate strategy and get decision
-                    decision, reason = evaluate_strategy(strategy_with_context, market_data)
-                    
-                    # DRY-RUN: Decision is logged, no action taken
-                    # In real implementation, decision would trigger order placement
-                
-                else:
-                    # INACTIVE or unknown status
-                    logger.warning(
-                        f"Execution status is {current_execution.status.value}: "
-                        f"execution_id={self.execution.id}"
-                    )
-                    break
+                    else:
+                        # INACTIVE or unknown status
+                        logger.warning(
+                            f"Execution status is {current_execution.status.value}: "
+                            f"execution_id={self.execution_id}"
+                        )
+                        break
+                finally:
+                    # Close DB session
+                    db.close()
                 
                 # Wait before next tick
                 time.sleep(self.tick_interval_seconds)
