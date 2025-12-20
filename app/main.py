@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from contextlib import asynccontextmanager
 from app.api.routes_signal import router as signal_router
 from app.api.routes_history import router as history_router
 from app.api.routes_ai_strategy import router as ai_strategy_router
@@ -16,8 +17,42 @@ from app.api.routes_websocket import router as websocket_router
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL
+from app.execution.execution_manager import ExecutionManager
+import logging
 
-app = FastAPI(title="CryptoArth Strategy Engine")
+logger = logging.getLogger(__name__)
+
+# Global execution manager instance
+execution_manager: ExecutionManager = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events.
+    Manages execution manager lifecycle.
+    """
+    global execution_manager
+    
+    # Startup: Initialize and start execution manager
+    logger.info("Starting Execution Manager...")
+    execution_manager = ExecutionManager(
+        poll_interval_seconds=10.0,  # Poll DB every 10 seconds
+        tick_interval_seconds=5.0    # Generate ticks every 5 seconds
+    )
+    execution_manager.start()
+    logger.info("Execution Manager started")
+    
+    yield
+    
+    # Shutdown: Stop execution manager
+    logger.info("Stopping Execution Manager...")
+    if execution_manager:
+        execution_manager.stop()
+    logger.info("Execution Manager stopped")
+
+
+app = FastAPI(title="CryptoArth Strategy Engine", lifespan=lifespan)
 
 # Security Headers Middleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
