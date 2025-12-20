@@ -84,21 +84,23 @@ def sync_user_to_local_db(
     try:
         # Fetch user data if not provided
         if user_data is None:
-            user_data = fetch_user_from_auth_backend(external_user_id, authorization)
-            if user_data is None:
-                logger.warning(f"Could not fetch user {external_user_id} from auth backend")
-                return None
+            if not authorization:
+                raise ValueError("Authorization header required when user_data is not provided")
+            # Fetch from auth backend (no external_user_id needed - extracted from response)
+            user_data = fetch_user_from_auth_backend(authorization)
+            # Extract external_user_id from user_data
+            if not external_user_id:
+                external_user_id = user_data.get("id") or user_data.get("user_id")
+                if not external_user_id:
+                    raise ValueError("Could not extract user ID from auth backend response")
         
-        # Check if user exists in local DB
-        local_user = db.query(User).filter(User.external_user_id == external_user_id).first()
-        
-        # Extract external_user_id from user_data if not provided
+        # Extract external_user_id from user_data if still not provided
         if not external_user_id:
             external_user_id = user_data.get("id") or user_data.get("user_id")
             if not external_user_id:
-                raise ValueError("Could not extract user ID from auth backend response")
+                raise ValueError("Could not extract user ID from user_data")
         
-        # Check if user exists in local DB (using external_user_id from user_data)
+        # Check if user exists in local DB
         local_user = db.query(User).filter(User.external_user_id == external_user_id).first()
         
         # Extract user fields (adjust field names based on your auth backend response)
