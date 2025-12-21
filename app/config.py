@@ -59,26 +59,29 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 
 # Database Configuration (using STRATEGY_ prefixed names)
+# NOTE: Strategy Engine is now part of Django - database is managed by Django
+# These variables are kept for backward compatibility but are optional
 STRATEGY_DB_HOST = os.getenv("STRATEGY_DB_HOST")
 STRATEGY_DB_PORT = int(os.getenv("STRATEGY_DB_PORT", "3306"))
 STRATEGY_DB_USER = os.getenv("STRATEGY_DB_USER")
 STRATEGY_DB_PASSWORD = os.getenv("STRATEGY_DB_PASSWORD", "")
 STRATEGY_DB_NAME = os.getenv("STRATEGY_DB_NAME")
 
-# Validate required database variables
-if not STRATEGY_DB_HOST:
-    raise ValueError(f"STRATEGY_DB_HOST must be set in {env_file}")
-if not STRATEGY_DB_USER:
-    raise ValueError(f"STRATEGY_DB_USER must be set in {env_file}")
-if not STRATEGY_DB_NAME:
-    raise ValueError(f"STRATEGY_DB_NAME must be set in {env_file}")
+# Database variables are now optional (Django handles database)
+# Only validate if explicitly needed for legacy code
+# if not STRATEGY_DB_HOST:
+#     raise ValueError(f"STRATEGY_DB_HOST must be set in {env_file}")
+# if not STRATEGY_DB_USER:
+#     raise ValueError(f"STRATEGY_DB_USER must be set in {env_file}")
+# if not STRATEGY_DB_NAME:
+#     raise ValueError(f"STRATEGY_DB_NAME must be set in {env_file}")
 
-# Backward compatibility aliases
-DB_HOST = STRATEGY_DB_HOST
+# Backward compatibility aliases (with defaults to prevent errors)
+DB_HOST = STRATEGY_DB_HOST or "127.0.0.1"
 DB_PORT = STRATEGY_DB_PORT
-DB_USER = STRATEGY_DB_USER
+DB_USER = STRATEGY_DB_USER or "root"
 DB_PASSWORD = STRATEGY_DB_PASSWORD
-DB_NAME = STRATEGY_DB_NAME
+DB_NAME = STRATEGY_DB_NAME or "tradearth_db_local"
 
 # Auth Backend Configuration
 # IMPORTANT: Auth backend is the source of truth for user data
