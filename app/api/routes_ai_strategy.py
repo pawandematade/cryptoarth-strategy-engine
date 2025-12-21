@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Header, Depends, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from typing import Optional, Dict, Any
 import logging
 import json
@@ -29,8 +29,14 @@ class AIStrategyRequest(BaseModel):
     
     SYSTEM RULE: All parameters are converted to a single prompt string.
     Only the prompt is sent to OpenAI - no separate fields.
+    
+    ACCEPTS:
+    - 'prompt' OR 'description' (both map to the same internal 'prompt' field)
+    - 'type' (optional strategy type hint, e.g., 'indicator_based')
     """
-    prompt: str = Field(..., description="Natural language description of the trading strategy")
+    prompt: Optional[str] = Field(default=None, description="Natural language description of the trading strategy")
+    description: Optional[str] = Field(default=None, description="Alias for 'prompt' - natural language description of the trading strategy")
+    type: Optional[str] = Field(default=None, description="Strategy type hint (e.g., 'indicator_based', 'trend_following', etc.)")
     symbol: Optional[str] = Field(default="BTCUSD", description="Trading symbol (e.g., BTCUSD)")
     timeframe: Optional[str] = Field(default=None, description="Trading timeframe (e.g., 15MIN, 1H, 1D)")
     chart_type: Optional[str] = Field(default=None, description="Chart type (candles or heikin_ashi)")
@@ -41,6 +47,23 @@ class AIStrategyRequest(BaseModel):
     max_trades_per_day: Optional[int] = Field(default=None, description="Maximum trades per day")
     current_price: Optional[float] = Field(default=None, description="Current market price for context")
     market_context: Optional[str] = Field(default=None, description="Additional market context")
+    
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_prompt(cls, data: Any) -> Any:
+        """Normalize 'description' to 'prompt' if prompt is not provided."""
+        if isinstance(data, dict):
+            prompt_val = data.get('prompt')
+            description_val = data.get('description')
+            
+            # Check if values are non-empty strings
+            prompt_empty = not prompt_val or (isinstance(prompt_val, str) and not prompt_val.strip())
+            description_non_empty = description_val and isinstance(description_val, str) and description_val.strip()
+            
+            # If 'description' is provided (non-empty) but 'prompt' is missing/empty, copy description to prompt
+            if description_non_empty and prompt_empty:
+                data['prompt'] = description_val.strip()
+        return data
     
     class Config:
         # Allow extra fields but we'll validate and reject them
@@ -74,32 +97,54 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
         AIStrategyResponse: Generated strategy in structured format
     """
     try:
+        # FALLBACK: Normalize description to prompt if validator didn't catch it
+        # Handle both None and empty string cases
+        prompt_value = request.prompt
+        description_value = request.description
+        
+        # Normalize: if prompt is missing/empty but description exists, use description
+        if (not prompt_value or not str(prompt_value).strip()) and description_value and str(description_value).strip():
+            request.prompt = str(description_value).strip()
+            logger.info("✅ Normalized 'description' to 'prompt' in endpoint")
+            prompt_value = request.prompt
+        
+        # Validate required fields FIRST (before extra keys check)
+        if not prompt_value or not str(prompt_value).strip():
+            logger.error("❌ Validation failed: Prompt is empty")
+            logger.error(f"Request prompt: {repr(request.prompt)}")
+            logger.error(f"Request description: {repr(request.description)}")
+            raise HTTPException(
+                status_code=400, 
+                detail="Either 'prompt' or 'description' is required and cannot be empty. Please provide a non-empty strategy description."
+            )
+        
         # VALIDATION: Reject extra keys (guard against unauthorized fields)
+        # Note: We check after normalization, so 'description' might still be in the dict
         allowed_fields = {
-            'prompt', 'symbol', 'timeframe', 'chart_type', 
+            'prompt', 'description', 'type', 'symbol', 'timeframe', 'chart_type', 
             'take_profit', 'stop_loss', 'trailing_stop',
             'trading_session', 'max_trades_per_day',
             'current_price', 'market_context'
         }
         request_dict = request.model_dump(exclude_unset=True)
+        
+        # Log incoming request BEFORE extra keys check for debugging
+        logger.info("=" * 80)
+        logger.info("🔄 NEW STRATEGY GENERATION REQUEST RECEIVED")
+        logger.info(f"Raw payload keys: {list(request_dict.keys())}")
+        logger.info(f"Payload: {json.dumps(request_dict, indent=2)}")
+        logger.info(f"Prompt value: {request.prompt}")
+        logger.info("=" * 80)
+        
         extra_keys = set(request_dict.keys()) - allowed_fields
         if extra_keys:
             logger.error(f"❌ REJECTED: Extra keys in payload: {extra_keys}")
+            logger.error(f"Allowed fields: {allowed_fields}")
+            logger.error(f"Received fields: {set(request_dict.keys())}")
             raise HTTPException(
                 status_code=400, 
-                detail=f"Invalid payload: Extra keys not allowed: {list(extra_keys)}. Allowed keys: {list(allowed_fields)}"
+                detail=f"Invalid payload: Extra keys not allowed: {list(extra_keys)}. Allowed keys: {sorted(allowed_fields)}"
             )
-        
-        # Log incoming request
-        logger.info("=" * 80)
-        logger.info("🔄 NEW STRATEGY GENERATION REQUEST RECEIVED")
-        logger.info(f"Payload: {json.dumps(request_dict, indent=2)}")
-        logger.info("=" * 80)
-        
-        # Validate required fields
-        if not request.prompt or not request.prompt.strip():
-            logger.error("❌ Validation failed: Prompt is empty")
-            raise HTTPException(status_code=400, detail="Prompt is required")
         
         # CREDIT FACILITY DISABLED FOR TESTING - Code kept for future enablement
         # Check and consume credits
