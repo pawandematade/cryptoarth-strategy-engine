@@ -123,6 +123,7 @@ class ExecutionLoop:
             base_price = 50000.0  # Starting price
             price_amplitude = 1000.0  # Price variation
             tick_count = 0
+            last_status = None  # Track previous status for state change detection
             
             while not self.should_stop:
                 # Create fresh DB session for this iteration (read-only)
@@ -143,7 +144,7 @@ class ExecutionLoop:
                         break
                 
                     elif current_execution.status == ExecutionStatus.PAUSED:
-                        if last_status != ExecutionStatus.PAUSED:
+                        if last_status is not None and last_status != ExecutionStatus.PAUSED:
                             log_execution_pause(strategy_code, version, self.execution_id)
                         last_status = ExecutionStatus.PAUSED
                         # Sleep longer when paused

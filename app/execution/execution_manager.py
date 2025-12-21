@@ -52,7 +52,12 @@ class ExecutionManager:
         self.lock = threading.Lock()
         
         # Create database engine and session factory
-        db_url = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        # Handle empty password for XAMPP (local development)
+        if DB_PASSWORD:
+            db_url = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
+        else:
+            # Empty password - XAMPP default
+            db_url = f"mysql+pymysql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
         self.db_engine = create_engine(db_url, pool_pre_ping=True)
         self.SessionLocal = sessionmaker(bind=self.db_engine)
     

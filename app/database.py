@@ -15,12 +15,20 @@ logger = logging.getLogger(__name__)
 # Models will be imported when init_db() is called
 
 # Construct database URL
-# Handle empty password for XAMPP (local development)
-if DB_PASSWORD:
-    DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
+# Priority: 1) DATABASE_URL from .env, 2) Build from components
+import os
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    # Build DATABASE_URL from individual components
+    # Handle empty password for XAMPP (local development)
+    if DB_PASSWORD:
+        DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
+    else:
+        # Empty password - XAMPP default
+        DATABASE_URL = f"mysql+pymysql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 else:
-    # Empty password - XAMPP default
-    DATABASE_URL = f"mysql+pymysql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
+    logger.info(f"Using DATABASE_URL from environment variable")
 
 # Create engine with safe configuration
 engine = create_engine(
@@ -94,13 +102,19 @@ def init_db() -> bool:
             logger.error("Cannot initialize database - connection test failed")
             return False
         
-        # Import models to ensure they're registered with Base.metadata
-        # This must be done before create_all() so all tables are discovered
-        from app import models  # noqa: F401
+        # Import ALL models to ensure they're registered with Base.metadata
+        # This MUST be done before create_all() so all tables are discovered
+        # Import order matters for foreign key relationships
+        from app.models import User, Strategy, StrategyVersion, StrategyExecution  # noqa: F401
+        
+        # Log which tables will be created
+        tables = list(Base.metadata.tables.keys())
+        logger.info(f"Creating tables: {', '.join(tables)}")
         
         # Create all tables
         Base.metadata.create_all(bind=engine)
         logger.info(f"✅ Database tables initialized successfully (DB={DB_NAME})")
+        logger.info(f"   Created/verified {len(tables)} table(s): {', '.join(tables)}")
         return True
     except OperationalError as e:
         logger.error(f"❌ Database initialization failed (OperationalError): {e}")
