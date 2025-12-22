@@ -32,11 +32,16 @@ def fetch_user_from_auth_backend(authorization: Optional[str] = None) -> Dict[st
         ValueError: If user not found or invalid response
     """
     # Auth backend endpoint: GET https://trade-api.cryptoarth.in/auth/user/
+    # CRITICAL: MUST use AUTH_BACKEND_URL, NEVER STRATEGY_ENGINE_BASE_URL
     url = f"{AUTH_BACKEND_URL}/auth/user/"
     headers = {}
     
     if authorization:
         headers["Authorization"] = authorization
+    
+    # DEBUG: Log auth API call (remove in production if needed)
+    print(f"AUTH API HIT → {url}")
+    logger.info(f"AUTH API HIT → {url}")
     
     # Call auth backend user API
     response = requests.get(

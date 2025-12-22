@@ -22,6 +22,9 @@ from app.engine.backtest_engine import BacktestEngine
 from app.store.redis_client import redis_client
 from app.strategies.loader import load_strategies
 from app.feed.delta_history import fetch_ohlcv, get_default_lookback_days
+from app.services.backtest_logging_service import log_backtest_execution
+from app.database import get_db
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -753,6 +756,49 @@ def _get_strategy_performance_internal(strategy_id: int, backtest_settings: Opti
                     status_code=status.HTTP_200_OK,
                     content=backtest_results
                 )
+            
+            # CRITICAL: Log backtest execution to strategy_executions table
+            # This endpoint is called from manual UI (not AI Builder), so use 'manual_backtest'
+            # MUST log every backtest execution for History tab
+            try:
+                from app.database import SessionLocal
+                from app.models import Strategy, StrategyVersion
+                backtest_db = SessionLocal()
+                try:
+                    # Get strategy from database to find latest version
+                    db_strategy = backtest_db.query(Strategy).filter(Strategy.id == strategy_id).first()
+                    if db_strategy:
+                        # Get latest version
+                        latest_version = backtest_db.query(StrategyVersion).filter(
+                            StrategyVersion.strategy_id == strategy_id
+                        ).order_by(StrategyVersion.version.desc()).first()
+                        
+                        if latest_version:
+                            # Log backtest execution (manual_backtest - called from performance endpoint)
+                            # CRITICAL: This MUST succeed to populate History tab
+                            execution = log_backtest_execution(
+                                db=backtest_db,
+                                strategy_id=strategy_id,
+                                strategy_version=latest_version.version,
+                                run_source='manual_backtest',
+                                backtest_results=backtest_results
+                            )
+                            if execution:
+                                logger.info(f"✅ Backtest execution logged: strategy_id={strategy_id}, execution_id={execution.id}")
+                            else:
+                                logger.warning(f"⚠️ Backtest execution logging returned None for strategy_id={strategy_id}")
+                        else:
+                            logger.warning(f"⚠️ No version found for strategy_id={strategy_id}, cannot log backtest")
+                    else:
+                        logger.warning(f"⚠️ Strategy {strategy_id} not found in database, cannot log backtest")
+                except Exception as log_error:
+                    backtest_db.rollback()
+                    logger.error(f"❌ Failed to log backtest execution: {log_error}", exc_info=True)
+                finally:
+                    backtest_db.close()
+            except Exception as log_error:
+                # Don't fail backtest if logging fails, but log the error
+                logger.error(f"❌ Failed to create database session for backtest logging: {log_error}", exc_info=True)
             
             # Cache results (without brokerage - cache raw results)
             _cache_performance(strategy_id, backtest_results)

@@ -40,12 +40,15 @@ FRONTEND_URL = STRATEGY_ENGINE_FRONTEND_URL
 # Redis Configuration (using STRATEGY_ prefixed names)
 STRATEGY_REDIS_HOST = os.getenv("STRATEGY_REDIS_HOST")
 STRATEGY_REDIS_PORT = int(os.getenv("STRATEGY_REDIS_PORT", "6379"))
+STRATEGY_REDIS_PASSWORD = os.getenv("STRATEGY_REDIS_PASSWORD", "")  # Optional password
 if not STRATEGY_REDIS_HOST:
     raise ValueError(f"STRATEGY_REDIS_HOST must be set in {env_file}")
 
 # Backward compatibility aliases
 REDIS_HOST = STRATEGY_REDIS_HOST
 REDIS_PORT = STRATEGY_REDIS_PORT
+REDIS_PASSWORD = STRATEGY_REDIS_PASSWORD
+REDIS_PASSWORD = STRATEGY_REDIS_PASSWORD
 
 # Delta Exchange Configuration
 DELTA_BASE_URL = os.getenv("DELTA_BASE_URL", "https://api.india.delta.exchange")

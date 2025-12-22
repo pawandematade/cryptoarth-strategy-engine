@@ -137,7 +137,7 @@ class ExecutionManager:
         try:
             # Query all ACTIVE executions
             active_executions = db.query(StrategyExecution).filter(
-                StrategyExecution.status == ExecutionStatus.ACTIVE
+                StrategyExecution.status == ExecutionStatus.active
             ).all()
             
             active_execution_ids = {ex.id for ex in active_executions}

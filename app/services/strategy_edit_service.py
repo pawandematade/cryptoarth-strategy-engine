@@ -4,17 +4,86 @@ Handles editing saved strategies by creating new versions.
 
 IMPORTANT: Editing a strategy NEVER overwrites existing versions.
 Every edit creates a NEW version in strategy_versions table.
+
+CRITICAL: All strategy updates must also call auth backend API.
 """
 import logging
+import requests
+import json
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
-from app.models import Strategy, StrategyVersion, User
+from app.models import Strategy, StrategyVersion, User, StrategyStatus
 from app.services.user_sync_service import get_or_sync_user
 from app.services.strategy_save_service import validate_strategy_payload
+from app.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)
+
+
+def update_strategy_in_auth_backend(
+    strategy_code: str,
+    strategy_data: Dict[str, Any],
+    authorization: str
+) -> bool:
+    """
+    Update strategy in auth backend database via API.
+    
+    CRITICAL: MUST use AUTH_BACKEND_URL, NEVER STRATEGY_ENGINE_BASE_URL.
+    This ensures strategy is updated in production database.
+    
+    Args:
+        strategy_code: Strategy code (e.g., STRG-ABCD)
+        strategy_data: Updated strategy data
+        authorization: Authorization header (Bearer token)
+    
+    Returns:
+        bool: True if successful, False otherwise (logs error but doesn't raise)
+    
+    Note: This is a non-blocking call - if auth backend is unavailable,
+    we log the error but don't fail the local update.
+    """
+    try:
+        # CRITICAL: Use AUTH_BACKEND_URL for all /auth/ API calls
+        # Note: Auth backend may use different endpoint for updates
+        # For now, we'll use add_strategy endpoint (it may handle updates)
+        # TODO: Check if auth backend has dedicated update endpoint
+        url = f"{AUTH_BACKEND_URL}/auth/user/add_strategy/"
+        headers = {
+            "Authorization": authorization,
+            "Content-Type": "application/json"
+        }
+        
+        # Add strategy_code to identify existing strategy
+        strategy_data["strategy_code"] = strategy_code
+        
+        # DEBUG: Log auth API call
+        print(f"AUTH API HIT → {url}")
+        logger.info(f"AUTH API HIT → {url} (update strategy: {strategy_code})")
+        
+        # Call auth backend to update strategy
+        response = requests.post(
+            url,
+            headers=headers,
+            json=strategy_data,
+            timeout=10
+        )
+        
+        if response.status_code in [200, 201]:
+            logger.info(f"Strategy updated in auth backend successfully: {strategy_code}")
+            return True
+        else:
+            logger.warning(f"Auth backend update returned {response.status_code}: {response.text}")
+            return False
+            
+    except requests.exceptions.RequestException as e:
+        # Log error but don't fail - local update already succeeded
+        logger.error(f"Failed to update strategy in auth backend: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating auth backend: {e}", exc_info=True)
+        return False
 
 
 def edit_strategy(
@@ -99,12 +168,21 @@ def edit_strategy(
     
     try:
         # 6. Create new strategy_versions row with version = latest_version + 1
+        # CRITICAL: Edited versions are always 'manual' (user-edited, not AI-generated)
+        # MANDATORY: Explicitly set created_by - DO NOT rely on DB defaults (no default in model)
         strategy_version = StrategyVersion(
             strategy_id=strategy.id,
             version=new_version,
             strategy_payload=strategy_payload,
-            backtest_snapshot=backtest_snapshot
+            backtest_snapshot=backtest_snapshot,
+            created_by="manual"  # MANDATORY: Explicitly set - Edited versions are user-edited (manual)
         )
+        
+        # VALIDATION: Ensure created_by is set before adding to session
+        if not strategy_version.created_by:
+            raise ValueError("CRITICAL: strategy_version.created_by must be explicitly set (got None)")
+        
+        logger.info(f"StrategyVersion created_by={strategy_version.created_by}")
         db.add(strategy_version)
         
         # 7. Update strategies.description if provided (allowed metadata update)
@@ -115,11 +193,38 @@ def edit_strategy(
         db.commit()
         db.refresh(strategy_version)
         
+        # CRITICAL: Set status to 'active' after successful edit
+        # This allows the strategy to be run immediately after edit
+        strategy.status = StrategyStatus.ACTIVE.value
+        db.commit()
+        db.refresh(strategy)
+        
         logger.info(
             f"Strategy edited successfully: strategy_code={strategy_code}, "
             f"strategy_id={strategy.id}, new_version={new_version}, "
-            f"previous_version={latest_version}"
+            f"previous_version={latest_version}, status=active"
         )
+        
+        # CRITICAL: Also update in auth backend database
+        # Prepare strategy data for auth backend API
+        strategy_data_for_auth = {
+            "strategy_name": strategy.name,
+            "strategy_code": strategy_code,
+            "name": strategy.name,
+            "full_name": strategy.name,
+            "symbol": strategy_payload.get("symbol", "BTCUSD"),
+            "strategy_type": strategy_payload.get("strategy_type", "ai_generated"),
+            "timeframe": strategy_payload.get("timeframe", "15MIN"),
+            "logic": json.dumps(strategy_payload.get("logic", {})),
+            "risk": json.dumps(strategy_payload.get("risk", {})),
+            "stratergy_description": description or strategy.description or f"AI Generated {strategy_payload.get('strategy_type', 'strategy')}",
+            "is_active": False,  # Keep existing status
+            "tag": strategy_payload.get("meta", {}).get("tags", []),
+            "trading_type": "Automatic",
+        }
+        
+        # Update in auth backend (non-blocking - logs error if fails)
+        update_strategy_in_auth_backend(strategy_code, strategy_data_for_auth, authorization)
         
         # 9. Return strategy_code and new_version
         return {

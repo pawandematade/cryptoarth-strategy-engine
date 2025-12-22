@@ -139,23 +139,23 @@ class ExecutionLoop:
                         break
                     
                     # Handle status changes
-                    if current_execution.status == ExecutionStatus.STOPPED:
+                    if current_execution.status == ExecutionStatus.stopped:
                         log_state_change(strategy_code, version, "active", "stopped")
                         break
                 
-                    elif current_execution.status == ExecutionStatus.PAUSED:
-                        if last_status is not None and last_status != ExecutionStatus.PAUSED:
+                    elif current_execution.status == ExecutionStatus.paused:
+                        if last_status is not None and last_status != ExecutionStatus.paused:
                             log_execution_pause(strategy_code, version, self.execution_id)
-                        last_status = ExecutionStatus.PAUSED
+                        last_status = ExecutionStatus.paused
                         # Sleep longer when paused
                         time.sleep(self.tick_interval_seconds * 2)
                         continue
                     
-                    elif current_execution.status == ExecutionStatus.ACTIVE:
-                        if last_status == ExecutionStatus.PAUSED:
+                    elif current_execution.status == ExecutionStatus.active:
+                        if last_status == ExecutionStatus.paused:
                             log_execution_resume(strategy_code, version, self.execution_id)
                             log_state_change(strategy_code, version, "paused", "active")
-                        last_status = ExecutionStatus.ACTIVE
+                        last_status = ExecutionStatus.active
                         
                         # Generate mock market data
                         tick_count += 1

@@ -11,6 +11,9 @@ from app.api.routes_strategy_performance import router as strategy_performance_r
 from app.api.routes_strategy_save import router as strategy_save_router
 from app.api.routes_strategy_edit import router as strategy_edit_router
 from app.api.routes_strategy_execution import router as strategy_execution_router
+from app.api.routes_strategy_list import router as strategy_list_router
+from app.api.routes_strategy_run import router as strategy_run_router
+from app.api.routes_paper_trades import router as paper_trades_router
 from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
 from app.api.routes_websocket import router as websocket_router
@@ -142,6 +145,9 @@ app.include_router(strategy_performance_router, prefix="/auth")  # Strategy perf
 app.include_router(strategy_save_router, prefix="", tags=["Strategy Save"])  # Strategy save (TEMP → SAVED)
 app.include_router(strategy_edit_router, prefix="", tags=["Strategy Edit"])  # Strategy edit (create new version)
 app.include_router(strategy_execution_router, prefix="", tags=["Strategy Execution"])  # Strategy execution activation
+app.include_router(strategy_list_router, prefix="", tags=["Strategy List"])  # Strategy list (Template & History tabs)
+app.include_router(strategy_run_router, prefix="", tags=["Strategy Run"])  # Strategy run creation
+app.include_router(paper_trades_router, prefix="", tags=["Paper Trades"])  # Paper trades & PDF export
 app.include_router(credits_router, prefix="/auth")  # Credits management
 app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
 app.include_router(websocket_router, prefix="/auth")  # WebSocket for live prices

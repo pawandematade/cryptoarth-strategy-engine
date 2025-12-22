@@ -19,12 +19,21 @@ class StrategyStatus(enum.Enum):
     ARCHIVED = "archived"
 
 
-class ExecutionStatus(enum.Enum):
-    """Execution status enum"""
-    INACTIVE = "inactive"
-    ACTIVE = "active"
-    PAUSED = "paused"
-    STOPPED = "stopped"
+class ExecutionStatus(str, enum.Enum):
+    """Execution status enum - values must match DB ENUM values (lowercase)"""
+    inactive = "inactive"
+    active = "active"
+    paused = "paused"
+    stopped = "stopped"
+    running = "running"
+    completed = "completed"
+
+
+class ExecutionMode(str, enum.Enum):
+    """Execution mode enum - values must match DB ENUM values (lowercase)"""
+    template = "template"
+    paper = "paper"
+    live = "live"
 
 
 class User(Base):
@@ -75,6 +84,7 @@ class Strategy(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(Enum(StrategyStatus), nullable=False, default=StrategyStatus.DRAFT, index=True)
+    created_by = Column(String(20), nullable=False, default="manual", index=True, comment="Source: 'ai' or 'manual'")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -83,7 +93,9 @@ class Strategy(Base):
     versions = relationship("StrategyVersion", back_populates="strategy", cascade="all, delete-orphan", order_by="StrategyVersion.version")
 
     def __repr__(self):
-        return f"<Strategy(id={self.id}, strategy_code={self.strategy_code}, name={self.name}, status={self.status.value})>"
+        # CRITICAL: status is stored as string, not Enum object
+        # Do NOT call .value on status - it will crash if status is already a string
+        return f"<Strategy(id={self.id}, strategy_code={self.strategy_code}, name={self.name}, status={self.status})>"
 
 
 class StrategyVersion(Base):
@@ -100,6 +112,7 @@ class StrategyVersion(Base):
     version = Column(Integer, nullable=False, default=1)
     strategy_payload = Column(JSON, nullable=False, comment="Full strategy JSON payload")
     backtest_snapshot = Column(JSON, nullable=True, comment="Optional backtest snapshot JSON")
+    created_by = Column(String(20), nullable=False, index=True, comment="Source: 'ai' for AI-generated, 'manual' for user-edited")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
@@ -115,17 +128,34 @@ class StrategyVersion(Base):
 
 class StrategyExecution(Base):
     """
-    Strategy execution activation records.
+    Strategy execution records.
     
-    Tracks which version of a strategy is currently active for execution.
-    Only one ACTIVE execution per strategy_id is allowed.
+    Tracks strategy runs with execution mode (template/paper/live).
+    Each execution represents one strategy run session.
     """
     __tablename__ = "strategy_executions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_version = Column(Integer, nullable=False, comment="Version number from strategy_versions")
-    status = Column(Enum(ExecutionStatus), nullable=False, default=ExecutionStatus.INACTIVE, index=True)
+    strategy_name = Column(String(255), nullable=False, comment="Strategy name snapshot")
+    strategy_code = Column(String(50), nullable=False, index=True, comment="Strategy code snapshot")
+    execution_mode = Column(
+        Enum(ExecutionMode, native_enum=False),
+        nullable=False,
+        default=ExecutionMode.paper,
+        index=True,
+        comment="Execution mode: template, paper, or live"
+    )
+    run_source = Column(String(30), nullable=False, default='live', index=True, comment="Source: template, paper, live, ai_backtest, manual_backtest")
+    status = Column(
+        Enum(ExecutionStatus, native_enum=False),
+        nullable=False,
+        default=ExecutionStatus.running,
+        index=True
+    )
+    trades = Column(Integer, nullable=False, default=0, comment="Total number of trades executed")
+    pnl = Column(String(50), nullable=False, default="0.0", comment="Total PnL as string (supports large numbers)")
     activated_at = Column(DateTime(timezone=True), nullable=True, comment="UTC timestamp when activated")
     deactivated_at = Column(DateTime(timezone=True), nullable=True, comment="UTC timestamp when deactivated")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -133,10 +163,46 @@ class StrategyExecution(Base):
 
     # Relationships
     strategy = relationship("Strategy", backref="executions")
+    paper_trades = relationship("PaperTrade", back_populates="execution", cascade="all, delete-orphan")
 
     __table_args__ = (
-        {"comment": "Strategy execution activation. Only one ACTIVE execution per strategy_id allowed."}
+        {"comment": "Strategy execution records. Tracks runs with execution mode."}
     )
 
     def __repr__(self):
-        return f"<StrategyExecution(id={self.id}, strategy_id={self.strategy_id}, strategy_version={self.strategy_version}, status={self.status.value})>"
+        status_val = self.status.value if hasattr(self.status, 'value') else str(self.status)
+        return f"<StrategyExecution(id={self.id}, strategy_id={self.strategy_id}, execution_mode={self.execution_mode.value if hasattr(self.execution_mode, 'value') else self.execution_mode}, status={status_val})>"
+
+
+class PaperTrade(Base):
+    """
+    Paper trade records.
+    
+    Tracks virtual trades for paper trading mode.
+    Each trade represents a BUY or SELL signal execution.
+    """
+    __tablename__ = "paper_trades"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    execution_id = Column(Integer, ForeignKey("strategy_executions.id", ondelete="CASCADE"), nullable=False, index=True)
+    symbol = Column(String(50), nullable=False, comment="Trading symbol (e.g., BTCUSD)")
+    side = Column(String(10), nullable=False, comment="BUY or SELL")
+    lot_size = Column(String(50), nullable=False, comment="Lot size as string (supports large numbers)")
+    contract_value = Column(String(50), nullable=False, comment="Contract value as string")
+    entry_price = Column(String(50), nullable=True, comment="Entry price as string")
+    exit_price = Column(String(50), nullable=True, comment="Exit price as string (null for open positions)")
+    leverage = Column(Integer, nullable=False, comment="Leverage used")
+    usable_capital = Column(String(50), nullable=False, comment="Usable capital as string")
+    margin_used = Column(String(50), nullable=False, comment="Margin used as string")
+    pnl = Column(String(50), nullable=False, default="0.0", comment="Trade PnL as string")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    execution = relationship("StrategyExecution", back_populates="paper_trades")
+
+    __table_args__ = (
+        {"comment": "Paper trade records. Tracks virtual trades for paper trading."}
+    )
+
+    def __repr__(self):
+        return f"<PaperTrade(id={self.id}, execution_id={self.execution_id}, symbol={self.symbol}, side={self.side}, pnl={self.pnl})>"

@@ -1,9 +1,19 @@
 import redis
 from redis.exceptions import RedisError
-from app.config import REDIS_HOST, REDIS_PORT
+from app.config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
 
 # Redis client connection using environment variables
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
+# Include password if provided
+redis_kwargs = {
+    'host': REDIS_HOST,
+    'port': REDIS_PORT,
+    'db': 0,
+    'decode_responses': True
+}
+if REDIS_PASSWORD:
+    redis_kwargs['password'] = REDIS_PASSWORD
+
+redis_client = redis.Redis(**redis_kwargs)
 
 
 def test_connection():

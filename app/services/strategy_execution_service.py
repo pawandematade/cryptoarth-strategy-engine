@@ -4,8 +4,11 @@ Handles activation, pausing, and resuming of strategy executions.
 
 IMPORTANT: Execution must ALWAYS bind to a specific version (strategy_code + version).
 Only one ACTIVE execution per strategy_id is allowed.
+
+CRITICAL: All strategy activate/deploy operations must also call auth backend API.
 """
 import logging
+import requests
 from typing import Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -13,8 +16,77 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 from app.models import Strategy, StrategyVersion, StrategyExecution, ExecutionStatus, User
 from app.services.user_sync_service import get_or_sync_user
+from app.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)
+
+
+def deploy_strategy_to_auth_backend(
+    strategy_code: str,
+    authorization: str,
+    is_active: bool = True
+) -> bool:
+    """
+    Deploy/activate strategy in auth backend database via API.
+    
+    CRITICAL: MUST use AUTH_BACKEND_URL, NEVER STRATEGY_ENGINE_BASE_URL.
+    This ensures strategy is activated in production database.
+    
+    Args:
+        strategy_code: Strategy code (e.g., STRG-ABCD)
+        authorization: Authorization header (Bearer token)
+        is_active: True to activate, False to deactivate
+    
+    Returns:
+        bool: True if successful, False otherwise (logs error but doesn't raise)
+    
+    Note: This is a non-blocking call - if auth backend is unavailable,
+    we log the error but don't fail the local activation.
+    """
+    try:
+        # CRITICAL: Use AUTH_BACKEND_URL for all /auth/ API calls
+        # Use deploy endpoint if available, otherwise use activate endpoint
+        if is_active:
+            url = f"{AUTH_BACKEND_URL}/auth/user/strategies/deploy/"
+        else:
+            url = f"{AUTH_BACKEND_URL}/auth/user/strategies/undeploy/"
+        
+        headers = {
+            "Authorization": authorization,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "strategy_code": strategy_code,
+            "is_active": is_active
+        }
+        
+        # DEBUG: Log auth API call
+        print(f"AUTH API HIT → {url}")
+        logger.info(f"AUTH API HIT → {url} (strategy: {strategy_code}, active: {is_active})")
+        
+        # Call auth backend to deploy/activate strategy
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=10
+        )
+        
+        if response.status_code in [200, 201]:
+            logger.info(f"Strategy {'activated' if is_active else 'deactivated'} in auth backend: {strategy_code}")
+            return True
+        else:
+            logger.warning(f"Auth backend deploy returned {response.status_code}: {response.text}")
+            return False
+            
+    except requests.exceptions.RequestException as e:
+        # Log error but don't fail - local activation already succeeded
+        logger.error(f"Failed to deploy strategy to auth backend: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error deploying to auth backend: {e}", exc_info=True)
+        return False
 
 
 def activate_strategy_execution(
@@ -108,11 +180,11 @@ def activate_strategy_execution(
         # 7. Lock and query existing active execution (if any)
         existing_active = db.query(StrategyExecution).filter(
             StrategyExecution.strategy_id == strategy.id,
-            StrategyExecution.status == ExecutionStatus.ACTIVE
+            StrategyExecution.status == ExecutionStatus.active
         ).with_for_update().first()
         
         if existing_active:
-            existing_active.status = ExecutionStatus.INACTIVE
+            existing_active.status = ExecutionStatus.inactive
             existing_active.deactivated_at = datetime.now(timezone.utc)
             logger.info(
                 f"Deactivated existing execution: strategy_code={strategy_code}, "
@@ -127,18 +199,27 @@ def activate_strategy_execution(
         
         if execution:
             # Update existing execution record
-            execution.status = ExecutionStatus.ACTIVE
+            execution.status = ExecutionStatus.active
             execution.activated_at = datetime.now(timezone.utc)
             execution.deactivated_at = None
+            execution.run_source = 'live'  # MANDATORY: Explicitly set - Live execution
         else:
             # Create new execution record
+            # MANDATORY: Explicitly set run_source - DO NOT rely on DB defaults
             execution = StrategyExecution(
                 strategy_id=strategy.id,
                 strategy_version=version,
-                status=ExecutionStatus.ACTIVE,
+                status=ExecutionStatus.active,
                 activated_at=datetime.now(timezone.utc),
-                deactivated_at=None
+                deactivated_at=None,
+                run_source='live'  # MANDATORY: Explicitly set - Live execution
             )
+            
+            # VALIDATION: Ensure run_source is set before adding to session
+            if not execution.run_source:
+                raise ValueError("CRITICAL: execution.run_source must be explicitly set (got None)")
+            
+            logger.info(f"StrategyExecution run_source={execution.run_source}")
             db.add(execution)
         
         # 9. Commit transaction
@@ -150,11 +231,15 @@ def activate_strategy_execution(
             f"strategy_id={strategy.id}, version={version}"
         )
         
+        # CRITICAL: Also deploy/activate in auth backend database
+        # This ensures strategy is activated in production database
+        deploy_strategy_to_auth_backend(strategy_code, authorization, is_active=True)
+        
         # 10. Return success response
         return {
             "strategy_code": strategy_code,
             "active_version": version,
-            "status": ExecutionStatus.ACTIVE.value
+            "status": ExecutionStatus.active.value
         }
         
     except IntegrityError as e:
@@ -242,17 +327,17 @@ def pause_strategy_execution(
         raise ValueError(f"Execution not found for strategy: strategy_code={strategy_code}")
     
     # 5. Validate current status (idempotent: if already paused, return success)
-    if execution.status == ExecutionStatus.PAUSED:
+    if execution.status == ExecutionStatus.paused:
         logger.info(
             f"Execution already paused (idempotent): strategy_code={strategy_code}, "
             f"execution_id={execution.id}"
         )
         return {
             "strategy_code": strategy_code,
-            "status": ExecutionStatus.PAUSED.value
+            "status": ExecutionStatus.paused.value
         }
     
-    if execution.status != ExecutionStatus.ACTIVE:
+    if execution.status != ExecutionStatus.active:
         raise ValueError(
             f"Cannot pause execution with status '{execution.status.value}'. "
             f"Only ACTIVE executions can be paused."
@@ -260,7 +345,7 @@ def pause_strategy_execution(
     
     try:
         # 6 & 7. Update execution status to PAUSED and set deactivated_at
-        execution.status = ExecutionStatus.PAUSED
+        execution.status = ExecutionStatus.paused
         execution.deactivated_at = datetime.now(timezone.utc)
         
         # 8. Commit transaction
@@ -272,10 +357,13 @@ def pause_strategy_execution(
             f"strategy_id={strategy.id}, execution_id={execution.id}"
         )
         
+        # CRITICAL: Also pause in auth backend (deploy with is_active=False)
+        deploy_strategy_to_auth_backend(strategy_code, authorization, is_active=False)
+        
         # 9. Return success response
         return {
             "strategy_code": strategy_code,
-            "status": ExecutionStatus.PAUSED.value
+            "status": ExecutionStatus.paused.value
         }
         
     except IntegrityError as e:
@@ -353,17 +441,17 @@ def resume_strategy_execution(
         raise ValueError(f"Execution not found for strategy: strategy_code={strategy_code}")
     
     # 5. Validate current status (idempotent: if already active, return success)
-    if execution.status == ExecutionStatus.ACTIVE:
+    if execution.status == ExecutionStatus.active:
         logger.info(
             f"Execution already active (idempotent): strategy_code={strategy_code}, "
             f"execution_id={execution.id}"
         )
         return {
             "strategy_code": strategy_code,
-            "status": ExecutionStatus.ACTIVE.value
+            "status": ExecutionStatus.active.value
         }
     
-    if execution.status != ExecutionStatus.PAUSED:
+    if execution.status != ExecutionStatus.paused:
         raise ValueError(
             f"Cannot resume execution with status '{execution.status.value}'. "
             f"Only PAUSED executions can be resumed."
@@ -371,7 +459,7 @@ def resume_strategy_execution(
     
     try:
         # 6 & 7. Update execution status to ACTIVE and set activated_at
-        execution.status = ExecutionStatus.ACTIVE
+        execution.status = ExecutionStatus.active
         execution.activated_at = datetime.now(timezone.utc)
         execution.deactivated_at = None  # Clear deactivated_at when resuming
         
@@ -384,10 +472,13 @@ def resume_strategy_execution(
             f"strategy_id={strategy.id}, execution_id={execution.id}"
         )
         
+        # CRITICAL: Also resume in auth backend (deploy with is_active=True)
+        deploy_strategy_to_auth_backend(strategy_code, authorization, is_active=True)
+        
         # 9. Return success response
         return {
             "strategy_code": strategy_code,
-            "status": ExecutionStatus.ACTIVE.value
+            "status": ExecutionStatus.active.value
         }
         
     except IntegrityError as e:
@@ -466,18 +557,18 @@ def stop_strategy_execution(
         raise ValueError(f"Execution not found for strategy: strategy_code={strategy_code}")
     
     # 5. Validate current status (idempotent: if already stopped, return success)
-    if execution.status == ExecutionStatus.STOPPED:
+    if execution.status == ExecutionStatus.stopped:
         logger.info(
             f"Execution already stopped (idempotent): strategy_code={strategy_code}, "
             f"execution_id={execution.id}"
         )
         return {
             "strategy_code": strategy_code,
-            "status": ExecutionStatus.STOPPED.value
+            "status": ExecutionStatus.stopped.value
         }
     
     # STOP is allowed only from ACTIVE or PAUSED states
-    if execution.status not in [ExecutionStatus.ACTIVE, ExecutionStatus.PAUSED]:
+    if execution.status not in [ExecutionStatus.active, ExecutionStatus.paused]:
         raise ValueError(
             f"Cannot stop execution with status '{execution.status.value}'. "
             f"Only ACTIVE or PAUSED executions can be stopped."
@@ -488,7 +579,7 @@ def stop_strategy_execution(
         previous_status = execution.status.value
         
         # 6 & 7. Update execution status to STOPPED and set deactivated_at
-        execution.status = ExecutionStatus.STOPPED
+        execution.status = ExecutionStatus.stopped
         execution.deactivated_at = datetime.now(timezone.utc)
         
         # 8. Commit transaction
@@ -501,10 +592,13 @@ def stop_strategy_execution(
             f"previous_status={previous_status}"
         )
         
+        # CRITICAL: Also stop in auth backend (deploy with is_active=False)
+        deploy_strategy_to_auth_backend(strategy_code, authorization, is_active=False)
+        
         # 9. Return success response
         return {
             "strategy_code": strategy_code,
-            "status": ExecutionStatus.STOPPED.value
+            "status": ExecutionStatus.stopped.value
         }
         
     except IntegrityError as e:

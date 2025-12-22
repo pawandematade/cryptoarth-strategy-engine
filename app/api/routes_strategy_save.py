@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Header, Depends
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 import logging
 import requests
 
@@ -75,10 +75,28 @@ def save_strategy_endpoint(
     Raises:
         HTTPException: If validation fails or save fails
     """
+    # CRITICAL DEBUG: Verify endpoint is being called
+    print("🔥🔥🔥 ENTERED save_strategy API ENDPOINT 🔥🔥🔥")
+    logger.info("🔥🔥🔥 ENTERED save_strategy API ENDPOINT 🔥🔥🔥")
+    print(f"🔥 Request data: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
+    logger.info(f"🔥 Request data: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
+    
     try:
+        # STEP 1: CONFIRM ACTIVE DATABASE (CRITICAL)
+        from app.config import DB_HOST, DB_NAME
+        print(f"🔥 [ENDPOINT] ACTIVE DB: HOST={DB_HOST}, NAME={DB_NAME}")
+        logger.info(f"🔥 [ENDPOINT] ACTIVE DB: HOST={DB_HOST}, NAME={DB_NAME}")
+        
         # Validate authorization header
         if not authorization:
+            print("❌ [ENDPOINT] Authorization header missing")
+            logger.warning("❌ [ENDPOINT] Authorization header missing")
             raise HTTPException(status_code=401, detail="Authorization header required")
+        
+        print("🔥🔥🔥 CALLING save_strategy() now 🔥🔥🔥")
+        logger.info("🔥🔥🔥 CALLING save_strategy() now 🔥🔥🔥")
+        print(f"🔥 [ENDPOINT] Request params: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
+        logger.info(f"🔥 [ENDPOINT] Request params: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
         
         # Save strategy (includes user sync, validation, and DB save)
         result = save_strategy(
@@ -91,34 +109,98 @@ def save_strategy_endpoint(
             backtest_snapshot=request.backtest_snapshot
         )
         
+        print(f"✅ [ENDPOINT] save_strategy() returned: strategy_id={result.get('strategy_id')}, strategy_code={result.get('strategy_code')}")
         logger.info(f"Strategy saved successfully: strategy_id={result['strategy_id']}, strategy_code={result['strategy_code']}")
+        
+        # STEP 6: RESPONSE MUST USE REAL DB ID
+        # Verify strategy_id is from actual DB, not random/fake
+        strategy_id = result["strategy_id"]
+        if not isinstance(strategy_id, int) or strategy_id <= 0:
+            logger.error(f"❌ [ENDPOINT] Invalid strategy_id in response: {strategy_id}")
+            raise HTTPException(status_code=500, detail="Invalid strategy_id returned from save operation")
+        
+        print(f"✅ [ENDPOINT] Returning response with strategy_id={strategy_id}")
+        logger.info(f"✅ [ENDPOINT] Returning response with strategy_id={strategy_id}")
+        print("🔥🔥🔥 EXITING save_strategy API ENDPOINT (SUCCESS) 🔥🔥🔥")
+        logger.info("🔥🔥🔥 EXITING save_strategy API ENDPOINT (SUCCESS) 🔥🔥🔥")
         
         return SaveStrategyResponse(
             success=True,
-            strategy_id=result["strategy_id"],
+            strategy_id=strategy_id,
             strategy_code=result["strategy_code"],
             version=result["version"],
             message="Strategy saved successfully"
         )
         
     except ValueError as e:
-        # Validation errors
-        logger.warning(f"Validation error saving strategy: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        # Validation errors (including NOT NULL constraint violations)
+        error_msg = str(e)
+        print(f"❌ [ENDPOINT] ValueError: {error_msg}")
+        logger.error(f"❌ Validation error saving strategy: {error_msg}", exc_info=True)
+        print("🔥🔥🔥 EXITING save_strategy API ENDPOINT (ValueError) 🔥🔥🔥")
+        logger.info("🔥🔥🔥 EXITING save_strategy API ENDPOINT (ValueError) 🔥🔥🔥")
+        
+        # Check if it's a NOT NULL constraint error
+        if 'must be explicitly set' in error_msg or 'NOT NULL' in error_msg:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Database constraint violation: {error_msg}. Please ensure all required fields are set."
+            )
+        else:
+            raise HTTPException(status_code=400, detail=error_msg)
     except requests.exceptions.RequestException as e:
         # Auth backend unavailable - FAIL FAST
+        print(f"❌ [ENDPOINT] RequestException (Auth backend unavailable): {e}")
         logger.error(f"Auth backend unavailable: {e}")
+        print("🔥🔥🔥 EXITING save_strategy API ENDPOINT (RequestException) 🔥🔥🔥")
+        logger.info("🔥🔥🔥 EXITING save_strategy API ENDPOINT (RequestException) 🔥🔥🔥")
         raise HTTPException(
             status_code=503,
             detail=f"Auth backend unavailable. Cannot save strategy without user verification. Error: {str(e)}"
         )
-    except SQLAlchemyError as e:
-        # Database errors
-        logger.error(f"Database error saving strategy: {e}", exc_info=True)
+    except IntegrityError as e:
+        # Database integrity errors (NOT NULL, UNIQUE, FOREIGN KEY violations)
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        print(f"❌ [ENDPOINT] IntegrityError: {error_msg}")
+        logger.error(f"❌ Database integrity error saving strategy: {error_msg}", exc_info=True)
+        import traceback
+        traceback.print_exc()
         db.rollback()
-        raise HTTPException(status_code=500, detail="Database error occurred while saving strategy")
+        print("🔥🔥🔥 EXITING save_strategy API ENDPOINT (IntegrityError) 🔥🔥🔥")
+        logger.info("🔥🔥🔥 EXITING save_strategy API ENDPOINT (IntegrityError) 🔥🔥🔥")
+        
+        # Check if it's a NOT NULL constraint violation
+        if 'NOT NULL' in error_msg or 'cannot be null' in error_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Database constraint violation: Missing required field. Error: {error_msg}"
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Database constraint violation: {error_msg}"
+            )
+    except SQLAlchemyError as e:
+        # Other database errors
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        print(f"❌ [ENDPOINT] SQLAlchemyError: {error_msg}")
+        logger.error(f"❌ Database error saving strategy: {error_msg}", exc_info=True)
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        print("🔥🔥🔥 EXITING save_strategy API ENDPOINT (SQLAlchemyError) 🔥🔥🔥")
+        logger.info("🔥🔥🔥 EXITING save_strategy API ENDPOINT (SQLAlchemyError) 🔥🔥🔥")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error occurred while saving strategy: {error_msg}"
+        )
     except Exception as e:
         # Unexpected errors
+        print(f"❌ [ENDPOINT] Unexpected error: {e}")
         logger.error(f"Unexpected error saving strategy: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
         db.rollback()
+        print("🔥🔥🔥 EXITING save_strategy API ENDPOINT (Exception) 🔥🔥🔥")
+        logger.info("🔥🔥🔥 EXITING save_strategy API ENDPOINT (Exception) 🔥🔥🔥")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
