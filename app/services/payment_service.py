@@ -9,7 +9,9 @@ import json
 import time
 from typing import Dict, Optional, Any
 from app.store.redis_client import redis_client
-from app.services.credits_service import add_credits
+from app.services.credit_service import add_credits, get_rupee_to_credit_ratio
+from app.models import PaymentTransaction
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -17,30 +19,34 @@ logger = logging.getLogger(__name__)
 razorpay_client = None
 
 # Credit packages/plans
+# CRITICAL: All amounts must match frontend exactly
+# Base price: ₹10 = 1 Credit
+# GST: 18% of base price
+# Total payable = base_price + gst
 CREDIT_PLANS = {
     'starter': {
         'name': 'Starter Pack',
         'credits': 50,
-        'amount': 99,  # in INR (paise will be calculated)
+        'base_price': 500,  # Base price in INR
+        'gst': 90,  # GST (18%) in INR
+        'total_amount': 590,  # Total payable (base + GST) in INR
         'description': '50 credits for AI strategy generation and backtesting'
     },
     'professional': {
         'name': 'Professional Pack',
-        'credits': 200,
-        'amount': 299,
-        'description': '200 credits - Best for active traders'
+        'credits': 150,
+        'base_price': 1500,  # Base price in INR
+        'gst': 270,  # GST (18%) in INR
+        'total_amount': 1770,  # Total payable (base + GST) in INR
+        'description': '150 credits - Best for active traders'
     },
     'enterprise': {
         'name': 'Enterprise Pack',
-        'credits': 500,
-        'amount': 699,
-        'description': '500 credits - For power users and teams'
-    },
-    'unlimited': {
-        'name': 'Unlimited Pack',
-        'credits': 1000,
-        'amount': 1299,
-        'description': '1000 credits - Maximum value'
+        'credits': 300,
+        'base_price': 3000,  # Base price in INR
+        'gst': 540,  # GST (18%) in INR
+        'total_amount': 3540,  # Total payable (base + GST) in INR
+        'description': '300 credits - For power users and teams'
     }
 }
 
@@ -74,7 +80,7 @@ def initialize_razorpay():
         return False
 
 
-def create_razorpay_order(plan_id: str, user_id: str) -> Dict[str, Any]:
+def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
     """
     Create a Razorpay order for credit purchase
     
@@ -120,15 +126,18 @@ def create_razorpay_order(plan_id: str, user_id: str) -> Dict[str, Any]:
             }
         
         plan = CREDIT_PLANS[plan_id]
-        amount_paise = plan['amount'] * 100  # Convert to paise
+        # CRITICAL: Use total_amount (base + GST) for Razorpay order
+        # This ensures checkout shows the correct amount matching frontend
+        total_amount = plan['total_amount']  # Total payable in INR
+        amount_paise = int(total_amount * 100)  # Convert to paise (Razorpay requires integer)
         
         # Create Razorpay order
         order_data = {
             'amount': amount_paise,  # Amount in paise
             'currency': 'INR',
-            'receipt': f'credits_{user_id}_{plan_id}',
+            'receipt': f'credits_{user_id}_{plan_id}_{int(time.time())}',
             'notes': {
-                'user_id': user_id,
+                'user_id': str(user_id),
                 'plan_id': plan_id,
                 'credits': plan['credits'],
                 'plan_name': plan['name']
@@ -155,13 +164,16 @@ def create_razorpay_order(plan_id: str, user_id: str) -> Dict[str, Any]:
         order_key = f"PAYMENT_ORDER:{order_id}"
         order_details = {
             'order_id': order_id,
-            'user_id': user_id,
+            'user_id': str(user_id),
             'plan_id': plan_id,
             'credits': plan['credits'],
-            'amount': plan['amount'],
-            'amount_paise': amount_paise,
+            'base_price': plan['base_price'],  # Base price in INR
+            'gst': plan['gst'],  # GST in INR
+            'amount': total_amount,  # Total payable (base + GST) in INR
+            'amount_paise': amount_paise,  # Total payable in paise
+            'plan_name': plan['name'],
             'status': 'created',
-            'created_at': order.get('created_at', 0)
+            'created_at': order.get('created_at', int(time.time()))
         }
         redis_client.setex(
             order_key,
@@ -240,19 +252,27 @@ def verify_razorpay_signature(order_id: str, payment_id: str, signature: str) ->
         return False
 
 
-def process_payment_success(order_id: str, payment_id: str, signature: str) -> Dict[str, Any]:
+def process_payment_success(
+    db: Session,
+    order_id: str,
+    payment_id: str,
+    signature: str,
+    user_id: int
+) -> Dict[str, Any]:
     """
     Process successful payment and add credits to user
     
     Args:
+        db: Database session
         order_id: Razorpay order ID
         payment_id: Razorpay payment ID
         signature: Razorpay signature
+        user_id: Local user ID (integer)
     
     Returns:
         dict: {
             'success': bool,
-            'user_id': str,
+            'user_id': int,
             'credits_added': int,
             'message': str
         }
@@ -262,7 +282,7 @@ def process_payment_success(order_id: str, payment_id: str, signature: str) -> D
         if not verify_razorpay_signature(order_id, payment_id, signature):
             return {
                 'success': False,
-                'user_id': None,
+                'user_id': user_id,
                 'credits_added': 0,
                 'message': 'Invalid payment signature. Payment verification failed.'
             }
@@ -275,39 +295,90 @@ def process_payment_success(order_id: str, payment_id: str, signature: str) -> D
             logger.error(f"Order {order_id} not found in Redis")
             return {
                 'success': False,
-                'user_id': None,
+                'user_id': user_id,
                 'credits_added': 0,
                 'message': 'Order not found. Payment may have expired.'
             }
         
         order_data = json.loads(order_data_str)
         
-        # Check if already processed
-        if order_data.get('status') == 'completed':
-            logger.warning(f"Order {order_id} already processed")
+        # CRITICAL: Idempotency check - Check if payment_id already processed
+        # This prevents duplicate credit additions if webhook is called multiple times
+        existing_payment = db.query(PaymentTransaction).filter(
+            PaymentTransaction.gateway_payment_id == payment_id,
+            PaymentTransaction.status == 'success'
+        ).first()
+        
+        if existing_payment:
+            logger.info(f"Payment {payment_id} already processed in DB (idempotency check). Skipping duplicate processing.")
+            # Get updated user credits
+            from app.services.credit_service import get_user_credits
+            user_credits = get_user_credits(db, user_id)
+            credits_remaining = user_credits.available_credits if user_credits else 0
+            
             return {
                 'success': True,
-                'user_id': order_data['user_id'],
-                'credits_added': order_data['credits'],
-                'message': 'Payment already processed'
+                'user_id': user_id,
+                'credits_added': existing_payment.credits_added,
+                'credits_remaining': credits_remaining,
+                'message': 'Payment already processed (idempotent response)'
             }
         
-        user_id = order_data['user_id']
-        credits = order_data['credits']
+        # Calculate credits from base_price (₹10 = 1 credit)
+        # CRITICAL: Credits are calculated from base_price, NOT total_amount (GST excluded)
+        base_price = order_data.get('base_price', 0)  # Base price in INR (GST excluded)
+        if base_price == 0:
+            # Fallback to amount for backward compatibility (old orders)
+            base_price = order_data.get('amount', 0)
+        ratio = get_rupee_to_credit_ratio(db)  # Default: 10
+        credits = int(base_price / ratio) if ratio > 0 else 0
         
-        # Add credits to user account
-        credit_result = add_credits(user_id, credits)
+        # Get total amount for payment transaction record
+        total_amount = order_data.get('amount', 0)  # Total payable (base + GST) in INR
         
-        if not credit_result['success']:
-            logger.error(f"Failed to add credits to user {user_id}: {credit_result['message']}")
+        # Add credits to user account (atomic operation)
+        success, error_msg = add_credits(
+            db, user_id, credits,
+            reason=f"Payment for order {order_id}",
+            reference_id=payment_id
+        )
+        
+        if not success:
+            logger.error(f"Failed to add credits to user {user_id}: {error_msg}")
+            # Create failed payment transaction
+            payment_txn = PaymentTransaction(
+                user_id=user_id,
+                provider='razorpay',
+                amount=float(total_amount),  # Total payable (base + GST)
+                credits_added=0,
+                status='failed',
+                gateway_order_id=order_id,
+                gateway_payment_id=payment_id
+            )
+            db.add(payment_txn)
+            db.commit()
+            
             return {
                 'success': False,
                 'user_id': user_id,
                 'credits_added': 0,
-                'message': f"Failed to add credits: {credit_result['message']}"
+                'message': f"Failed to add credits: {error_msg}"
             }
         
-        # Update order status
+        # Create payment transaction record
+        payment_txn = PaymentTransaction(
+            user_id=user_id,
+            provider='razorpay',
+            amount=float(total_amount),  # Total payable (base + GST)
+            credits_added=credits,
+            status='success',
+            gateway_order_id=order_id,
+            gateway_payment_id=payment_id
+        )
+        db.add(payment_txn)
+        db.commit()
+        
+        # Update order status in Redis
         order_data['status'] = 'completed'
         order_data['payment_id'] = payment_id
         order_data['completed_at'] = int(time.time())
@@ -318,23 +389,59 @@ def process_payment_success(order_id: str, payment_id: str, signature: str) -> D
             json.dumps(order_data)
         )
         
-        # Store transaction record
-        transaction_key = f"PAYMENT_TXN:{payment_id}"
-        transaction_data = {
-            'payment_id': payment_id,
-            'order_id': order_id,
-            'user_id': user_id,
-            'plan_id': order_data['plan_id'],
-            'credits': credits,
-            'amount': order_data['amount'],
-            'status': 'completed',
-            'completed_at': int(time.time())
-        }
-        redis_client.setex(
-            transaction_key,
-            86400 * 365,  # 1 year TTL
-            json.dumps(transaction_data)
-        )
+        # Get updated user credits
+        from app.services.credit_service import get_user_credits
+        user_credits = get_user_credits(db, user_id)
+        credits_remaining = user_credits.available_credits if user_credits else 0
+        
+        # Get user details for invoice email
+        from app.models import User
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        # Send invoice email (idempotent - only if email not sent before)
+        # Check if invoice email was already sent by checking a flag in payment_txn
+        # For now, we'll send email only once per payment_id (idempotency handled by email service)
+        if user and user.email:
+            try:
+                from app.services.email_service import send_invoice_email
+                from datetime import datetime
+                
+                # Get base_price and GST from order_data (already calculated)
+                invoice_base_price = float(order_data.get('base_price', 0))
+                invoice_gst = float(order_data.get('gst', 0))
+                invoice_total = float(total_amount)  # Total payable (base + GST)
+                
+                # Fallback calculation for backward compatibility (old orders without base_price/gst)
+                if invoice_base_price == 0:
+                    invoice_base_price = float(total_amount) / 1.18  # Calculate base from total
+                    invoice_gst = float(total_amount) - invoice_base_price
+                
+                # Get user name and mobile
+                user_name = user.first_name or user.username or "User"
+                if user.last_name:
+                    user_name = f"{user.first_name} {user.last_name}" if user.first_name else user.last_name
+                user_mobile = user.phone or ""
+                
+                # Send invoice email (non-blocking - don't fail payment if email fails)
+                email_sent = send_invoice_email(
+                    to_email=user.email,
+                    user_name=user_name,
+                    user_mobile=user_mobile,
+                    payment_id=payment_id,
+                    amount=invoice_base_price,  # Base price (GST excluded)
+                    gst_amount=invoice_gst,  # GST amount
+                    total_amount=invoice_total,  # Total payable (base + GST)
+                    credits_added=credits,
+                    payment_date=payment_txn.created_at if payment_txn.created_at else datetime.now()
+                )
+                
+                if email_sent:
+                    logger.info(f"Invoice email sent to {user.email} for payment {payment_id}")
+                else:
+                    logger.warning(f"Failed to send invoice email to {user.email} for payment {payment_id}")
+            except Exception as email_error:
+                # Log error but don't fail payment processing
+                logger.error(f"Error sending invoice email: {email_error}", exc_info=True)
         
         logger.info(f"Payment processed successfully: Order {order_id}, Payment {payment_id}, User {user_id}, Credits {credits}")
         
@@ -342,15 +449,16 @@ def process_payment_success(order_id: str, payment_id: str, signature: str) -> D
             'success': True,
             'user_id': user_id,
             'credits_added': credits,
-            'credits_remaining': credit_result['credits_remaining'],
+            'credits_remaining': credits_remaining,
             'message': f'Successfully added {credits} credits to your account'
         }
         
     except Exception as e:
+        db.rollback()
         logger.error(f"Error processing payment: {e}", exc_info=True)
         return {
             'success': False,
-            'user_id': None,
+            'user_id': user_id,
             'credits_added': 0,
             'message': f'Error processing payment: {str(e)}'
         }

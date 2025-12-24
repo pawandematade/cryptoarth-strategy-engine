@@ -48,6 +48,15 @@ async def lifespan(app: FastAPI):
     db_connected = test_db_connection()
     
     if db_connected:
+        # CRITICAL: Import all models BEFORE calling init_db() to register with Base.metadata
+        # This avoids circular import (models import Base from database.py)
+        # Import all models to ensure they're registered with Base.metadata
+        from app.models import (  # noqa: F401
+            User, Strategy, StrategyVersion, StrategyExecution, PaperTrade,
+            CreditConfig, UserCredits, CreditTransaction, StrategyUsage, PaymentTransaction
+        )
+        logger.info("✅ All models imported and registered with Base.metadata")
+        
         # Initialize database tables (safe - returns False on error, doesn't raise)
         db_initialized = init_db()
         if not db_initialized:
@@ -109,6 +118,8 @@ if IS_PRODUCTION:
         "https://aistrategy.cryptoarth.in",
         "https://cryptoarth.in",
         "https://panel.cryptoarth.in",
+        "https://trade-panel.cryptoarth.in",  # Main trading panel frontend
+        "https://www.trade-panel.cryptoarth.in",  # With www subdomain
     ]
     # Remove duplicates and None values
     allowed_origins = list(set(filter(None, allowed_origins)))
@@ -142,15 +153,18 @@ app.include_router(ai_strategy_router, prefix="/auth")
 app.include_router(secure_ai_router, prefix="/auth")  # Secure AI strategy generation
 app.include_router(strategy_router, prefix="/auth")  # Strategy performance metrics
 app.include_router(strategy_performance_router, prefix="/auth")  # Strategy performance API
-app.include_router(strategy_save_router, prefix="", tags=["Strategy Save"])  # Strategy save (TEMP → SAVED)
+# CRITICAL: All protected Strategy Engine APIs MUST use /auth prefix
+app.include_router(strategy_save_router, prefix="/auth", tags=["Strategy Save"])  # Strategy save (TEMP → SAVED) - /auth/strategies/save
 app.include_router(strategy_edit_router, prefix="", tags=["Strategy Edit"])  # Strategy edit (create new version)
 app.include_router(strategy_execution_router, prefix="", tags=["Strategy Execution"])  # Strategy execution activation
-app.include_router(strategy_list_router, prefix="", tags=["Strategy List"])  # Strategy list (Template & History tabs)
-app.include_router(strategy_run_router, prefix="", tags=["Strategy Run"])  # Strategy run creation
+app.include_router(strategy_list_router, prefix="/auth", tags=["Strategy List"])  # Strategy list (Template & History tabs) - /auth/strategies, /auth/strategy-runs
+app.include_router(strategy_run_router, prefix="/auth", tags=["Strategy Run"])  # Strategy run creation - /auth/strategy-runs/live, /auth/strategy-runs/stop
 app.include_router(paper_trades_router, prefix="", tags=["Paper Trades"])  # Paper trades & PDF export
 app.include_router(credits_router, prefix="/auth")  # Credits management
 app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
-app.include_router(websocket_router, prefix="/auth")  # WebSocket for live prices
+# CRITICAL: WebSocket for live prices is PUBLIC - no authentication required
+# Live market prices do not require user authentication
+app.include_router(websocket_router, prefix="")  # WebSocket for live prices (public endpoint)
 app.include_router(backtest_router, prefix="", tags=["Backtest"])  # Backtest (no /auth prefix - direct Strategy Engine endpoint)
 
 @app.get("/")

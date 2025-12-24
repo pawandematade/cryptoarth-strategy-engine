@@ -43,14 +43,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Base class for models
 # CRITICAL: SINGLE Base definition - all models must use this Base
 # This is the ONLY place where declarative_base() is called
+# DO NOT import models here - this creates circular import (models import Base from here)
 Base = declarative_base()
-
-# CRITICAL: Import models IMMEDIATELY after Base is defined
-# This ensures all models are registered with Base.metadata before any queries
-# Models import Base from this module, so import happens after Base is defined
-# This is safe because Python handles the circular import correctly
-from app.models import User, Strategy, StrategyVersion, StrategyExecution, PaperTrade  # noqa: F401
-logger.info("✅ Models imported at module level: User, Strategy, StrategyVersion, StrategyExecution, PaperTrade")
 
 
 def get_db() -> Session:
@@ -99,6 +93,9 @@ def init_db() -> bool:
     Initialize database - create all tables if they don't exist.
     Safe version that doesn't raise exceptions.
     
+    NOTE: Models must be imported BEFORE calling this function to register with Base.metadata.
+    This function does NOT import models to avoid circular import.
+    
     Returns:
         bool: True if tables were created/verified successfully, False otherwise
     """
@@ -108,24 +105,18 @@ def init_db() -> bool:
             logger.error("Cannot initialize database - connection test failed")
             return False
         
-        # Models should already be imported at module level (after Base definition)
-        # But import again here to ensure they're registered before create_all()
-        from app.models import User, Strategy, StrategyVersion, StrategyExecution, PaperTrade  # noqa: F401
+        # CRITICAL: Models must be imported BEFORE this function is called
+        # (in main.py or wherever init_db() is called)
+        # This avoids circular import: models import Base from database.py
         
-        # CRITICAL: Verify models are registered with Base.metadata
-        # Log which tables will be created
+        # Verify models are registered with Base.metadata
         tables = list(Base.metadata.tables.keys())
-        logger.info(f"Creating tables: {', '.join(tables)}")
+        if not tables:
+            logger.warning("⚠️  No tables found in Base.metadata. Models may not be imported yet.")
+            logger.warning("   Make sure all models are imported before calling init_db()")
+            return False
         
-        # Verify expected tables are present
-        expected_tables = ['users', 'strategies', 'strategy_versions', 'strategy_executions', 'paper_trades']
-        missing_tables = [t for t in expected_tables if t not in tables]
-        if missing_tables:
-            logger.error(f"❌ CRITICAL: Missing tables in Base.metadata: {missing_tables}")
-            logger.error(f"   Available tables: {tables}")
-            raise ValueError(f"Models not properly registered: missing tables {missing_tables}")
-        else:
-            logger.info(f"✅ All expected tables registered: {expected_tables}")
+        logger.info(f"Creating tables: {', '.join(tables)}")
         
         # Create all tables
         Base.metadata.create_all(bind=engine)

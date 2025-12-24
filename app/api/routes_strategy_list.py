@@ -14,8 +14,9 @@ from fastapi import APIRouter, HTTPException, Header, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from datetime import datetime
+from collections import defaultdict
 import logging
 
 from app.database import get_db
@@ -52,22 +53,25 @@ class StrategyDetailResponse(BaseModel):
     message: Optional[str] = None
 
 
-class StrategyRunItem(BaseModel):
-    """Strategy run item for History tab"""
-    id: int
-    strategy_id: int
-    strategy_name: str
-    strategy_code: str
-    execution_mode: str  # 'template', 'paper', or 'live'
-    run_source: str  # 'template', 'paper', 'live', 'ai_backtest', or 'manual_backtest'
+class ModeStatus(BaseModel):
+    """Status for a single execution mode (paper or live)"""
+    exists: bool
+    status: Optional[str] = None  # 'running', 'stopped', 'paused', 'completed'
     pnl: Optional[float] = None
-    trades: Optional[int] = None
-    created_at: datetime
-    status: Optional[str] = None
+    started_at: Optional[datetime] = None
+
+
+class StrategyRunItem(BaseModel):
+    """Strategy run item for History tab - GROUPED by strategy_code"""
+    strategy_code: str
+    strategy_name: str
+    is_premium: bool = False  # Premium indicator
+    paper: ModeStatus
+    live: ModeStatus
 
 
 class StrategyRunsResponse(BaseModel):
-    """Response model for GET /strategy-runs"""
+    """Response model for GET /strategy-runs - Returns ONE card per strategy"""
     success: bool
     runs: List[StrategyRunItem]
     total: int
@@ -266,77 +270,99 @@ def get_strategy_runs(
         if not user:
             raise HTTPException(status_code=401, detail="Failed to authenticate user")
         
-        # Build query - only get executions for user's strategies
+        # CRITICAL: Group executions by strategy_code
+        # Return ONE card per strategy_code with paper and live status
+        
+        # Get all executions for user's strategies
         query = db.query(StrategyExecution).join(Strategy).filter(
             Strategy.user_id == user.id
         )
         
-        # Filter by strategy_id if provided
         if strategy_id:
             query = query.filter(StrategyExecution.strategy_id == strategy_id)
         
-        # Get executions ordered by created_at (newest first)
-        executions = query.order_by(desc(StrategyExecution.created_at)).offset(offset).limit(limit).all()
+        executions = query.order_by(desc(StrategyExecution.created_at)).all()
         
-        # Get total count
-        total_query = db.query(StrategyExecution).join(Strategy).filter(Strategy.user_id == user.id)
-        if strategy_id:
-            total_query = total_query.filter(StrategyExecution.strategy_id == strategy_id)
-        total = total_query.count()
+        # Group by strategy_code
+        strategy_groups = defaultdict(lambda: {
+            'strategy_code': None,
+            'strategy_name': None,
+            'is_premium': False,  # TODO: Get from strategy metadata
+            'paper': {
+                'exists': False,
+                'status': None,
+                'pnl': None,
+                'started_at': None
+            },
+            'live': {
+                'exists': False,
+                'status': None,
+                'pnl': None,
+                'started_at': None
+            }
+        })
         
-        # Build response - FLAT structure (no nested objects)
-        run_items = []
         for execution in executions:
-            # Get status as string (handle Enum)
-            status_str = execution.status.value if hasattr(execution.status, 'value') else str(execution.status)
-            
-            # Get execution_mode as string
-            execution_mode_str = execution.execution_mode.value if hasattr(execution.execution_mode, 'value') else str(execution.execution_mode)
-            
-            # CRITICAL: Use execution's own pnl and trades fields
-            # These are updated by paper trade service and signal service
-            pnl = None
-            try:
-                if execution.pnl:
-                    pnl = float(execution.pnl)
-            except (ValueError, TypeError):
-                pnl = None
-            
-            trades = execution.trades if execution.trades else None
-            
-            # For backtests, try to get from snapshot if execution fields are empty
-            if (pnl is None or trades is None) and execution.run_source in ['ai_backtest', 'manual_backtest']:
-                version = db.query(StrategyVersion).filter(
-                    StrategyVersion.strategy_id == execution.strategy_id,
-                    StrategyVersion.version == execution.strategy_version
-                ).first()
-                
-                if version and version.backtest_snapshot:
-                    snapshot = version.backtest_snapshot
-                    if isinstance(snapshot, dict):
-                        summary = snapshot.get('summary', {})
-                        if pnl is None:
-                            pnl = summary.get('netPNL') or summary.get('net_pnl') or summary.get('totalReturn')
-                        if trades is None:
-                            trades = summary.get('totalTrades') or summary.get('total_trades')
-            
-            # CRITICAL: Use execution's strategy_name and strategy_code (snapshot fields)
-            # These are set when execution is created
-            strategy_name = execution.strategy_name or "Unknown Strategy"
             strategy_code = execution.strategy_code or "UNKNOWN"
+            group = strategy_groups[strategy_code]
+            
+            # Set strategy metadata (from first execution)
+            if not group['strategy_code']:
+                group['strategy_code'] = strategy_code
+                group['strategy_name'] = execution.strategy_name or "Unknown Strategy"
+            
+            # Get status and mode
+            status_str = execution.status.value if hasattr(execution.status, 'value') else str(execution.status)
+            mode_str = execution.execution_mode.value if hasattr(execution.execution_mode, 'value') else str(execution.execution_mode)
+            
+            # Update mode-specific data
+            if mode_str in ['paper', 'live']:
+                mode_data = group[mode_str]
+                mode_data['exists'] = True
+                mode_data['status'] = status_str
+                
+                # Get P&L
+                try:
+                    pnl_value = float(execution.pnl) if execution.pnl else 0.0
+                    # Keep latest P&L if multiple executions exist
+                    if mode_data['pnl'] is None or execution.updated_at > mode_data.get('_last_update', datetime.min):
+                        mode_data['pnl'] = pnl_value
+                        mode_data['_last_update'] = execution.updated_at
+                except (ValueError, TypeError):
+                    mode_data['pnl'] = 0.0
+                
+                # Get started_at (use activated_at if available, else created_at)
+                if execution.activated_at:
+                    if mode_data['started_at'] is None or execution.activated_at > mode_data['started_at']:
+                        mode_data['started_at'] = execution.activated_at
+                elif execution.created_at:
+                    if mode_data['started_at'] is None or execution.created_at > mode_data['started_at']:
+                        mode_data['started_at'] = execution.created_at
+        
+        # Build response - ONE item per strategy_code
+        run_items = []
+        for strategy_code, group in strategy_groups.items():
+            # Clean up internal tracking fields
+            group['paper'].pop('_last_update', None)
+            group['live'].pop('_last_update', None)
             
             run_items.append(StrategyRunItem(
-                id=execution.id,
-                strategy_id=execution.strategy_id,
-                strategy_name=strategy_name,
-                strategy_code=strategy_code,
-                execution_mode=execution_mode_str,
-                run_source=execution.run_source or 'live',  # Default to 'live' if not set
-                pnl=pnl,
-                trades=trades,
-                created_at=execution.created_at,
-                status=status_str
+                strategy_code=group['strategy_code'],
+                strategy_name=group['strategy_name'],
+                is_premium=group['is_premium'],
+                paper=ModeStatus(**group['paper']),
+                live=ModeStatus(**group['live'])
             ))
+        
+        # Sort by most recent started_at (any mode)
+        run_items.sort(key=lambda x: max(
+            x.paper.started_at or datetime.min,
+            x.live.started_at or datetime.min
+        ), reverse=True)
+        
+        # Apply pagination
+        total = len(run_items)
+        run_items = run_items[offset:offset + limit]
         
         return StrategyRunsResponse(
             success=True,

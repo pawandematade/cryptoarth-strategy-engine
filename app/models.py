@@ -4,7 +4,7 @@ SQLAlchemy Database Models
 NOTE: TEMP strategies (TEMP-xxx) are stateless and never touch the database.
 Only explicitly saved strategies are persisted.
 """
-from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey, Enum, Text
+from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey, Enum, Text, BigInteger, DECIMAL, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -64,6 +64,10 @@ class User(Base):
 
     # Relationships
     strategies = relationship("Strategy", back_populates="user", cascade="all, delete-orphan")
+    user_credits = relationship("UserCredits", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    credit_transactions = relationship("CreditTransaction", back_populates="user", cascade="all, delete-orphan")
+    strategy_usage = relationship("StrategyUsage", back_populates="user", cascade="all, delete-orphan")
+    payment_transactions = relationship("PaymentTransaction", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, external_user_id={self.external_user_id}, email={self.email})>"
@@ -206,3 +210,141 @@ class PaperTrade(Base):
 
     def __repr__(self):
         return f"<PaperTrade(id={self.id}, execution_id={self.execution_id}, symbol={self.symbol}, side={self.side}, pnl={self.pnl})>"
+
+
+class CreditConfig(Base):
+    """
+    Global credit rules and costs for all actions.
+    All credit costs are DB-driven (no hardcoding).
+    """
+    __tablename__ = "credit_config"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    action_key = Column(String(50), unique=True, nullable=False, index=True, comment="Action identifier (e.g., ai_strategy_generate)")
+    credit_cost = Column(Integer, nullable=False, comment="Credit cost for this action")
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        {"comment": "Global credit rules and costs for all actions"}
+    )
+
+    def __repr__(self):
+        return f"<CreditConfig(id={self.id}, action_key={self.action_key}, credit_cost={self.credit_cost}, is_active={self.is_active})>"
+
+
+class UserCredits(Base):
+    """
+    User credit wallet - tracks total and used credits.
+    One record per user.
+    """
+    __tablename__ = "user_credits"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    total_credits = Column(Integer, default=0, nullable=False, comment="Total credits available")
+    used_credits = Column(Integer, default=0, nullable=False, comment="Total credits used")
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="user_credits")
+
+    __table_args__ = (
+        {"comment": "User credit wallet - tracks total and used credits"}
+    )
+
+    @property
+    def available_credits(self):
+        """Calculate available credits"""
+        return max(0, self.total_credits - self.used_credits)
+
+    def __repr__(self):
+        return f"<UserCredits(id={self.id}, user_id={self.user_id}, total={self.total_credits}, used={self.used_credits}, available={self.available_credits})>"
+
+
+class CreditTransaction(Base):
+    """
+    Audit log for all credit transactions.
+    Tracks all credit debits and credits.
+    """
+    __tablename__ = "credit_transactions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    mobile = Column(String(20), nullable=False, index=True, comment="Mobile number in 91XXXXXXXXXX format")
+    type = Column(Enum('debit', 'credit', name='credit_transaction_type'), nullable=False, index=True)
+    credits = Column(Integer, nullable=False, comment="Credit amount")
+    reason = Column(String(100), nullable=True, comment="Reason for transaction")
+    reference_id = Column(String(100), nullable=True, index=True, comment="Reference ID (e.g., payment_id, strategy_code)")
+    original_transaction_id = Column(BigInteger, ForeignKey("credit_transactions.id", ondelete="SET NULL"), nullable=True, index=True, comment="ID of original transaction if this is a correction")
+    admin_name = Column(String(100), nullable=True, comment="Admin name who created this transaction (for corrections)")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # Relationships
+    user = relationship("User", back_populates="credit_transactions")
+    original_transaction = relationship("CreditTransaction", remote_side=[id], backref="corrections")
+
+    __table_args__ = (
+        {"comment": "Audit log for all credit transactions"}
+    )
+
+    def __repr__(self):
+        return f"<CreditTransaction(id={self.id}, user_id={self.user_id}, type={self.type}, credits={self.credits}, reason={self.reason})>"
+
+
+class StrategyUsage(Base):
+    """
+    Tracks usage count per strategy per action (for free limits).
+    Used to implement "first 3 backtests free" logic.
+    """
+    __tablename__ = "strategy_usage"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    strategy_code = Column(String(50), nullable=False, index=True, comment="Strategy code (e.g., STRG-XXXX)")
+    action_key = Column(String(50), nullable=False, index=True, comment="Action identifier (e.g., backtest)")
+    usage_count = Column(Integer, default=0, nullable=False, comment="Number of times this action was performed")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="strategy_usage")
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'strategy_code', 'action_key', name='unique_user_strategy_action'),
+        {"comment": "Tracks usage count per strategy per action (for free limits)"}
+    )
+
+    def __repr__(self):
+        return f"<StrategyUsage(id={self.id}, user_id={self.user_id}, strategy_code={self.strategy_code}, action_key={self.action_key}, usage_count={self.usage_count})>"
+
+
+class PaymentTransaction(Base):
+    """
+    Payment transactions from Razorpay.
+    Tracks all payment attempts and successes.
+    """
+    __tablename__ = "payment_transactions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(20), default='razorpay', nullable=False, comment="Payment provider")
+    amount = Column(DECIMAL(10, 2), nullable=False, comment="Payment amount in INR")
+    credits_added = Column(Integer, nullable=False, comment="Credits added to user wallet")
+    status = Column(Enum('created', 'success', 'failed', name='payment_status'), default='created', nullable=False, index=True)
+    gateway_order_id = Column(String(100), nullable=True, index=True, comment="Razorpay order ID")
+    gateway_payment_id = Column(String(100), nullable=True, index=True, comment="Razorpay payment ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # Relationships
+    user = relationship("User", back_populates="payment_transactions")
+
+    __table_args__ = (
+        {"comment": "Payment transactions from Razorpay"}
+    )
+
+    def __repr__(self):
+        return f"<PaymentTransaction(id={self.id}, user_id={self.user_id}, amount={self.amount}, credits_added={self.credits_added}, status={self.status})>"

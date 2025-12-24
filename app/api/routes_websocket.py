@@ -261,23 +261,97 @@ connect_to_delta()
 @router.websocket("/ws/live-prices")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    WebSocket endpoint for frontend to receive live price updates
-    Frontend can subscribe to specific symbols
-    """
-    # Accept connection from any origin (CORS is handled at HTTP level)
-    # For WebSocket, we accept all connections in development
-    origin = websocket.headers.get("origin")
-    logger.info(f"WebSocket connection attempt from origin: {origin}")
+    WebSocket endpoint for frontend to receive live price updates.
     
+    CRITICAL: This endpoint is PUBLIC - no authentication required.
+    Live market prices are public data and do not require user authentication.
+    
+    This endpoint explicitly bypasses all authentication checks.
+    Frontend can subscribe to specific symbols to receive real-time price updates.
+    """
+    from app.config import IS_PRODUCTION, FRONTEND_URL
+    
+    # Get origin from headers
+    origin = websocket.headers.get("origin") or websocket.headers.get("Origin")
+    logger.info(f"🔌 WebSocket connection attempt from origin: {origin} (PUBLIC endpoint - NO AUTH REQUIRED)")
+    
+    # Allowed origins for WebSocket (same as CORS)
+    if IS_PRODUCTION:
+        allowed_origins = [
+            FRONTEND_URL,
+            "https://aistrategy.cryptoarth.in",
+            "https://cryptoarth.in",
+            "https://panel.cryptoarth.in",
+            "https://trade-panel.cryptoarth.in",
+            "https://www.trade-panel.cryptoarth.in",
+        ]
+        allowed_origins = list(set(filter(None, allowed_origins)))
+    else:
+        # Development: Allow ALL localhost origins (very permissive)
+        allowed_origins = [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:5174",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5174",
+            "http://127.0.0.1:8000",  # Backend origin
+            "http://localhost:8000",  # Backend origin
+            FRONTEND_URL,
+        ]
+        # In development, also allow any localhost/127.0.0.1 origin
+        allowed_origins = list(set(filter(None, allowed_origins)))
+    
+    # Validate origin for WebSocket (CORS doesn't apply to WebSocket, need manual check)
+    # In development, be more permissive - allow any localhost origin
+    if origin:
+        # Normalize origin (remove trailing slash)
+        origin_clean = origin.rstrip('/')
+        allowed_origins_clean = [o.rstrip('/') for o in allowed_origins]
+        
+        # Check if origin is allowed
+        if origin_clean not in allowed_origins_clean:
+            # Also check if origin matches any allowed origin (case-insensitive for scheme)
+            origin_lower = origin_clean.lower()
+            is_allowed = any(
+                allowed.lower() == origin_lower or 
+                origin_clean.startswith(allowed.rstrip('/')) or
+                allowed.rstrip('/').startswith(origin_clean)
+                for allowed in allowed_origins
+            )
+            
+            # In development, also allow any localhost/127.0.0.1 origin
+            if not IS_PRODUCTION:
+                if 'localhost' in origin_lower or '127.0.0.1' in origin_lower:
+                    is_allowed = True
+                    logger.info(f"✅ Development mode: Allowing localhost origin: {origin}")
+            
+            if not is_allowed:
+                logger.warning(f"❌ WebSocket connection rejected: origin '{origin}' not in allowed list")
+                logger.warning(f"   Allowed origins: {allowed_origins}")
+                await websocket.close(code=1008, reason="Origin not allowed")
+                return
+    else:
+        # No origin header - in development, allow it
+        if not IS_PRODUCTION:
+            logger.info("⚠️  No origin header, but allowing in development mode")
+        else:
+            logger.warning("❌ WebSocket connection rejected: No origin header in production")
+            await websocket.close(code=1008, reason="Origin required")
+            return
+    
+    # CRITICAL: Accept WebSocket connection WITHOUT any authentication
+    # This endpoint is PUBLIC - no token, no user check, no permission check
     try:
         await websocket.accept()
         active_connections.add(websocket)
         connection_subscriptions[websocket] = set()
         connection_loops[websocket] = asyncio.get_event_loop()
         
-        logger.info(f"Client connected. Total connections: {len(active_connections)}")
+        logger.info(f"✅ WebSocket connection ACCEPTED (PUBLIC - NO AUTH). Origin: {origin}. Total connections: {len(active_connections)}")
     except Exception as e:
-        logger.error(f"Error accepting WebSocket connection: {e}")
+        logger.error(f"❌ Error accepting WebSocket connection: {e}")
+        logger.error(f"   This should NOT happen - endpoint is PUBLIC")
         raise
     
     try:

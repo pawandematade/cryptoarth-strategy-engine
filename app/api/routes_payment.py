@@ -15,7 +15,10 @@ from app.services.payment_service import (
     get_credit_plans,
     verify_razorpay_signature
 )
-from app.services.credits_service import get_user_id_from_header
+from app.services.user_sync_service import get_or_sync_user
+from app.database import get_db
+from sqlalchemy.orm import Session
+from fastapi import Depends
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +56,18 @@ def get_plans():
 
 
 @router.post("/payment/create-order")
-def create_order(request: CreateOrderRequest, authorization: Optional[str] = Header(None)):
+def create_order(
+    request: CreateOrderRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
     """
     Create a Razorpay order for credit purchase
     
     Args:
         request: CreateOrderRequest with plan_id
-        authorization: Authorization header with user ID
+        authorization: Authorization header (Bearer token)
+        db: Database session
     
     Returns:
         dict: {
@@ -74,12 +82,18 @@ def create_order(request: CreateOrderRequest, authorization: Optional[str] = Hea
         }
     """
     try:
-        user_id = get_user_id_from_header(authorization)
-        
-        if not user_id or user_id == "anonymous":
+        if not authorization:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User authentication required"
+                detail="Authorization header required"
+            )
+        
+        # Sync user and get local user ID
+        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to authenticate user"
             )
         
         # Validate plan_id
@@ -91,8 +105,8 @@ def create_order(request: CreateOrderRequest, authorization: Optional[str] = Hea
         
         plan_id = request.plan_id.strip().lower()
         
-        # Create Razorpay order
-        result = create_razorpay_order(plan_id, user_id)
+        # Create Razorpay order (user.id is integer)
+        result = create_razorpay_order(plan_id, user.id)
         
         if not result['success']:
             raise HTTPException(
@@ -122,18 +136,33 @@ def create_order(request: CreateOrderRequest, authorization: Optional[str] = Hea
 
 
 @router.post("/payment/webhook")
-async def razorpay_webhook(request: Request):
+async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Razorpay webhook handler for payment events
     
+    CRITICAL: Webhook is the source of truth for payment processing.
+    Credits must NEVER depend only on frontend callback (unreliable).
+    
     This endpoint:
     - Verifies Razorpay webhook signature (HMAC SHA256 of request body)
-    - Processes payment.captured event
-    - Adds credits to user account
-    - Stores transaction details
+    - Processes payment.captured and order.paid events
+    - Checks idempotency (payment_id already processed) before adding credits
+    - Adds credits to user account only if payment_id not already processed
+    - Stores transaction details in database
+    
+    Events handled:
+    - payment.captured: Payment successfully captured
+    - order.paid: Order marked as paid (alternative event)
+    - payment.failed: Payment failed (logged only)
+    
+    Idempotency:
+    - Checks PaymentTransaction table by gateway_payment_id
+    - If payment_id already exists with status='success', returns existing result
+    - Prevents duplicate credit additions on webhook retries
     
     Args:
         request: FastAPI Request object (contains webhook payload)
+        db: Database session
     
     Returns:
         dict: Webhook processing result (always returns 200 to Razorpay)
@@ -177,28 +206,68 @@ async def razorpay_webhook(request: Request):
         
         logger.info(f"Received Razorpay webhook event: {event}")
         
-        # Process payment.captured event
-        if event == 'payment.captured':
-            # Extract payment entity (Razorpay webhook structure)
-            payment_entity = payload.get('payload', {}).get('payment', {}).get('entity', {})
+        # Process payment.captured and order.paid events
+        # Both events indicate successful payment
+        # CRITICAL: Webhook is the source of truth - credits must NEVER depend only on frontend callback
+        if event == 'payment.captured' or event == 'order.paid':
+            # Extract payment entity (Razorpay webhook structure varies by event)
+            payment_entity = None
+            order_entity = None
             
-            # Fallback: try direct payment object
-            if not payment_entity:
-                payment_entity = payload.get('payload', {}).get('payment', {})
+            if event == 'payment.captured':
+                # payment.captured event structure: payload.payment.entity
+                payment_entity = payload.get('payload', {}).get('payment', {}).get('entity', {})
+                if not payment_entity:
+                    payment_entity = payload.get('payload', {}).get('payment', {})
+            elif event == 'order.paid':
+                # order.paid event structure: payload.order.entity contains payments array
+                order_entity = payload.get('payload', {}).get('order', {}).get('entity', {})
+                if not order_entity:
+                    order_entity = payload.get('payload', {}).get('order', {})
+                # Extract payment from order.payments array
+                payments = order_entity.get('payments', [])
+                if payments and len(payments) > 0:
+                    payment_entity = payments[0]  # Get first payment (usually only one)
             
             # Get payment details
-            payment_id = payment_entity.get('id')
-            order_id = payment_entity.get('order_id')
+            payment_id = payment_entity.get('id') if payment_entity else None
+            order_id = payment_entity.get('order_id') if payment_entity else (order_entity.get('id') if order_entity else None)
             
             if not payment_id or not order_id:
-                logger.error(f"Missing payment_id or order_id in webhook: {payload}")
+                logger.error(f"Missing payment_id or order_id in webhook event {event}: {payload}")
                 return {"success": False, "message": "Missing payment_id or order_id"}
             
             # Get payment signature for additional verification
-            payment_signature = payment_entity.get('signature', '')
+            payment_signature = payment_entity.get('signature', '') if payment_entity else ''
+            
+            # Extract user_id from order notes (stored in Redis)
+            from app.store.redis_client import redis_client
+            order_data_str = redis_client.get(f"PAYMENT_ORDER:{order_id}")
+            if not order_data_str:
+                logger.error(f"Order {order_id} not found in Redis")
+                return {"success": False, "message": "Order not found"}
+            
+            order_data = json.loads(order_data_str)
+            user_id_str = order_data.get('user_id')
+            
+            if not user_id_str:
+                logger.error(f"User ID not found in order {order_id}")
+                return {"success": False, "message": "User ID not found in order"}
+            
+            # Get user from database (user_id in Redis is external_user_id as string)
+            from app.models import User
+            try:
+                external_user_id = int(user_id_str)
+                user = db.query(User).filter(User.external_user_id == external_user_id).first()
+                if not user:
+                    logger.error(f"User not found for external_user_id={external_user_id}")
+                    return {"success": False, "message": "User not found"}
+            except ValueError:
+                logger.error(f"Invalid user_id format in order: {user_id_str}")
+                return {"success": False, "message": "Invalid user ID format"}
             
             # Process payment (will verify payment signature internally)
-            result = process_payment_success(order_id, payment_id, payment_signature)
+            result = process_payment_success(db, order_id, payment_id, payment_signature, user.id)
             
             if not result['success']:
                 logger.error(f"Failed to process payment: {result['message']}")
@@ -265,7 +334,13 @@ async def razorpay_webhook(request: Request):
 
 
 @router.post("/payment/verify")
-def verify_payment(order_id: str, payment_id: str, signature: str, authorization: Optional[str] = Header(None)):
+def verify_payment(
+    order_id: str,
+    payment_id: str,
+    signature: str,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
     """
     Verify payment manually (for frontend callback)
     
@@ -273,18 +348,25 @@ def verify_payment(order_id: str, payment_id: str, signature: str, authorization
         order_id: Razorpay order ID
         payment_id: Razorpay payment ID
         signature: Razorpay signature
-        authorization: Authorization header with user ID
+        authorization: Authorization header (Bearer token)
+        db: Database session
     
     Returns:
         dict: Payment verification result
     """
     try:
-        user_id = get_user_id_from_header(authorization)
-        
-        if not user_id or user_id == "anonymous":
+        if not authorization:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User authentication required"
+                detail="Authorization header required"
+            )
+        
+        # Sync user and get local user ID
+        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to authenticate user"
             )
         
         # Verify signature
@@ -294,8 +376,8 @@ def verify_payment(order_id: str, payment_id: str, signature: str, authorization
                 detail="Invalid payment signature"
             )
         
-        # Process payment
-        result = process_payment_success(order_id, payment_id, signature)
+        # Process payment (user.id is integer)
+        result = process_payment_success(db, order_id, payment_id, signature, user.id)
         
         if not result['success']:
             raise HTTPException(
@@ -314,6 +396,94 @@ def verify_payment(order_id: str, payment_id: str, signature: str, authorization
         raise
     except Exception as e:
         logger.error(f"Error verifying payment: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.get("/payment/history")
+def get_payment_history(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get payment history for the authenticated user
+    
+    Returns:
+        dict: {
+            "success": bool,
+            "payments": [
+                {
+                    "id": int,
+                    "date": str,
+                    "amount": float,
+                    "payment_id": str,
+                    "status": str,
+                    "plan_name": str,
+                    "credits_added": int
+                }
+            ],
+            "message": str
+        }
+    """
+    try:
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization header required"
+            )
+        
+        # Sync user and get local user ID
+        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to authenticate user"
+            )
+        
+        # Get payment transactions for user
+        from app.models import PaymentTransaction
+        payments = db.query(PaymentTransaction).filter(
+            PaymentTransaction.user_id == user.id
+        ).order_by(PaymentTransaction.created_at.desc()).all()
+        
+        # Format payment history
+        payment_history = []
+        for payment in payments:
+            # Get plan name from order data in Redis (if available)
+            plan_name = "Credit Purchase"
+            if payment.gateway_order_id:
+                from app.store.redis_client import redis_client
+                order_key = f"PAYMENT_ORDER:{payment.gateway_order_id}"
+                order_data_str = redis_client.get(order_key)
+                if order_data_str:
+                    try:
+                        order_data = json.loads(order_data_str)
+                        plan_name = order_data.get('plan_name', 'Credit Purchase')
+                    except:
+                        pass
+            
+            payment_history.append({
+                "id": payment.id,
+                "date": payment.created_at.isoformat() if payment.created_at else "",
+                "amount": float(payment.amount) if payment.amount else 0.0,
+                "payment_id": payment.gateway_payment_id or "",
+                "status": payment.status,
+                "plan_name": plan_name,
+                "credits_added": payment.credits_added
+            })
+        
+        return {
+            "success": True,
+            "payments": payment_history,
+            "message": f"Retrieved {len(payment_history)} payment records"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting payment history: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"

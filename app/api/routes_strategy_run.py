@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone
 import logging
 
 from app.database import get_db
@@ -138,31 +139,58 @@ def create_strategy_run(
         # run_source matches execution_mode (use lowercase string for run_source)
         run_source = execution_mode_input
         
-        # CRITICAL: Create execution row immediately
-        # History tab depends ONLY on this insert
-        execution = StrategyExecution(
-            strategy_id=strategy.id,
-            strategy_version=latest_version.version,
-            strategy_name=strategy.name,
-            strategy_code=strategy.strategy_code,
-            execution_mode=execution_mode,
-            run_source=run_source.value if hasattr(run_source, 'value') else str(run_source),
-            status=ExecutionStatus.running,
-            trades=0,
-            pnl="0.0"
-        )
+        # CRITICAL: Check for existing row by (strategy_code + execution_mode)
+        # RULE: Max 1 row per (strategy_code + execution_mode)
+        # If exists → UPDATE, If not exists → INSERT
+        existing_execution = db.query(StrategyExecution).filter(
+            StrategyExecution.strategy_code == strategy.strategy_code,
+            StrategyExecution.execution_mode == execution_mode
+        ).first()
         
-        db.add(execution)
+        if existing_execution:
+            # UPDATE existing execution row
+            existing_execution.strategy_id = strategy.id  # Update in case strategy_id changed
+            existing_execution.strategy_version = latest_version.version
+            existing_execution.strategy_name = strategy.name
+            existing_execution.status = ExecutionStatus.running
+            existing_execution.run_source = run_source
+            existing_execution.activated_at = datetime.now(timezone.utc)
+            existing_execution.deactivated_at = None
+            # Reset PnL and trades if was stopped
+            if existing_execution.status != ExecutionStatus.running:
+                existing_execution.pnl = "0.0"
+                existing_execution.trades = 0
+            
+            execution = existing_execution
+            logger.info(f"Updated existing execution: execution_id={execution.id}, strategy_code={strategy.strategy_code}, mode={execution_mode.value}")
+        else:
+            # INSERT new execution row
+            execution = StrategyExecution(
+                strategy_id=strategy.id,
+                strategy_version=latest_version.version,
+                strategy_name=strategy.name,
+                strategy_code=strategy.strategy_code,
+                execution_mode=execution_mode,
+                run_source=run_source,
+                status=ExecutionStatus.running,
+                trades=0,
+                pnl="0.0",
+                activated_at=datetime.now(timezone.utc)
+            )
+            db.add(execution)
+            logger.info(f"Created new execution: strategy_code={strategy.strategy_code}, mode={execution_mode.value}")
+        
         db.flush()
         
         # Commit immediately
         db.commit()
         db.refresh(execution)
         
-        logger.info(f"Strategy run created: execution_id={execution.id}, strategy_id={strategy.id}, execution_mode={execution_mode_str}")
-        
+        # Extract enum values for response
         status_val = execution.status.value if hasattr(execution.status, 'value') else str(execution.status)
         execution_mode_val = execution.execution_mode.value if hasattr(execution.execution_mode, 'value') else str(execution.execution_mode)
+        
+        logger.info(f"Strategy run created: execution_id={execution.id}, strategy_id={strategy.id}, execution_mode={execution_mode_val}")
         
         return StrategyRunResponse(
             success=True,
@@ -184,5 +212,79 @@ def create_strategy_run(
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating strategy run: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+class StopStrategyRequest(BaseModel):
+    """Request model for stopping strategy run"""
+    strategy_id: int
+
+
+class StopStrategyResponse(BaseModel):
+    """Response model for stopping strategy run"""
+    success: bool
+    message: str
+
+
+@router.post("/strategy-runs/stop", response_model=StopStrategyResponse)
+def stop_strategy_run(
+    request: StopStrategyRequest = Body(...),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db)
+):
+    """
+    Stop an active strategy run.
+    
+    Sets execution status to 'stopped' and records deactivation time.
+    
+    Args:
+        request: Stop strategy request
+        authorization: Authorization header (Bearer token)
+        db: Database session
+    
+    Returns:
+        StopStrategyResponse with success message
+    """
+    try:
+        # Authenticate user
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        
+        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        if not user:
+            raise HTTPException(status_code=401, detail="Failed to authenticate user")
+        
+        # Find active execution for this strategy
+        execution = db.query(StrategyExecution).join(Strategy).filter(
+            StrategyExecution.strategy_id == request.strategy_id,
+            Strategy.user_id == user.id,
+            StrategyExecution.status == ExecutionStatus.running
+        ).first()
+        
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No active run found for strategy {request.strategy_id}"
+            )
+        
+        # Stop the execution
+        execution.status = ExecutionStatus.stopped
+        execution.deactivated_at = datetime.now(timezone.utc)
+        db.add(execution)
+        db.commit()
+        db.refresh(execution)
+        
+        logger.info(f"Strategy run stopped: execution_id={execution.id}, strategy_id={request.strategy_id}")
+        
+        return StopStrategyResponse(
+            success=True,
+            message="Strategy run stopped successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error stopping strategy run: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 

@@ -12,7 +12,12 @@ from app.services.openai_service import generate_strategy
 from app.services.backtest_service import run_backtest
 from app.services.prompt_builder import build_prompt
 from app.store.redis_client import redis_client
-from app.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
+from app.services.credit_service import (
+    check_credits_available,
+    deduct_credits,
+    get_user_credits
+)
+from app.services.user_sync_service import get_or_sync_user
 from app.engine.backtest_engine import BacktestEngine
 from app.feed.delta_history import fetch_ohlcv, get_default_lookback_days
 from app.database import get_db
@@ -83,7 +88,11 @@ class AIStrategyResponse(BaseModel):
 
 
 @router.post("/ai-strategy/generate", response_model=AIStrategyResponse)
-def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str] = Header(None)):
+def generate_ai_strategy(
+    request: AIStrategyRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
     """
     Generate a trading strategy using AI based on natural language description.
     
@@ -92,6 +101,7 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
     2. Only { "prompt": "..." } is sent to OpenAI
     3. No database storage - runtime only
     4. Extra keys in payload are rejected
+    5. Credits are checked and deducted before generation (1 credit per generate)
     
     Returns:
         AIStrategyResponse: Generated strategy in structured format
@@ -146,24 +156,54 @@ def generate_ai_strategy(request: AIStrategyRequest, authorization: Optional[str
                 detail=f"Invalid payload: Extra keys not allowed: {list(extra_keys)}. Allowed keys: {sorted(allowed_fields)}"
             )
         
-        # CREDIT FACILITY DISABLED FOR TESTING - Code kept for future enablement
-        # Check and consume credits
-        # user_id = get_user_id_from_header(authorization)
-        # credit_check = check_credits_available(user_id, 'ai_generate')
-        # 
-        # if not credit_check['has_credits']:
-        #     raise HTTPException(
-        #         status_code=402,  # Payment Required
-        #         detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to continue."
-        #     )
-        # 
-        # # Consume credits before generating
-        # credit_result = consume_credits(user_id, 'ai_generate')
-        # if not credit_result['success']:
-        #     raise HTTPException(
-        #         status_code=402,
-        #         detail=f"Failed to process credits: {credit_result['message']}"
-        #     )
+        # CREDIT CHECK AND DEDUCTION (MANDATORY - FIRST STEP)
+        # CRITICAL: Credit deduction happens INSIDE this API - this is the SINGLE place for deduction
+        # Get user from authorization header
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization header required"
+            )
+        
+        # Sync user and get local user ID
+        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to authenticate user"
+            )
+        
+        # CRITICAL: FIRST STEP - Check and deduct credits BEFORE any other processing
+        # This ensures every API call results in credit deduction
+        # Check if user has enough credits for AI generate (1 credit)
+        is_available, available_credits, required_credits = check_credits_available(
+            db, user.id, 'ai_strategy_generate'
+        )
+        
+        if not is_available:
+            # Block generation if credits <= 0
+            logger.warning(f"AI GENERATE BLOCKED – insufficient credits: user_id={user.id}, available={available_credits}, required={required_credits}")
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,  # 402 Payment Required
+                detail=f"Insufficient credits. Available: {available_credits}, Required: {required_credits}. Please purchase more credits to continue."
+            )
+        
+        # CRITICAL: Deduct credits FIRST (atomic operation) - BEFORE any generation logic
+        # This is the SINGLE place where credits are deducted for AI Generate
+        success, error_msg = deduct_credits(
+            db, user.id, 'ai_strategy_generate',
+            reason="AI strategy generation",
+            reference_id=None
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Failed to process credits: {error_msg}"
+            )
+        
+        # CRITICAL: Log credit deduction (silent - no popup, no message to user)
+        logger.info(f"AI GENERATE CALLED – credit deducted: user_id={user.id}, credits={required_credits}, remaining={available_credits - required_credits}")
         
         # Get current price from Redis if not provided
         current_price = request.current_price
@@ -511,13 +551,23 @@ class BacktestRequest(BaseModel):
 
 
 @router.post("/ai-strategy/backtest")
-def run_strategy_backtest(request: BacktestRequest, authorization: Optional[str] = Header(None)):
+def run_strategy_backtest(
+    request: BacktestRequest,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
     """
     Run backtest for a strategy.
+    
+    CREDIT RULES:
+    - Every backtest run MUST deduct 1 credit
+    - No free usage - all backtests require credits
+    - If credits <= 0, return 402 Insufficient Credits
     
     Args:
         request: BacktestRequest with strategy and period
         authorization: Authorization header with user ID
+        db: Database session
     
     Returns:
         dict: Comprehensive backtest results
@@ -530,24 +580,57 @@ def run_strategy_backtest(request: BacktestRequest, authorization: Optional[str]
         if request.period not in ['year', 'month', 'day']:
             raise HTTPException(status_code=400, detail="Period must be 'year', 'month', or 'day'")
         
-        # CREDIT FACILITY DISABLED FOR TESTING - Code kept for future enablement
-        # Check and consume credits
-        # user_id = get_user_id_from_header(authorization)
-        # credit_check = check_credits_available(user_id, 'backtest')
-        # 
-        # if not credit_check['has_credits']:
-        #     raise HTTPException(
-        #         status_code=402,  # Payment Required
-        #         detail=f"Insufficient credits. {credit_check['message']}. Please purchase more credits to run backtest."
-        #     )
-        # 
-        # # Consume credits before running backtest
-        # credit_result = consume_credits(user_id, 'backtest')
-        # if not credit_result['success']:
-        #     raise HTTPException(
-        #         status_code=402,
-        #         detail=f"Failed to process credits: {credit_result['message']}"
-        #     )
+        # Get user from authorization header
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization header required"
+            )
+        
+        # Sync user and get local user ID
+        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to authenticate user"
+            )
+        
+        # CREDIT CHECK AND DEDUCTION (MANDATORY - NO FREE USAGE)
+        # Every backtest run MUST deduct 1 credit
+        # Check if user has enough credits for backtest (1 credit)
+        is_available, available_credits, required_credits = check_credits_available(
+            db, user.id, 'backtest'
+        )
+        
+        if not is_available:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,  # 402 Payment Required
+                detail=f"Insufficient credits. Available: {available_credits}, Required: {required_credits}. Please purchase more credits to continue."
+            )
+        
+        # Extract strategy_code from strategy object (for reference_id in transaction)
+        strategy = request.strategy
+        strategy_code = (
+            strategy.get('strategy_code') or
+            strategy.get('meta', {}).get('strategy_code') or
+            strategy.get('id') or
+            'TEMP'  # Fallback for TEMP strategies
+        )
+        
+        # Deduct credits BEFORE running backtest (atomic operation)
+        success, error_msg = deduct_credits(
+            db, user.id, 'backtest',
+            reason="Backtest execution",
+            reference_id=str(strategy_code)
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Failed to process credits: {error_msg}"
+            )
+        
+        logger.info(f"BACKTEST CALLED – credit deducted: user_id={user.id}, strategy_code={strategy_code}, credits={required_credits}, remaining={available_credits - required_credits}")
         
         # Validate strategy structure
         strategy = request.strategy
@@ -643,10 +726,16 @@ def preview_backtest(request: PreviewBacktestRequest):
     """
     Preview backtest for a strategy WITHOUT saving it.
     
+    CRITICAL: This endpoint does NOT deduct credits.
+    Credit deduction happens ONLY in:
+    - /ai-strategy/generate (AI Generate API) - deducts 1 credit
+    - /ai-strategy/backtest (Backtest API) - deducts 1 credit
+    
     This endpoint:
     - Does NOT require strategy_id
     - Does NOT save strategy
     - Does NOT cache results
+    - Does NOT deduct credits (Preview API only)
     - Runs BacktestEngine directly on provided strategy JSON
     - Applies brokerage calculations if backtest_settings provided
     
