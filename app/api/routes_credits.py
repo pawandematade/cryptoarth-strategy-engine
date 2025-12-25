@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Header
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
+from datetime import date, datetime, timezone
 from app.services.credit_service import (
     get_user_credits,
     check_credits_available,
@@ -27,7 +28,10 @@ router = APIRouter()
 def get_credits_by_phone(db: Session, user: User) -> dict:
     """
     Get credits for user by phone number (production-safe).
-    CRITICAL: Credits table is keyed by phone in production.
+    🔒 FINAL LOGIC - NEVER RETURNS None:
+    - 10 credits ONLY IF user signed up TODAY
+    - Otherwise, return actual DB credits (never override for old users)
+    - ALWAYS returns a number (never None/null)
     
     Args:
         db: Database session
@@ -37,14 +41,26 @@ def get_credits_by_phone(db: Session, user: User) -> dict:
         dict: {
             "success": True,
             "data": {
-                "credits": int  # Always present, even if 0
+                "credits": int  # ALWAYS a number, never None
             }
         }
     """
     phone = user.phone
     
+    # Get today's date (timezone-aware)
+    today = datetime.now(timezone.utc).date()
+    
+    # Get user's signup date (created_at) - timezone-aware comparison
+    user_joined_date = None
+    if user.created_at:
+        # Handle both timezone-aware and naive datetimes
+        if user.created_at.tzinfo is not None:
+            user_joined_date = user.created_at.date()
+        else:
+            # If naive, assume UTC
+            user_joined_date = user.created_at.date()
+    
     # CRITICAL: Query credits by joining UserCredits with User table
-    # UserCredits has user_id, User has phone - join to get credits by phone
     user_credits = (
         db.query(UserCredits)
         .join(User, UserCredits.user_id == User.id)
@@ -52,26 +68,50 @@ def get_credits_by_phone(db: Session, user: User) -> dict:
         .first()
     )
     
-    # Extract balance (available credits)
+    # 🔒 FINAL RULE: Extract credits - NEVER return None
     if user_credits:
-        credits = user_credits.available_credits
-        # Ensure credits is not None
-        if credits is None:
-            credits = 0
+        # Credits record exists - use DB value
+        credits_value = user_credits.available_credits
+        
+        # 🚫 STRICTLY FORBIDDEN: Never return None
+        if credits_value is None:
+            credits_value = 0
+        elif not isinstance(credits_value, (int, float)):
+            # Convert to int if not numeric
+            try:
+                credits_value = int(float(credits_value))
+            except (ValueError, TypeError):
+                credits_value = 0
+        
+        # Ensure it's an integer
+        credits = int(credits_value) if credits_value is not None else 0
+        
+        logger.info(f"[CREDITS_API] DB credits found: phone={phone}, credits={credits}")
     else:
-        # No credits record found - return 0 (safe default)
+        # No credits record found
+        # 🔒 FINAL RULE: 10 credits ONLY if user signed up TODAY
+        if user_joined_date and user_joined_date == today:
+            # New signup today - return 10 credits
+            credits = 10
+            logger.info(f"[CREDITS_API] New signup today - returning 10 credits for phone={phone}")
+        else:
+            # Old user or no signup date - return 0 (never return 10 for old users)
+            credits = 0
+            logger.info(f"[CREDITS_API] No credits record - returning 0 for phone={phone}, joined_date={user_joined_date}, today={today}")
+    
+    # 🚫 FINAL SAFETY CHECK: Ensure credits is ALWAYS a number
+    if credits is None:
+        logger.error(f"[CREDITS_API] CRITICAL: credits is None for phone={phone}, forcing to 0")
         credits = 0
     
-    # TEMP DEBUG LOG (MANDATORY - Remove after verification)
-    logger.info(
-        f"[CREDITS_API] phone={phone}, credits={credits}"
-    )
+    # Ensure integer type
+    credits = int(credits) if credits is not None else 0
     
-    # CRITICAL: Always return data object, even if credits = 0
+    # CRITICAL: Always return data object with number (never None)
     return {
         "success": True,
         "data": {
-            "credits": credits
+            "credits": credits  # ALWAYS a number
         }
     }
 
@@ -200,26 +240,40 @@ def get_credits(
         # Verify user has phone number
         if not user.phone:
             logger.error(f"Credits API | User has no phone - user_id={user.id}")
-            # Return 0 credits if phone is missing (safe default)
+            # 🚫 ALWAYS return number, never None
             return {
+                "success": True,
+                "data": {
+                    "credits": 0  # ALWAYS a number
+                }
+            }
+        
+        # CRITICAL: Get credits by phone (production-safe query)
+        result = get_credits_by_phone(db, user)
+        
+        # 🚫 FINAL SAFETY: Ensure credits is a number in response
+        if result and result.get("data") and result["data"].get("credits") is not None:
+            result["data"]["credits"] = int(result["data"]["credits"])
+        else:
+            logger.error(f"[CREDITS_API] CRITICAL: Invalid response structure, forcing credits=0")
+            result = {
                 "success": True,
                 "data": {
                     "credits": 0
                 }
             }
         
-        # CRITICAL: Get credits by phone (production-safe query)
-        return get_credits_by_phone(db, user)
+        return result
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting credits: {e}", exc_info=True)
-        # Return safe default on error (never return empty)
+        # 🚫 ALWAYS return number on error (never None)
         return {
             "success": True,
             "data": {
-                "credits": 0
+                "credits": 0  # ALWAYS a number
             }
         }
 

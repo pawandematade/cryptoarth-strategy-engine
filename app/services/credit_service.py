@@ -137,20 +137,22 @@ def initialize_user_credits(db: Session, user_id: int) -> UserCredits:
 def get_user_credits(db: Session, user_id: int) -> Optional[UserCredits]:
     """
     Get user credits record.
-    If not exists, initialize with default free credits.
+    🔒 FINAL LOGIC: Do NOT auto-initialize credits.
+    Credits are initialized ONLY on signup (via initialize_user_credits endpoint).
     
     Args:
         db: Database session
         user_id: Local user ID
     
     Returns:
-        UserCredits: User credits record
+        UserCredits: User credits record (None if not exists)
     """
     user_credits = db.query(UserCredits).filter(UserCredits.user_id == user_id).first()
     
-    if not user_credits:
-        # Initialize credits for new user
-        user_credits = initialize_user_credits(db, user_id)
+    # ❌ REMOVED: Auto-initialization logic
+    # Credits are initialized ONLY on signup, not on every credit check
+    # if not user_credits:
+    #     user_credits = initialize_user_credits(db, user_id)
     
     return user_credits
 
