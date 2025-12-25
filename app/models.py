@@ -4,11 +4,12 @@ SQLAlchemy Database Models
 NOTE: TEMP strategies (TEMP-xxx) are stateless and never touch the database.
 Only explicitly saved strategies are persisted.
 """
-from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey, Enum, Text, BigInteger, DECIMAL, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, Date, ForeignKey, Enum, Text, BigInteger, DECIMAL, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
 import enum
+import uuid
 
 
 class StrategyStatus(enum.Enum):
@@ -320,6 +321,178 @@ class StrategyUsage(Base):
 
     def __repr__(self):
         return f"<StrategyUsage(id={self.id}, user_id={self.user_id}, strategy_code={self.strategy_code}, action_key={self.action_key}, usage_count={self.usage_count})>"
+
+
+class CronStatus(str, enum.Enum):
+    """Cron status enum - values must match DB ENUM values (uppercase)"""
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+class CronTriggeredBy(str, enum.Enum):
+    """Cron triggered by enum - values must match DB ENUM values (uppercase)"""
+    SYSTEM = "SYSTEM"
+    ADMIN = "ADMIN"
+
+
+class CronMaster(Base):
+    """
+    Cron Master System - Tracks all cron job executions
+    
+    CRITICAL: Every cron run MUST be recorded here.
+    No cron may run without visibility.
+    """
+    __tablename__ = "cron_master"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cron_name = Column(String(100), unique=True, nullable=False, index=True, comment="Unique cron identifier (e.g., DAILY_BACKTEST_BTCUSD)")
+    cron_type = Column(String(50), nullable=False, index=True, comment="Cron type (e.g., BACKTEST, CLEANUP)")
+    symbol = Column(String(20), nullable=True, index=True, comment="Symbol if cron is symbol-specific (e.g., BTCUSD)")
+    
+    status = Column(Enum(CronStatus), nullable=False, default=CronStatus.SUCCESS, index=True, comment="Current status: RUNNING, SUCCESS, FAILED")
+    
+    last_run_at = Column(DateTime(timezone=True), nullable=True, comment="Last execution timestamp")
+    last_success_at = Column(DateTime(timezone=True), nullable=True, comment="Last successful execution timestamp")
+    
+    error_message = Column(Text, nullable=True, comment="Error message if status is FAILED")
+    
+    triggered_by = Column(Enum(CronTriggeredBy), nullable=False, default=CronTriggeredBy.SYSTEM, index=True, comment="Who triggered: SYSTEM or ADMIN")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    def __repr__(self):
+        return f"<CronMaster(cron_name={self.cron_name}, status={self.status}, last_run_at={self.last_run_at})>"
+
+
+class CronExecutionLog(Base):
+    """
+    Cron Execution History - Logs every cron execution
+    
+    CRITICAL: This table stores complete execution history.
+    cron_master is the latest snapshot only.
+    """
+    __tablename__ = "cron_execution_log"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    cron_name = Column(String(100), nullable=False, index=True, comment="Cron identifier (e.g., DAILY_BACKTEST_BTCUSD)")
+    triggered_by = Column(Enum(CronTriggeredBy), nullable=False, index=True, comment="Who triggered: SYSTEM or ADMIN")
+    
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True, comment="Execution start timestamp")
+    finished_at = Column(DateTime(timezone=True), nullable=True, comment="Execution finish timestamp")
+    
+    status = Column(Enum(CronStatus), nullable=False, index=True, comment="Final status: RUNNING, SUCCESS, FAILED")
+    error_message = Column(Text, nullable=True, comment="Error message if status is FAILED")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    def __repr__(self):
+        return f"<CronExecutionLog(cron_name={self.cron_name}, status={self.status}, started_at={self.started_at})>"
+
+
+class TradeSide(str, enum.Enum):
+    """Trade side enum"""
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class StrategyBacktestSummary(Base):
+    """
+    Strategy Backtest Summary - One row per completed backtest run
+    
+    Purpose: Strategy card & overview performance
+    CRITICAL: Precomputed data only - no on-call computation
+    """
+    __tablename__ = "strategy_backtest_summary"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    backtest_run_id = Column(String(36), nullable=False, index=True, comment="Unique backtest run identifier (UUID)")
+    strategy_id = Column(BigInteger, nullable=False, index=True, comment="Strategy ID")
+    symbol = Column(String(20), nullable=False, index=True, comment="Trading symbol (e.g., BTCUSD)")
+    timeframe = Column(String(10), nullable=False, comment="Timeframe (e.g., 1h, 15m)")
+    
+    from_time = Column(BigInteger, nullable=False, comment="Start timestamp (Unix seconds)")
+    to_time = Column(BigInteger, nullable=False, comment="End timestamp (Unix seconds)")
+    
+    total_trades = Column(Integer, default=0, nullable=False, comment="Total number of trades")
+    winning_trades = Column(Integer, default=0, nullable=False, comment="Number of winning trades")
+    losing_trades = Column(Integer, default=0, nullable=False, comment="Number of losing trades")
+    
+    net_pnl = Column(DECIMAL(20, 8), nullable=True, comment="Net PnL")
+    max_drawdown = Column(DECIMAL(20, 8), nullable=True, comment="Maximum drawdown")
+    win_rate = Column(DECIMAL(10, 4), nullable=True, comment="Win rate (0-100)")
+    profit_factor = Column(DECIMAL(10, 4), nullable=True, comment="Profit factor")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    
+    def __repr__(self):
+        return f"<StrategyBacktestSummary(strategy_id={self.strategy_id}, symbol={self.symbol}, total_trades={self.total_trades})>"
+
+
+class StrategyBacktestDaily(Base):
+    """
+    Strategy Daily Performance - One row per strategy per day
+    
+    Purpose: Equity curve & performance charts
+    CRITICAL: Precomputed data only - no on-call computation
+    """
+    __tablename__ = "strategy_backtest_daily"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    backtest_run_id = Column(String(36), nullable=False, index=True, comment="Unique backtest run identifier (UUID)")
+    strategy_id = Column(BigInteger, nullable=False, index=True, comment="Strategy ID")
+    symbol = Column(String(20), nullable=False, index=True, comment="Trading symbol (e.g., BTCUSD)")
+    date = Column(Date, nullable=False, index=True, comment="Date (day)")
+    
+    daily_pnl = Column(DECIMAL(20, 8), nullable=True, comment="Daily PnL")
+    cumulative_pnl = Column(DECIMAL(20, 8), nullable=True, comment="Cumulative PnL")
+    drawdown = Column(DECIMAL(20, 8), nullable=True, comment="Drawdown for the day")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint('strategy_id', 'date', name='uniq_strategy_date'),
+        {"comment": "Strategy daily performance - one row per strategy per day"}
+    )
+    
+    def __repr__(self):
+        return f"<StrategyBacktestDaily(strategy_id={self.strategy_id}, date={self.date}, daily_pnl={self.daily_pnl})>"
+
+
+class StrategyBacktestTrades(Base):
+    """
+    Strategy Trade-by-Trade Details
+    
+    Purpose: Deep dive analysis (future-proof)
+    CRITICAL: Large table - must support pagination
+    """
+    __tablename__ = "strategy_backtest_trades"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    backtest_run_id = Column(String(36), nullable=False, index=True, comment="Unique backtest run identifier (UUID)")
+    strategy_id = Column(BigInteger, nullable=False, index=True, comment="Strategy ID")
+    symbol = Column(String(20), nullable=False, index=True, comment="Trading symbol (e.g., BTCUSD)")
+    
+    entry_time = Column(DateTime(timezone=True), nullable=False, index=True, comment="Trade entry timestamp")
+    exit_time = Column(DateTime(timezone=True), nullable=False, index=True, comment="Trade exit timestamp")
+    
+    entry_price = Column(DECIMAL(20, 8), nullable=False, comment="Entry price")
+    exit_price = Column(DECIMAL(20, 8), nullable=False, comment="Exit price")
+    
+    quantity = Column(DECIMAL(20, 8), nullable=False, comment="Trade quantity")
+    side = Column(Enum(TradeSide), nullable=False, index=True, comment="Trade side: BUY or SELL")
+    
+    pnl = Column(DECIMAL(20, 8), nullable=False, comment="Trade PnL")
+    pnl_percent = Column(DECIMAL(10, 4), nullable=True, comment="Trade PnL percentage")
+    
+    exit_reason = Column(String(100), nullable=True, comment="Exit reason (e.g., stop_loss, take_profit)")
+    holding_time_seconds = Column(BigInteger, nullable=True, comment="Holding time in seconds")
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    
+    def __repr__(self):
+        return f"<StrategyBacktestTrades(strategy_id={self.strategy_id}, entry_time={self.entry_time}, pnl={self.pnl})>"
 
 
 class PaymentTransaction(Base):

@@ -18,6 +18,12 @@ from app.api.routes_credits import router as credits_router
 from app.api.routes_payment import router as payment_router
 from app.api.routes_websocket import router as websocket_router
 from app.api.routes_backtest import router as backtest_router
+from app.api.routes_admin_backtest_data import router as admin_backtest_data_router
+from app.api.routes_admin_cron import router as admin_cron_router
+from app.api.routes_backtest_performance import router as backtest_performance_router
+from app.api.routes_health import router as health_router
+from app.api.routes_monitoring import router as monitoring_router
+from app.middleware.api_observability import APIObservabilityMiddleware
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
@@ -53,7 +59,9 @@ async def lifespan(app: FastAPI):
         # Import all models to ensure they're registered with Base.metadata
         from app.models import (  # noqa: F401
             User, Strategy, StrategyVersion, StrategyExecution, PaperTrade,
-            CreditConfig, UserCredits, CreditTransaction, StrategyUsage, PaymentTransaction
+            CreditConfig, UserCredits, CreditTransaction, StrategyUsage, PaymentTransaction,
+            CronMaster, CronExecutionLog,
+            StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades
         )
         logger.info("✅ All models imported and registered with Base.metadata")
         
@@ -108,6 +116,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(APIObservabilityMiddleware)  # API observability - tracks metrics
 
 # Configure CORS based on environment
 if IS_PRODUCTION:
@@ -166,10 +175,15 @@ app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
 # Live market prices do not require user authentication
 app.include_router(websocket_router, prefix="")  # WebSocket for live prices (public endpoint)
 app.include_router(backtest_router, prefix="", tags=["Backtest"])  # Backtest (no /auth prefix - direct Strategy Engine endpoint)
+app.include_router(admin_backtest_data_router, prefix="/auth", tags=["Admin Backtest Data"])  # Admin backtest data management - /auth/admin/backtest-data/*
+app.include_router(admin_cron_router, prefix="/auth", tags=["Admin Cron"])  # Admin cron management - /auth/admin/cron/*
+app.include_router(backtest_performance_router, prefix="/auth", tags=["Backtest Performance"])  # Read-only backtest performance APIs - /auth/strategy/{id}/performance/*
+app.include_router(health_router, prefix="", tags=["Health"])  # Health check endpoints - /health, /health/db, /health/cron
+app.include_router(monitoring_router, prefix="/auth", tags=["Monitoring"])  # Monitoring endpoints - /auth/monitoring/*
 
 @app.get("/")
-def health():
-    return {"status": "ok"}
+def root():
+    return {"status": "ok", "service": "CryptoArth Strategy Engine"}
 
 @app.get("/test-redis")
 def test_redis():
