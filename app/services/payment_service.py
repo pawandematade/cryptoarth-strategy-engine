@@ -97,6 +97,8 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
     """
     Create a Razorpay order for credit purchase
     
+    CRITICAL: Creates a fresh Razorpay client for each request to prevent stale credential reuse.
+    
     Args:
         plan_id: Credit plan ID (starter, professional, enterprise, unlimited)
         user_id: User ID making the purchase
@@ -113,27 +115,50 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         }
     """
     try:
-        # Check if Razorpay is initialized
-        if not razorpay_client:
-            init_success = initialize_razorpay()
-            if not init_success:
-                # Log detailed error for debugging
-                from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
-                key_id_set = bool(RAZORPAY_KEY_ID)
-                key_secret_set = bool(RAZORPAY_KEY_SECRET)
-                key_id_valid = key_id_set and RAZORPAY_KEY_ID.startswith('rzp_live_')
-                
-                logger.error(f"❌ Razorpay initialization failed. KEY_ID set: {key_id_set}, KEY_SECRET set: {key_secret_set}, KEY_ID valid (rzp_live_): {key_id_valid}")
-                
-                return {
-                    'success': False,
-                    'order_id': None,
-                    'amount': 0,
-                    'currency': 'INR',
-                    'key_id': None,
-                    'credits': 0,
-                    'message': 'Payment gateway not configured. Please contact support.'
-                }
+        # CRITICAL: Create fresh Razorpay client for each request (no global client reuse)
+        from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+        import razorpay
+        
+        # Validate Razorpay keys are configured
+        if not RAZORPAY_KEY_ID:
+            logger.error("❌ Razorpay KEY_ID not configured. Set RAZORPAY_KEY_ID environment variable.")
+            return {
+                'success': False,
+                'order_id': None,
+                'amount': 0,
+                'currency': 'INR',
+                'key_id': None,
+                'credits': 0,
+                'message': 'Payment gateway not configured. Please contact support.'
+            }
+        
+        if not RAZORPAY_KEY_SECRET:
+            logger.error("❌ Razorpay KEY_SECRET not configured. Set RAZORPAY_KEY_SECRET environment variable.")
+            return {
+                'success': False,
+                'order_id': None,
+                'amount': 0,
+                'currency': 'INR',
+                'key_id': None,
+                'credits': 0,
+                'message': 'Payment gateway not configured. Please contact support.'
+            }
+        
+        # Validate key is LIVE
+        if not RAZORPAY_KEY_ID.startswith('rzp_live_'):
+            logger.error(f"❌ Razorpay key must be LIVE key (starting with rzp_live_). Current key starts with: {RAZORPAY_KEY_ID[:10]}...")
+            return {
+                'success': False,
+                'order_id': None,
+                'amount': 0,
+                'currency': 'INR',
+                'key_id': None,
+                'credits': 0,
+                'message': 'Payment gateway not configured. Please contact support.'
+            }
+        
+        # Create fresh Razorpay client for this request
+        client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
         
         # Validate plan
         if plan_id not in CREDIT_PLANS:
@@ -166,7 +191,8 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
             }
         }
         
-        order = razorpay_client.order.create(data=order_data)
+        # Create order using fresh client
+        order = client.order.create(order_data)
         
         if not order or 'id' not in order:
             logger.error(f"Failed to create Razorpay order: {order}")
