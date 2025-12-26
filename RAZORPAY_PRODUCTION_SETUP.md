@@ -9,8 +9,8 @@ This error occurs when Razorpay keys are not properly configured in the producti
 ### Production Razorpay Credentials
 
 ```
-RAZORPAY_KEY_ID=rzp_live_IVB2IdJP4ipwcz
-RAZORPAY_KEY_SECRET=1258552885VPJAMA
+RAZORPAY_KEY_ID=rzp_live_RwBMlsLyV3CujY
+RAZORPAY_KEY_SECRET=QvReN7jJv0kHeNxcx6f4vfva
 RAZORPAY_MERCHANT_ID=L998500
 ```
 
@@ -26,8 +26,8 @@ RAZORPAY_MERCHANT_ID=L998500
 3. **Add/Update Razorpay Keys**
    ```env
    # Razorpay Configuration (PRODUCTION - LIVE KEYS ONLY)
-   RAZORPAY_KEY_ID=rzp_live_IVB2IdJP4ipwcz
-   RAZORPAY_KEY_SECRET=1258552885VPJAMA
+   RAZORPAY_KEY_ID=rzp_live_RwBMlsLyV3CujY
+   RAZORPAY_KEY_SECRET=QvReN7jJv0kHeNxcx6f4vfva
    ```
 
 4. **Restart Strategy Engine Service**
