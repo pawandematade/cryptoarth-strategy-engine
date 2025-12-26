@@ -521,3 +521,53 @@ class PaymentTransaction(Base):
 
     def __repr__(self):
         return f"<PaymentTransaction(id={self.id}, user_id={self.user_id}, amount={self.amount}, credits_added={self.credits_added}, status={self.status})>"
+
+
+class StrategyTrade(Base):
+    """
+    Trade-level data storage for backtest and live trades.
+    
+    Stores individual trade records with full audit trail.
+    All reporting is derived from this table (read-only).
+    """
+    __tablename__ = "strategy_trades"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_id = Column(Integer, nullable=False, index=True, comment="Strategy ID (may reference strategies table)")
+    user_phone = Column(String(15), nullable=False, index=True)
+    user_name = Column(String(100), nullable=False)
+    
+    symbol = Column(String(20), nullable=False)
+    timeframe = Column(String(10), nullable=False)
+    direction = Column(Enum('BUY', 'SELL', name='trade_direction'), nullable=False)
+    
+    entry_time = Column(DateTime(timezone=True), nullable=False)
+    exit_time = Column(DateTime(timezone=True), nullable=False)
+    
+    entry_price = Column(DECIMAL(18, 8), nullable=False)
+    exit_price = Column(DECIMAL(18, 8), nullable=False)
+    
+    quantity = Column(DECIMAL(18, 8), nullable=False)
+    capital_used = Column(DECIMAL(18, 8), nullable=False)
+    
+    gross_pnl = Column(DECIMAL(18, 8), nullable=False)
+    brokerage = Column(DECIMAL(18, 8), nullable=False)
+    net_pnl = Column(DECIMAL(18, 8), nullable=False)
+    
+    pnl_percent = Column(DECIMAL(10, 4), nullable=False)
+    is_win = Column(Boolean, nullable=False)
+    
+    max_drawdown_trade = Column(DECIMAL(10, 4), nullable=False, default=0.0)
+    
+    brokerage_mode = Column(String(20), nullable=False, comment="default or custom")
+    maker_rate = Column(DECIMAL(6, 4), nullable=False)
+    taker_rate = Column(DECIMAL(6, 4), nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        {"comment": "Individual trade records for backtest and live execution"}
+    )
+    
+    def __repr__(self):
+        return f"<StrategyTrade(id={self.id}, strategy_id={self.strategy_id}, symbol={self.symbol}, direction={self.direction}, net_pnl={self.net_pnl})>"

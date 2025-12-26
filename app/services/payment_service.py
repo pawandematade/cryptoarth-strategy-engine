@@ -52,24 +52,29 @@ CREDIT_PLANS = {
 
 
 def initialize_razorpay():
-    """Initialize Razorpay client if API keys are available"""
+    """
+    Initialize Razorpay client with LIVE API keys.
+    PRODUCTION: Only LIVE keys are supported - no test keys, no fallbacks.
+    """
     global razorpay_client
     
     try:
         from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
         
+        # CRITICAL: Only LIVE keys are allowed
         if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
-            logger.warning("Razorpay keys not configured. Payment features will be disabled.")
+            logger.error("Razorpay LIVE keys not configured. Payment features will be disabled.")
             return False
         
-        if RAZORPAY_KEY_ID == "your_razorpay_key_id" or RAZORPAY_KEY_SECRET == "your_razorpay_key_secret":
-            logger.warning("Razorpay keys are placeholder values. Payment features will be disabled.")
+        # Validate keys are LIVE (must start with rzp_live_)
+        if not RAZORPAY_KEY_ID.startswith('rzp_live_'):
+            logger.error(f"Razorpay key must be LIVE key (starting with rzp_live_). Provided: {RAZORPAY_KEY_ID[:10]}...")
             return False
         
         try:
             import razorpay
             razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-            logger.info("Razorpay client initialized successfully")
+            logger.info("Razorpay LIVE client initialized successfully")
             return True
         except ImportError:
             logger.error("Razorpay Python SDK not installed. Install with: pip install razorpay")

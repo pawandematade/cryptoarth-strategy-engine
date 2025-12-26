@@ -72,8 +72,8 @@ def get_rupee_to_credit_ratio(db: Session) -> int:
 
 def initialize_user_credits(db: Session, user_id: int) -> UserCredits:
     """
-    Initialize credits for a new user.
-    Creates user_credits record with default free credits.
+    Initialize credits for a new user (signup flow).
+    UNIFIED LOGIC: Uses add_credits() internally to ensure consistent behavior.
     
     Args:
         db: Database session
@@ -91,47 +91,28 @@ def initialize_user_credits(db: Session, user_id: int) -> UserCredits:
         logger.info(f"User credits already exist for user_id={user_id}")
         return existing
     
-    # Get user to retrieve mobile number
-    from app.models import User
-    user = db.query(User).filter(User.id == user_id).first()
-    user_mobile = user.phone if user and user.phone else ""
-    
-    if not user_mobile:
-        logger.warning(f"User {user_id} has no phone number - using empty string for mobile field")
-    
     # Get default free credits from config
     default_credits = get_default_free_credits(db)
     
-    # Create user credits record
-    user_credits = UserCredits(
+    # Use unified add_credits function (creates user_credits if needed)
+    success, error_msg = add_credits(
+        db=db,
         user_id=user_id,
-        total_credits=default_credits,
-        used_credits=0,
-        is_active=True
-    )
-    
-    db.add(user_credits)
-    
-    # Create credit transaction for initial credits with mobile field
-    transaction = CreditTransaction(
-        user_id=user_id,
-        mobile=user_mobile,  # REQUIRED: Mobile in 91XXXXXXXXXX format
-        type='credit',
         credits=default_credits,
-        reason='Initial free credits',
+        reason="Signup bonus",
         reference_id=None
     )
-    db.add(transaction)
     
-    try:
-        db.commit()
-        db.refresh(user_credits)
-        logger.info(f"Initialized credits for user_id={user_id}: {default_credits} credits")
-        return user_credits
-    except IntegrityError as e:
-        db.rollback()
-        logger.error(f"Failed to initialize credits for user_id={user_id}: {e}")
-        raise
+    if not success:
+        raise IntegrityError(f"Failed to initialize credits: {error_msg}", None, None)
+    
+    # Get the created user credits record
+    user_credits = get_user_credits(db, user_id)
+    if not user_credits:
+        raise IntegrityError("User credits record not found after initialization", None, None)
+    
+    logger.info(f"Initialized credits for user_id={user_id}: {default_credits} credits")
+    return user_credits
 
 
 def get_user_credits(db: Session, user_id: int) -> Optional[UserCredits]:
@@ -293,22 +274,38 @@ def add_credits(
 ) -> Tuple[bool, Optional[str]]:
     """
     Add credits to user wallet (atomic operation).
+    UNIFIED FUNCTION: Used by signup, admin, and payment flows.
     
     Args:
         db: Database session
         user_id: Local user ID
         credits: Number of credits to add
-        reason: Optional reason for adding credits
+        reason: Optional reason for adding credits (default: "Credits added")
         reference_id: Optional reference ID (e.g., payment_id)
-        mobile: Mobile number in 91XXXXXXXXXX format (required for admin operations)
-        admin_name: Admin name who added credits (required for admin operations)
+        mobile: Mobile number in 91XXXXXXXXXX format (optional - auto-fetched from user if not provided)
+        admin_name: Admin name who added credits (optional, for audit trail)
     
     Returns:
         tuple: (success, error_message)
     """
     try:
-        # Get or create user credits
+        # Get user credits - create if doesn't exist (for signup case)
         user_credits = get_user_credits(db, user_id)
+        if not user_credits:
+            # Create user credits record with 0 credits (will add credits below)
+            from app.models import User
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                return False, f"User {user_id} not found"
+            
+            user_credits = UserCredits(
+                user_id=user_id,
+                total_credits=0,
+                used_credits=0,
+                is_active=True
+            )
+            db.add(user_credits)
+            db.flush()  # Flush to get the record
         
         # If mobile not provided, get it from user
         if not mobile:

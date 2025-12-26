@@ -23,6 +23,8 @@ from app.api.routes_admin_cron import router as admin_cron_router
 from app.api.routes_backtest_performance import router as backtest_performance_router
 from app.api.routes_health import router as health_router
 from app.api.routes_monitoring import router as monitoring_router
+from app.api.routes_reports import router as reports_router
+from app.api.routes_internal import router as internal_router
 from app.middleware.api_observability import APIObservabilityMiddleware
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -61,7 +63,8 @@ async def lifespan(app: FastAPI):
             User, Strategy, StrategyVersion, StrategyExecution, PaperTrade,
             CreditConfig, UserCredits, CreditTransaction, StrategyUsage, PaymentTransaction,
             CronMaster, CronExecutionLog,
-            StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades
+            StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades,
+            StrategyTrade
         )
         logger.info("✅ All models imported and registered with Base.metadata")
         
@@ -178,6 +181,8 @@ app.include_router(backtest_router, prefix="", tags=["Backtest"])  # Backtest (n
 app.include_router(admin_backtest_data_router, prefix="/auth", tags=["Admin Backtest Data"])  # Admin backtest data management - /auth/admin/backtest-data/*
 app.include_router(admin_cron_router, prefix="/auth", tags=["Admin Cron"])  # Admin cron management - /auth/admin/cron/*
 app.include_router(backtest_performance_router, prefix="/auth", tags=["Backtest Performance"])  # Read-only backtest performance APIs - /auth/strategy/{id}/performance/*
+app.include_router(reports_router, prefix="", tags=["Reports"])  # Trade reporting APIs - /reports/*
+app.include_router(internal_router, prefix="", tags=["Internal"])  # Internal APIs (no auth) - /internal/*
 app.include_router(health_router, prefix="", tags=["Health"])  # Health check endpoints - /health, /health/db, /health/cron
 app.include_router(monitoring_router, prefix="/auth", tags=["Monitoring"])  # Monitoring endpoints - /auth/monitoring/*
 

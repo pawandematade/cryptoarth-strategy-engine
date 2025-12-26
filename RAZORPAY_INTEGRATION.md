@@ -72,7 +72,7 @@ Create a Razorpay order for credit purchase.
   "order_id": "order_ABC123",
   "amount": 29900,
   "currency": "INR",
-  "key_id": "rzp_test_xxxxx",
+  "key_id": "rzp_live_xxxxx",
   "credits": 200,
   "plan_name": "Professional Pack",
   "message": "Order created successfully"
@@ -139,8 +139,8 @@ Manually verify payment (for frontend callback).
 Add to `.env` file:
 
 ```env
-# Razorpay Configuration
-RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxxx
+# Razorpay Configuration (PRODUCTION: LIVE keys only)
+RAZORPAY_KEY_ID=rzp_live_xxxxxxxxxxxxx
 RAZORPAY_KEY_SECRET=your_razorpay_key_secret
 ```
 
@@ -280,10 +280,11 @@ rzp.open();
 
 ## Testing
 
-### Test Mode
-1. Use Razorpay test keys (`rzp_test_...`)
-2. Use test cards from Razorpay documentation
-3. Webhook testing: Use Razorpay webhook testing tool
+### Test Mode (Deprecated)
+**NOTE: Production system uses LIVE keys only. Test mode is not supported.**
+1. ~~Use Razorpay test keys (`rzp_test_...`)~~ - Not supported
+2. For testing, use Razorpay test mode dashboard
+3. Webhook testing: Use Razorpay webhook testing tool with LIVE keys
 
 ### Test Cards
 - **Success**: `4111 1111 1111 1111`
@@ -310,7 +311,8 @@ rzp.open();
 
 ## Production Checklist
 
-- [ ] Replace test keys with live Razorpay keys
+- [x] System configured for LIVE keys only (code validates `rzp_live_` prefix)
+- [ ] Set LIVE Razorpay keys in environment variables (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
 - [ ] Configure webhook URL in Razorpay dashboard
 - [ ] Test webhook signature verification
 - [ ] Set up webhook monitoring/alerting
