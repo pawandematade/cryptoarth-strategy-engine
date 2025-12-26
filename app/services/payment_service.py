@@ -16,34 +16,32 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 # Credit packages/plans
-# CRITICAL: All amounts must match frontend exactly
+# CRITICAL: Single source of truth for backend pricing
 # Base price: ₹10 = 1 Credit
 # GST: 18% of base price
 # Total payable = base_price + gst
+# NO 'amount' field - use total_amount only
 CREDIT_PLANS = {
     'starter': {
         'name': 'Starter Pack',
         'credits': 50,
-        'base_price': 500,  # Base price in INR
-        'gst': 90,  # GST (18%) in INR
-        'total_amount': 590,  # Total payable (base + GST) in INR
-        'description': '50 credits for AI strategy generation and backtesting'
+        'base_price': 500,
+        'gst': 90,
+        'total_amount': 590
     },
     'professional': {
         'name': 'Professional Pack',
         'credits': 150,
-        'base_price': 1500,  # Base price in INR
-        'gst': 270,  # GST (18%) in INR
-        'total_amount': 1770,  # Total payable (base + GST) in INR
-        'description': '150 credits - Best for active traders'
+        'base_price': 1500,
+        'gst': 270,
+        'total_amount': 1770
     },
     'enterprise': {
         'name': 'Enterprise Pack',
         'credits': 300,
-        'base_price': 3000,  # Base price in INR
-        'gst': 540,  # GST (18%) in INR
-        'total_amount': 3540,  # Total payable (base + GST) in INR
-        'description': '300 credits - For power users and teams'
+        'base_price': 3000,
+        'gst': 540,
+        'total_amount': 3540
     }
 }
 
@@ -136,8 +134,12 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         plan = CREDIT_PLANS[plan_id]
         # CRITICAL: Use total_amount (base + GST) for Razorpay order
         # This ensures checkout shows the correct amount matching frontend
+        # SINGLE SOURCE OF TRUTH: amount_paise MUST be calculated ONLY from plan["total_amount"]
         total_amount = plan['total_amount']  # Total payable in INR
         amount_paise = int(total_amount * 100)  # Convert to paise (Razorpay requires integer)
+        
+        # Debug log: Verify amount calculation
+        logger.info(f"PAYMENT CREATE | plan={plan_id} | total_amount={total_amount} | amount_paise={amount_paise}")
         
         # Create Razorpay order using exact format as specified
         # CRITICAL: Receipt must be <= 40 characters (Razorpay hard limit)
