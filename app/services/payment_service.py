@@ -15,11 +15,6 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# DEPRECATED: Global razorpay_client is no longer used.
-# Each request creates a fresh client to prevent stale credential reuse.
-# Keeping variable for backward compatibility with status endpoint only.
-razorpay_client = None
-
 # Credit packages/plans
 # CRITICAL: All amounts must match frontend exactly
 # Base price: ₹10 = 1 Credit
@@ -51,48 +46,6 @@ CREDIT_PLANS = {
         'description': '300 credits - For power users and teams'
     }
 }
-
-
-def initialize_razorpay():
-    """
-    Initialize Razorpay client with LIVE API keys.
-    PRODUCTION: Only LIVE keys are supported - no test keys, no fallbacks.
-    """
-    global razorpay_client
-    
-    try:
-        from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
-        
-        # CRITICAL: Only LIVE keys are allowed
-        if not RAZORPAY_KEY_ID:
-            logger.error("❌ Razorpay KEY_ID not configured. Set RAZORPAY_KEY_ID environment variable.")
-            return False
-        
-        if not RAZORPAY_KEY_SECRET:
-            logger.error("❌ Razorpay KEY_SECRET not configured. Set RAZORPAY_KEY_SECRET environment variable.")
-            return False
-        
-        # Validate keys are LIVE (must start with rzp_live_)
-        if not RAZORPAY_KEY_ID.startswith('rzp_live_'):
-            logger.error(f"❌ Razorpay key must be LIVE key (starting with rzp_live_). Current key starts with: {RAZORPAY_KEY_ID[:10]}...")
-            logger.error(f"   Please set RAZORPAY_KEY_ID=rzp_live_IVB2IdJP4ipwcz in production environment")
-            return False
-        
-        try:
-            import razorpay
-            razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-            logger.info(f"✅ Razorpay LIVE client initialized successfully (Key ID: {RAZORPAY_KEY_ID[:15]}...)")
-            return True
-        except ImportError:
-            logger.error("❌ Razorpay Python SDK not installed. Install with: pip install razorpay")
-            return False
-        except Exception as init_error:
-            logger.error(f"❌ Failed to initialize Razorpay client: {init_error}", exc_info=True)
-            return False
-            
-    except Exception as e:
-        logger.error(f"❌ Error initializing Razorpay: {e}", exc_info=True)
-        return False
 
 
 def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
@@ -160,7 +113,13 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
             }
         
         # Create fresh Razorpay client for this request
-        client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        # CRITICAL: Strip keys to avoid hidden whitespace issues from .env
+        client = razorpay.Client(
+            auth=(
+                RAZORPAY_KEY_ID.strip(),
+                RAZORPAY_KEY_SECRET.strip()
+            )
+        )
         
         # Validate plan
         if plan_id not in CREDIT_PLANS:
@@ -180,22 +139,18 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         total_amount = plan['total_amount']  # Total payable in INR
         amount_paise = int(total_amount * 100)  # Convert to paise (Razorpay requires integer)
         
-        # Create Razorpay order
-        order_data = {
-            'amount': amount_paise,  # Amount in paise
-            'currency': 'INR',
-            'receipt': f'credits_{user_id}_{plan_id}_{int(time.time())}',
-            'notes': {
-                'user_id': str(user_id),
-                'plan_id': plan_id,
-                'credits': plan['credits'],
-                'plan_name': plan['name']
+        # Create Razorpay order using exact format as specified
+        order = client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"credits_{user_id}_{plan_id}_{int(time.time())}",
+            "notes": {
+                "user_id": str(user_id),
+                "plan_id": plan_id,
+                "credits": plan["credits"],
+                "plan_name": plan["name"]
             }
-        }
-        
-        # Create order using fresh client
-        logger.error("USING FRESH RAZORPAY CLIENT")  # TEMP: Verify new code is running
-        order = client.order.create(order_data)
+        })
         
         if not order or 'id' not in order:
             logger.error(f"Failed to create Razorpay order: {order}")
@@ -529,7 +484,4 @@ def get_credit_plans() -> Dict[str, Any]:
     }
 
 
-# DEPRECATED: Module-level Razorpay initialization removed.
-# Each request now creates a fresh client to prevent stale credential reuse.
-# No initialization needed on module load.
 
