@@ -9,9 +9,10 @@ import json
 import time
 from typing import Dict, Optional, Any
 from app.store.redis_client import redis_client
-from app.services.credit_service import add_credits, get_rupee_to_credit_ratio
+from app.services.credit_service import get_rupee_to_credit_ratio
 from app.models import PaymentTransaction
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 logger = logging.getLogger(__name__)
 
@@ -276,26 +277,54 @@ def process_payment_success(
     user_id: int
 ) -> Dict[str, Any]:
     """
-    Process successful payment and add credits to user
+    Process successful payment and add credits to user.
+    
+    CRITICAL: This function MUST use the JWT-authenticated user_id as the ONLY source of truth.
+    NEVER use hardcoded user_id, admin user, or Redis user_id without validation.
+    
+    FLOW:
+    1. Verify Razorpay signature
+    2. Fetch order from Redis and validate
+    3. Check idempotency (prevent duplicate processing)
+    4. Calculate credits from base_price
+    5. Update user_credits table (BALANCE)
+    6. Insert credit_transactions row (LEDGER)
+    7. Insert payment_transactions row (INVOICE RECORD)
+    8. Return success response
     
     Args:
         db: Database session
         order_id: Razorpay order ID
         payment_id: Razorpay payment ID
         signature: Razorpay signature
-        user_id: Local user ID (integer)
+        user_id: JWT-authenticated user ID (integer) - ONLY SOURCE OF TRUTH
     
     Returns:
         dict: {
             'success': bool,
             'user_id': int,
             'credits_added': int,
+            'credits_remaining': int,
             'message': str
         }
     """
+    # CRITICAL: Validate user_id is not admin/default (unless admin is actually paying)
+    if user_id <= 0:
+        logger.error(f"CRITICAL: Invalid user_id={user_id} in process_payment_success. Rejecting payment.")
+        return {
+            'success': False,
+            'user_id': user_id,
+            'credits_added': 0,
+            'message': 'Invalid user ID. Payment cannot be processed.'
+        }
+    
+    # CRITICAL: Log the user_id being used for payment processing
+    logger.info(f"PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
+    
     try:
-        # Verify signature first
+        # STEP 1: Verify Razorpay signature
         if not verify_razorpay_signature(order_id, payment_id, signature):
+            logger.error(f"Invalid Razorpay signature for payment {payment_id}")
             return {
                 'success': False,
                 'user_id': user_id,
@@ -303,7 +332,7 @@ def process_payment_success(
                 'message': 'Invalid payment signature. Payment verification failed.'
             }
         
-        # Get order details from Redis
+        # STEP 2: Get order details from Redis and validate
         order_key = f"PAYMENT_ORDER:{order_id}"
         order_data_str = redis_client.get(order_key)
         
@@ -318,16 +347,25 @@ def process_payment_success(
         
         order_data = json.loads(order_data_str)
         
-        # CRITICAL: Idempotency check - Check if payment_id already processed
-        # This prevents duplicate credit additions if webhook is called multiple times
+        # STEP 3: Idempotency check - Prevent duplicate processing
         existing_payment = db.query(PaymentTransaction).filter(
             PaymentTransaction.gateway_payment_id == payment_id,
             PaymentTransaction.status == 'success'
         ).first()
         
         if existing_payment:
-            logger.info(f"Payment {payment_id} already processed in DB (idempotency check). Skipping duplicate processing.")
-            # Get updated user credits
+            logger.info(f"Payment {payment_id} already processed (idempotency check). Returning existing result.")
+            # CRITICAL: Verify existing payment belongs to authenticated user
+            if existing_payment.user_id != user_id:
+                logger.error(f"Payment {payment_id} belongs to user_id={existing_payment.user_id}, but authenticated user_id={user_id}. Security violation.")
+                return {
+                    'success': False,
+                    'user_id': user_id,
+                    'credits_added': 0,
+                    'message': 'Payment ownership mismatch. Security violation.'
+                }
+            
+            # Get updated user credits for response
             from app.services.credit_service import get_user_credits
             user_credits = get_user_credits(db, user_id)
             credits_remaining = user_credits.available_credits if user_credits else 0
@@ -340,32 +378,33 @@ def process_payment_success(
                 'message': 'Payment already processed (idempotent response)'
             }
         
-        # Calculate credits from base_price (₹10 = 1 credit)
+        # STEP 4: Calculate credits from base_price (₹10 = 1 credit)
         # CRITICAL: Credits are calculated from base_price, NOT total_amount (GST excluded)
         base_price = order_data.get('base_price', 0)  # Base price in INR (GST excluded)
         if base_price == 0:
             # Fallback to amount for backward compatibility (old orders)
             base_price = order_data.get('amount', 0)
         ratio = get_rupee_to_credit_ratio(db)  # Default: 10
-        credits = int(base_price / ratio) if ratio > 0 else 0
+        credits_added = int(base_price / ratio) if ratio > 0 else 0
+        
+        if credits_added <= 0:
+            logger.error(f"Invalid credits calculation: base_price={base_price}, ratio={ratio}, credits={credits_added}")
+            return {
+                'success': False,
+                'user_id': user_id,
+                'credits_added': 0,
+                'message': 'Invalid credit calculation. Payment cannot be processed.'
+            }
         
         # Get total amount for payment transaction record
         total_amount = order_data.get('amount', 0)  # Total payable (base + GST) in INR
         
-        # Add credits to user account (atomic operation)
-        success, error_msg = add_credits(
-            db, user_id, credits,
-            reason=f"Payment for order {order_id}",
-            reference_id=payment_id
-        )
-        
-        # Get user details for customer snapshot (before creating payment transaction)
+        # STEP 5: Get authenticated user from database (CRITICAL: JWT user is source of truth)
         from app.models import User
-        user = db.query(User).filter(User.id == user_id).first()
+        current_user = db.query(User).filter(User.id == user_id).first()
         
-        # CRITICAL: Validate user exists before saving payment
-        if not user:
-            logger.error(f"User {user_id} not found when processing payment {payment_id}")
+        if not current_user:
+            logger.error(f"CRITICAL: JWT-authenticated user_id={user_id} not found in database. Payment cannot be processed.")
             return {
                 'success': False,
                 'user_id': user_id,
@@ -373,48 +412,78 @@ def process_payment_success(
                 'message': 'User not found. Payment cannot be processed.'
             }
         
-        # Capture customer details snapshot from user record
+        # Capture customer details snapshot from authenticated user record
+        # CRITICAL: Customer details MUST come from users table, NOT Razorpay or frontend
         customer_name = None
-        if user.first_name or user.last_name:
-            customer_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        elif user.username:
-            customer_name = user.username
+        if current_user.first_name or current_user.last_name:
+            customer_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip()
+        elif current_user.username:
+            customer_name = current_user.username
         
-        customer_email = user.email
-        customer_mobile = user.phone
+        customer_email = current_user.email or ""
+        customer_mobile = current_user.phone or ""
         
-        if not success:
-            logger.error(f"Failed to add credits to user {user_id}: {error_msg}")
-            # Create failed payment transaction with customer details
-            payment_txn = PaymentTransaction(
-                user_id=user_id,
-                provider='razorpay',
-                amount=float(total_amount),  # Total payable (base + GST)
-                credits_added=0,
-                status='failed',
-                gateway_order_id=order_id,
-                gateway_payment_id=payment_id,
-                customer_name=customer_name,
-                customer_email=customer_email,
-                customer_mobile=customer_mobile
+        # STEP 6: Update user_credits table (BALANCE TABLE)
+        # CRITICAL: This updates the balance that UI reads from
+        # CRITICAL: MUST use current_user.id - NEVER hardcoded or admin user_id
+        from app.services.credit_service import get_user_credits, UserCredits
+        user_credits = get_user_credits(db, user_id)
+        
+        if not user_credits:
+            # Create new user_credits record for this user
+            logger.info(f"CREATING NEW user_credits record: user_id={user_id} (NOT admin user_id=1)")
+            user_credits = UserCredits(
+                user_id=user_id,  # CRITICAL: Use JWT-authenticated user_id
+                total_credits=0,
+                used_credits=0,
+                is_active=True
             )
-            db.add(payment_txn)
-            db.commit()
-            
+            db.add(user_credits)
+            db.flush()  # Flush to get the record
+            logger.info(f"NEW user_credits record created: user_id={user_id}")
+        else:
+            logger.info(f"UPDATING EXISTING user_credits: user_id={user_id}, current_total={user_credits.total_credits}, adding={credits_added}")
+        
+        # CRITICAL: Verify we're updating the correct user's credits
+        if user_credits.user_id != user_id:
+            logger.error(f"CRITICAL BUG: user_credits.user_id={user_credits.user_id} != authenticated user_id={user_id}. Rejecting payment.")
+            db.rollback()
             return {
                 'success': False,
                 'user_id': user_id,
                 'credits_added': 0,
-                'message': f"Failed to add credits: {error_msg}"
+                'message': 'User credits ownership mismatch. Security violation.'
             }
         
-        # Create payment transaction record with customer details
-        # CRITICAL: This MUST be saved to DB before returning success
+        # Add credits to balance
+        old_total = user_credits.total_credits
+        user_credits.total_credits += credits_added
+        user_credits.updated_at = func.now()
+        logger.info(f"user_credits UPDATE: user_id={user_id}, old_total={old_total}, new_total={user_credits.total_credits}")
+        
+        # STEP 7: Insert credit_transactions row (LEDGER - HISTORY ONLY)
+        # CRITICAL: This is for audit trail, NOT for balance calculation
+        # CRITICAL: MUST use current_user.id - NEVER hardcoded or admin user_id
+        from app.models import CreditTransaction
+        credit_txn = CreditTransaction(
+            user_id=user_id,  # CRITICAL: Use JWT-authenticated user_id
+            mobile=customer_mobile,  # REQUIRED: Mobile in 91XXXXXXXXXX format
+            type='credit',
+            credits=credits_added,
+            reason=f"Payment for order {order_id}",
+            reference_id=payment_id
+        )
+        db.add(credit_txn)
+        logger.info(f"credit_transactions INSERT: user_id={user_id}, credits={credits_added}, payment_id={payment_id}")
+        
+        # STEP 8: Insert payment_transactions row (INVOICE RECORD)
+        # CRITICAL: This captures customer snapshot for admin, GST, reconciliation
+        # CRITICAL: MUST use current_user.id - NEVER hardcoded or admin user_id
         payment_txn = PaymentTransaction(
-            user_id=user_id,
+            user_id=user_id,  # CRITICAL: Use JWT-authenticated user_id
             provider='razorpay',
-            amount=float(total_amount),  # Total payable (base + GST)
-            credits_added=credits,
+            amount=float(total_amount),  # Total payable (base + GST) in INR
+            credits_added=credits_added,
             status='success',
             gateway_order_id=order_id,
             gateway_payment_id=payment_id,
@@ -423,12 +492,14 @@ def process_payment_success(
             customer_mobile=customer_mobile
         )
         db.add(payment_txn)
+        logger.info(f"payment_transactions INSERT: user_id={user_id}, amount={total_amount}, credits={credits_added}, customer={customer_name}")
         
-        # CRITICAL: Flush to catch any constraint violations before commit
+        # CRITICAL: Commit all three operations atomically
+        # This ensures: user_credits, credit_transactions, and payment_transactions are all saved together
         try:
-            db.flush()
+            db.flush()  # Flush to catch constraint violations before commit
         except Exception as flush_error:
-            logger.error(f"Error flushing PaymentTransaction to DB: {flush_error}", exc_info=True)
+            logger.error(f"Error flushing payment transaction to DB: {flush_error}", exc_info=True)
             db.rollback()
             return {
                 'success': False,
@@ -437,12 +508,12 @@ def process_payment_success(
                 'message': f'Failed to save payment transaction: {str(flush_error)}'
             }
         
-        # CRITICAL: Commit payment transaction - this MUST succeed
         try:
             db.commit()
-            logger.info(f"PaymentTransaction saved: payment_id={payment_id}, user_id={user_id}, amount={total_amount}, credits={credits}")
+            logger.info(f"✅ PAYMENT COMMITTED: payment_id={payment_id}, user_id={user_id}, amount={total_amount}, credits={credits_added}, customer={customer_name}")
+            logger.info(f"✅ DB WRITES COMPLETE: user_credits.user_id={user_id}, credit_transactions.user_id={user_id}, payment_transactions.user_id={user_id}")
         except Exception as commit_error:
-            logger.error(f"CRITICAL: Failed to commit PaymentTransaction to DB: {commit_error}", exc_info=True)
+            logger.error(f"CRITICAL: Failed to commit payment transaction to DB: {commit_error}", exc_info=True)
             db.rollback()
             return {
                 'success': False,
@@ -451,36 +522,35 @@ def process_payment_success(
                 'message': f'Failed to save payment transaction: {str(commit_error)}'
             }
         
-        # Verify payment transaction was saved (refresh to get ID)
+        # Verify payment transaction was saved
         try:
             db.refresh(payment_txn)
             if not payment_txn.id:
                 logger.error(f"CRITICAL: PaymentTransaction committed but ID is None. payment_id={payment_id}")
-                # Don't fail payment if ID is missing, but log the issue
         except Exception as refresh_error:
             logger.warning(f"Could not refresh PaymentTransaction after commit: {refresh_error}")
-            # Don't fail payment if refresh fails
         
-        # Update order status in Redis
-        order_data['status'] = 'completed'
-        order_data['payment_id'] = payment_id
-        order_data['completed_at'] = int(time.time())
+        # Get updated credits for response
+        db.refresh(user_credits)
+        credits_remaining = user_credits.available_credits
         
-        redis_client.setex(
-            order_key,
-            86400 * 30,  # 30 days TTL for completed orders
-            json.dumps(order_data)
-        )
+        # Update order status in Redis (non-critical - don't fail payment if this fails)
+        try:
+            order_data['status'] = 'completed'
+            order_data['payment_id'] = payment_id
+            order_data['completed_at'] = int(time.time())
+            
+            redis_client.setex(
+                order_key,
+                86400 * 30,  # 30 days TTL for completed orders
+                json.dumps(order_data)
+            )
+        except Exception as redis_error:
+            logger.warning(f"Failed to update Redis order status: {redis_error}")
+            # Don't fail payment if Redis update fails
         
-        # Get updated user credits
-        from app.services.credit_service import get_user_credits
-        user_credits = get_user_credits(db, user_id)
-        credits_remaining = user_credits.available_credits if user_credits else 0
-        
-        # Send invoice email (idempotent - only if email not sent before)
-        # Check if invoice email was already sent by checking a flag in payment_txn
-        # For now, we'll send email only once per payment_id (idempotency handled by email service)
-        if user and user.email:
+        # STEP 9: Send invoice email (non-blocking - don't fail payment if email fails)
+        if current_user and current_user.email:
             try:
                 from app.services.email_service import send_invoice_email
                 from datetime import datetime
@@ -495,41 +565,36 @@ def process_payment_success(
                     invoice_base_price = float(total_amount) / 1.18  # Calculate base from total
                     invoice_gst = float(total_amount) - invoice_base_price
                 
-                # Get user name and mobile
-                user_name = user.first_name or user.username or "User"
-                if user.last_name:
-                    user_name = f"{user.first_name} {user.last_name}" if user.first_name else user.last_name
-                user_mobile = user.phone or ""
-                
                 # Send invoice email (non-blocking - don't fail payment if email fails)
                 email_sent = send_invoice_email(
-                    to_email=user.email,
-                    user_name=user_name,
-                    user_mobile=user_mobile,
+                    to_email=current_user.email,
+                    user_name=customer_name or "User",
+                    user_mobile=customer_mobile,
                     payment_id=payment_id,
                     amount=invoice_base_price,  # Base price (GST excluded)
                     gst_amount=invoice_gst,  # GST amount
                     total_amount=invoice_total,  # Total payable (base + GST)
-                    credits_added=credits,
+                    credits_added=credits_added,
                     payment_date=payment_txn.created_at if payment_txn.created_at else datetime.now()
                 )
                 
                 if email_sent:
-                    logger.info(f"Invoice email sent to {user.email} for payment {payment_id}")
+                    logger.info(f"Invoice email sent to {current_user.email} for payment {payment_id}")
                 else:
-                    logger.warning(f"Failed to send invoice email to {user.email} for payment {payment_id}")
+                    logger.warning(f"Failed to send invoice email to {current_user.email} for payment {payment_id}")
             except Exception as email_error:
                 # Log error but don't fail payment processing
                 logger.error(f"Error sending invoice email: {email_error}", exc_info=True)
         
-        logger.info(f"Payment processed successfully: Order {order_id}, Payment {payment_id}, User {user_id}, Credits {credits}")
+        # STEP 10: Return success response
+        logger.info(f"Payment processed successfully: Order {order_id}, Payment {payment_id}, User {user_id}, Credits {credits_added}, Customer={customer_name}")
         
         return {
             'success': True,
             'user_id': user_id,
-            'credits_added': credits,
+            'credits_added': credits_added,
             'credits_remaining': credits_remaining,
-            'message': f'Successfully added {credits} credits to your account'
+            'message': f'Successfully added {credits_added} credits to your account'
         }
         
     except Exception as e:

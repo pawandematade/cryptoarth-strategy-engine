@@ -20,10 +20,69 @@ from app.services.user_sync_service import get_or_sync_user
 from app.database import get_db
 from sqlalchemy.orm import Session
 from fastapi import Depends
+from app.models import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Get current authenticated user from JWT token.
+    
+    CRITICAL: This is the ONLY source of truth for user identity.
+    NEVER use hardcoded user_id, admin user, or Redis user_id.
+    
+    Args:
+        authorization: Authorization header (Bearer token)
+        db: Database session
+    
+    Returns:
+        User: Authenticated user from database
+    
+    Raises:
+        HTTPException: If authentication fails or user not found
+    """
+    if not authorization:
+        logger.error("Authorization header missing in payment verification")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required"
+        )
+    
+    # Sync user and get local user ID from JWT
+    current_user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+    
+    if not current_user:
+        logger.error("Failed to authenticate user from JWT token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to authenticate user"
+        )
+    
+    # CRITICAL: Validate user_id is not admin/default (unless admin is actually paying)
+    if current_user.id <= 0:
+        logger.error(f"Invalid user_id={current_user.id} from JWT authentication. Rejecting payment.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid user ID. Payment cannot be processed."
+        )
+    
+    # Verify user exists in database
+    db_user = db.query(User).filter(User.id == current_user.id).first()
+    if not db_user:
+        logger.error(f"User {current_user.id} from JWT not found in database")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found. Payment cannot be processed."
+        )
+    
+    logger.info(f"JWT authenticated user: user_id={current_user.id}, email={current_user.email}, phone={current_user.phone}")
+    return current_user
 
 
 class CreateOrderRequest(BaseModel):
@@ -442,46 +501,38 @@ def verify_payment(
     order_id: str,
     payment_id: str,
     signature: str,
-    authorization: Optional[str] = Header(None),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Verify payment manually (for frontend callback)
     
+    CRITICAL: Uses JWT-authenticated user as ONLY source of truth.
+    ALL DB writes use current_user.id - NEVER hardcoded or Redis user_id.
+    
     Args:
         order_id: Razorpay order ID
         payment_id: Razorpay payment ID
         signature: Razorpay signature
-        authorization: Authorization header (Bearer token)
+        current_user: JWT-authenticated user (from get_current_user dependency)
         db: Database session
     
     Returns:
         dict: Payment verification result
     """
     try:
-        if not authorization:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization header required"
-            )
+        # CRITICAL: Log authenticated user for debugging
+        logger.info(f"Payment verification: user_id={current_user.id}, email={current_user.email}, phone={current_user.phone}, order_id={order_id}")
         
-        # Sync user and get local user ID
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to authenticate user"
-            )
-        
-        # Verify signature
+        # STEP 1: Verify Razorpay signature
         if not verify_razorpay_signature(order_id, payment_id, signature):
+            logger.error(f"Invalid Razorpay signature for payment {payment_id}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid payment signature"
             )
         
-        # CRITICAL SECURITY VALIDATION: Verify order belongs to authenticated user
-        # Fetch order data from Redis to validate ownership
+        # STEP 2: Fetch order from Redis and validate ownership
         from app.store.redis_client import redis_client
         order_key = f"PAYMENT_ORDER:{order_id}"
         order_data_str = redis_client.get(order_key)
@@ -503,11 +554,11 @@ def verify_payment(
                 detail="Invalid order data. User ID missing."
             )
         
-        # Validate order ownership: Redis order user_id must match authenticated user
+        # CRITICAL: Validate order ownership - Redis order user_id MUST match JWT-authenticated user
         try:
             redis_user_id = int(redis_user_id_str)
-            if redis_user_id != user.id:
-                logger.warning(f"Order ownership mismatch: order user_id={redis_user_id}, authenticated user_id={user.id}")
+            if redis_user_id != current_user.id:
+                logger.error(f"SECURITY VIOLATION: Order ownership mismatch - order user_id={redis_user_id}, JWT authenticated user_id={current_user.id}")
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Order does not belong to this user"
@@ -519,25 +570,19 @@ def verify_payment(
                 detail="Invalid order data format"
             )
         
-        # Validate user exists in database before processing payment
-        from app.models import User
-        db_user = db.query(User).filter(User.id == user.id).first()
-        if not db_user:
-            logger.error(f"User {user.id} not found in database during payment verification")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found. Payment cannot be processed."
-            )
-        
-        # Process payment (user.id is integer)
-        # Customer details will be captured in process_payment_success from user record
-        result = process_payment_success(db, order_id, payment_id, signature, user.id)
+        # STEP 3: Process payment using JWT-authenticated user_id
+        # CRITICAL: current_user.id is the ONLY source of truth
+        result = process_payment_success(db, order_id, payment_id, signature, current_user.id)
         
         if not result['success']:
+            logger.error(f"Payment processing failed: {result['message']}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result['message']
             )
+        
+        # STEP 4: Return success response
+        logger.info(f"Payment verified successfully: user_id={current_user.id}, payment_id={payment_id}, credits_added={result['credits_added']}")
         
         return {
             "success": True,
