@@ -140,16 +140,16 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         amount_paise = int(total_amount * 100)  # Convert to paise (Razorpay requires integer)
         
         # Create Razorpay order using exact format as specified
-        # CRITICAL: Receipt must be <= 40 characters (Razorpay requirement)
+        # CRITICAL: Receipt must be <= 40 characters (Razorpay hard limit)
+        safe_receipt = f"cr{user_id}{int(time.time())}"[:40]
+        
         order = client.order.create({
             "amount": amount_paise,
             "currency": "INR",
-            "receipt": f"cr_{user_id}_{int(time.time())}",  # <= 40 chars (Razorpay compliant)
+            "receipt": safe_receipt,
             "notes": {
-                "user_id": str(user_id),
-                "plan_id": plan_id,
-                "credits": plan["credits"],
-                "plan_name": plan["name"]
+                "uid": str(user_id),
+                "pid": plan_id
             }
         })
         
