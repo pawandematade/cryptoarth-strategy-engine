@@ -409,6 +409,7 @@ def process_payment_success(
             }
         
         # Create payment transaction record with customer details
+        # CRITICAL: This MUST be saved to DB before returning success
         payment_txn = PaymentTransaction(
             user_id=user_id,
             provider='razorpay',
@@ -422,7 +423,43 @@ def process_payment_success(
             customer_mobile=customer_mobile
         )
         db.add(payment_txn)
-        db.commit()
+        
+        # CRITICAL: Flush to catch any constraint violations before commit
+        try:
+            db.flush()
+        except Exception as flush_error:
+            logger.error(f"Error flushing PaymentTransaction to DB: {flush_error}", exc_info=True)
+            db.rollback()
+            return {
+                'success': False,
+                'user_id': user_id,
+                'credits_added': 0,
+                'message': f'Failed to save payment transaction: {str(flush_error)}'
+            }
+        
+        # CRITICAL: Commit payment transaction - this MUST succeed
+        try:
+            db.commit()
+            logger.info(f"PaymentTransaction saved: payment_id={payment_id}, user_id={user_id}, amount={total_amount}, credits={credits}")
+        except Exception as commit_error:
+            logger.error(f"CRITICAL: Failed to commit PaymentTransaction to DB: {commit_error}", exc_info=True)
+            db.rollback()
+            return {
+                'success': False,
+                'user_id': user_id,
+                'credits_added': 0,
+                'message': f'Failed to save payment transaction: {str(commit_error)}'
+            }
+        
+        # Verify payment transaction was saved (refresh to get ID)
+        try:
+            db.refresh(payment_txn)
+            if not payment_txn.id:
+                logger.error(f"CRITICAL: PaymentTransaction committed but ID is None. payment_id={payment_id}")
+                # Don't fail payment if ID is missing, but log the issue
+        except Exception as refresh_error:
+            logger.warning(f"Could not refresh PaymentTransaction after commit: {refresh_error}")
+            # Don't fail payment if refresh fails
         
         # Update order status in Redis
         order_data['status'] = 'completed'
