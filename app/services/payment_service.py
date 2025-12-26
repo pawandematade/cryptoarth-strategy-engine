@@ -141,23 +141,16 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         
         # Create Razorpay order using exact format as specified
         # CRITICAL: Receipt must be <= 40 characters (Razorpay hard limit)
-        safe_receipt = f"cr{user_id}{int(time.time())}"[:40]
+        # ENSURE receipt is ALWAYS <= 40 characters (EXACT CODE - DO NOT MODIFY)
+        safe_receipt = f"cr{user_id}{int(time.time())}"
+        safe_receipt = safe_receipt[:40]
         
-        # Runtime verification: Log receipt before order creation
-        logger.error(f"RAZORPAY RECEIPT => {safe_receipt} | LEN={len(safe_receipt)}")
-        
-        # Verify receipt length is within limit
-        if len(safe_receipt) > 40:
-            logger.error(f"❌ CRITICAL: Receipt length {len(safe_receipt)} exceeds 40 chars! Receipt: {safe_receipt}")
-            return {
-                'success': False,
-                'order_id': None,
-                'amount': 0,
-                'currency': 'INR',
-                'key_id': None,
-                'credits': 0,
-                'message': 'Internal error: Receipt validation failed. Please contact support.'
-            }
+        # Runtime verification: Log receipt before order creation (EXACT FORMAT)
+        logger.error(
+            "RAZORPAY RECEIPT => %s | LEN=%d",
+            safe_receipt,
+            len(safe_receipt)
+        )
         
         order = client.order.create({
             "amount": amount_paise,
