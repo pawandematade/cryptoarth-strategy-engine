@@ -480,7 +480,57 @@ def verify_payment(
                 detail="Invalid payment signature"
             )
         
+        # CRITICAL SECURITY VALIDATION: Verify order belongs to authenticated user
+        # Fetch order data from Redis to validate ownership
+        from app.store.redis_client import redis_client
+        order_key = f"PAYMENT_ORDER:{order_id}"
+        order_data_str = redis_client.get(order_key)
+        
+        if not order_data_str:
+            logger.error(f"Order {order_id} not found in Redis during verification")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found. Payment may have expired."
+            )
+        
+        order_data = json.loads(order_data_str)
+        redis_user_id_str = order_data.get('user_id')
+        
+        if not redis_user_id_str:
+            logger.error(f"User ID not found in order {order_id} data")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid order data. User ID missing."
+            )
+        
+        # Validate order ownership: Redis order user_id must match authenticated user
+        try:
+            redis_user_id = int(redis_user_id_str)
+            if redis_user_id != user.id:
+                logger.warning(f"Order ownership mismatch: order user_id={redis_user_id}, authenticated user_id={user.id}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Order does not belong to this user"
+                )
+        except ValueError:
+            logger.error(f"Invalid user_id format in order data: {redis_user_id_str}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid order data format"
+            )
+        
+        # Validate user exists in database before processing payment
+        from app.models import User
+        db_user = db.query(User).filter(User.id == user.id).first()
+        if not db_user:
+            logger.error(f"User {user.id} not found in database during payment verification")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found. Payment cannot be processed."
+            )
+        
         # Process payment (user.id is integer)
+        # Customer details will be captured in process_payment_success from user record
         result = process_payment_success(db, order_id, payment_id, signature, user.id)
         
         if not result['success']:

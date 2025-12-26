@@ -510,6 +510,9 @@ class PaymentTransaction(Base):
     status = Column(Enum('created', 'success', 'failed', name='payment_status'), default='created', nullable=False, index=True)
     gateway_order_id = Column(String(100), nullable=True, index=True, comment="Razorpay order ID")
     gateway_payment_id = Column(String(100), nullable=True, index=True, comment="Razorpay payment ID")
+    customer_name = Column(String(200), nullable=True, comment="Customer name snapshot at payment time")
+    customer_email = Column(String(255), nullable=True, comment="Customer email snapshot at payment time")
+    customer_mobile = Column(String(20), nullable=True, comment="Customer mobile snapshot at payment time")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     # Relationships

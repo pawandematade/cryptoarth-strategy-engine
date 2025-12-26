@@ -143,21 +143,19 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         
         # Create Razorpay order using exact format as specified
         # CRITICAL: Receipt must be <= 40 characters (Razorpay hard limit)
-        # ENSURE receipt is ALWAYS <= 40 characters (EXACT CODE - DO NOT MODIFY)
-        safe_receipt = f"cr{user_id}{int(time.time())}"
-        safe_receipt = safe_receipt[:40]
+        receipt = f"cr{user_id}{int(time.time())}"[:40]
         
-        # Runtime verification: Log receipt before order creation (EXACT FORMAT)
+        # Runtime verification: Log receipt before order creation
         logger.error(
             "RAZORPAY RECEIPT => %s | LEN=%d",
-            safe_receipt,
-            len(safe_receipt)
+            receipt,
+            len(receipt)
         )
         
         order = client.order.create({
             "amount": amount_paise,
             "currency": "INR",
-            "receipt": safe_receipt,
+            "receipt": receipt,
             "notes": {
                 "uid": str(user_id),
                 "pid": plan_id
@@ -361,9 +359,33 @@ def process_payment_success(
             reference_id=payment_id
         )
         
+        # Get user details for customer snapshot (before creating payment transaction)
+        from app.models import User
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        # CRITICAL: Validate user exists before saving payment
+        if not user:
+            logger.error(f"User {user_id} not found when processing payment {payment_id}")
+            return {
+                'success': False,
+                'user_id': user_id,
+                'credits_added': 0,
+                'message': 'User not found. Payment cannot be processed.'
+            }
+        
+        # Capture customer details snapshot from user record
+        customer_name = None
+        if user.first_name or user.last_name:
+            customer_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        elif user.username:
+            customer_name = user.username
+        
+        customer_email = user.email
+        customer_mobile = user.phone
+        
         if not success:
             logger.error(f"Failed to add credits to user {user_id}: {error_msg}")
-            # Create failed payment transaction
+            # Create failed payment transaction with customer details
             payment_txn = PaymentTransaction(
                 user_id=user_id,
                 provider='razorpay',
@@ -371,7 +393,10 @@ def process_payment_success(
                 credits_added=0,
                 status='failed',
                 gateway_order_id=order_id,
-                gateway_payment_id=payment_id
+                gateway_payment_id=payment_id,
+                customer_name=customer_name,
+                customer_email=customer_email,
+                customer_mobile=customer_mobile
             )
             db.add(payment_txn)
             db.commit()
@@ -383,7 +408,7 @@ def process_payment_success(
                 'message': f"Failed to add credits: {error_msg}"
             }
         
-        # Create payment transaction record
+        # Create payment transaction record with customer details
         payment_txn = PaymentTransaction(
             user_id=user_id,
             provider='razorpay',
@@ -391,7 +416,10 @@ def process_payment_success(
             credits_added=credits,
             status='success',
             gateway_order_id=order_id,
-            gateway_payment_id=payment_id
+            gateway_payment_id=payment_id,
+            customer_name=customer_name,
+            customer_email=customer_email,
+            customer_mobile=customer_mobile
         )
         db.add(payment_txn)
         db.commit()
@@ -411,10 +439,6 @@ def process_payment_success(
         from app.services.credit_service import get_user_credits
         user_credits = get_user_credits(db, user_id)
         credits_remaining = user_credits.available_credits if user_credits else 0
-        
-        # Get user details for invoice email
-        from app.models import User
-        user = db.query(User).filter(User.id == user_id).first()
         
         # Send invoice email (idempotent - only if email not sent before)
         # Check if invoice email was already sent by checking a flag in payment_txn
