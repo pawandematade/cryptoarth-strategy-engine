@@ -62,26 +62,34 @@ def initialize_razorpay():
         from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
         
         # CRITICAL: Only LIVE keys are allowed
-        if not RAZORPAY_KEY_ID or not RAZORPAY_KEY_SECRET:
-            logger.error("Razorpay LIVE keys not configured. Payment features will be disabled.")
+        if not RAZORPAY_KEY_ID:
+            logger.error("❌ Razorpay KEY_ID not configured. Set RAZORPAY_KEY_ID environment variable.")
+            return False
+        
+        if not RAZORPAY_KEY_SECRET:
+            logger.error("❌ Razorpay KEY_SECRET not configured. Set RAZORPAY_KEY_SECRET environment variable.")
             return False
         
         # Validate keys are LIVE (must start with rzp_live_)
         if not RAZORPAY_KEY_ID.startswith('rzp_live_'):
-            logger.error(f"Razorpay key must be LIVE key (starting with rzp_live_). Provided: {RAZORPAY_KEY_ID[:10]}...")
+            logger.error(f"❌ Razorpay key must be LIVE key (starting with rzp_live_). Current key starts with: {RAZORPAY_KEY_ID[:10]}...")
+            logger.error(f"   Please set RAZORPAY_KEY_ID=rzp_live_IVB2IdJP4ipwcz in production environment")
             return False
         
         try:
             import razorpay
             razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-            logger.info("Razorpay LIVE client initialized successfully")
+            logger.info(f"✅ Razorpay LIVE client initialized successfully (Key ID: {RAZORPAY_KEY_ID[:15]}...)")
             return True
         except ImportError:
-            logger.error("Razorpay Python SDK not installed. Install with: pip install razorpay")
+            logger.error("❌ Razorpay Python SDK not installed. Install with: pip install razorpay")
+            return False
+        except Exception as init_error:
+            logger.error(f"❌ Failed to initialize Razorpay client: {init_error}", exc_info=True)
             return False
             
     except Exception as e:
-        logger.error(f"Error initializing Razorpay: {e}", exc_info=True)
+        logger.error(f"❌ Error initializing Razorpay: {e}", exc_info=True)
         return False
 
 
@@ -107,7 +115,16 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
     try:
         # Check if Razorpay is initialized
         if not razorpay_client:
-            if not initialize_razorpay():
+            init_success = initialize_razorpay()
+            if not init_success:
+                # Log detailed error for debugging
+                from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+                key_id_set = bool(RAZORPAY_KEY_ID)
+                key_secret_set = bool(RAZORPAY_KEY_SECRET)
+                key_id_valid = key_id_set and RAZORPAY_KEY_ID.startswith('rzp_live_')
+                
+                logger.error(f"❌ Razorpay initialization failed. KEY_ID set: {key_id_set}, KEY_SECRET set: {key_secret_set}, KEY_ID valid (rzp_live_): {key_id_valid}")
+                
                 return {
                     'success': False,
                     'order_id': None,

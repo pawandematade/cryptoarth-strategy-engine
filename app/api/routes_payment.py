@@ -9,6 +9,7 @@ import logging
 import json
 import hmac
 import hashlib
+import requests
 from app.services.payment_service import (
     create_razorpay_order,
     process_payment_success,
@@ -34,6 +35,63 @@ class WebhookRequest(BaseModel):
     """Request model for Razorpay webhook"""
     event: str = Field(..., description="Webhook event type")
     payload: Dict[str, Any] = Field(..., description="Webhook payload")
+
+
+@router.get("/payment/status")
+def get_payment_status():
+    """
+    Check Razorpay payment gateway configuration status (for debugging)
+    Returns configuration status without sensitive data.
+    
+    Returns:
+        dict: Configuration status
+    """
+    try:
+        from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+        from app.services.payment_service import razorpay_client
+        
+        key_id_set = bool(RAZORPAY_KEY_ID)
+        key_secret_set = bool(RAZORPAY_KEY_SECRET)
+        key_id_valid = key_id_set and RAZORPAY_KEY_ID.startswith('rzp_live_')
+        razorpay_initialized = razorpay_client is not None
+        
+        # Check if Razorpay SDK is installed
+        try:
+            import razorpay
+            sdk_installed = True
+        except ImportError:
+            sdk_installed = False
+        
+        status_message = "configured"
+        if not key_id_set:
+            status_message = "KEY_ID not set"
+        elif not key_secret_set:
+            status_message = "KEY_SECRET not set"
+        elif not key_id_valid:
+            status_message = f"Invalid key format (must start with rzp_live_, got: {RAZORPAY_KEY_ID[:10]}...)"
+        elif not sdk_installed:
+            status_message = "Razorpay SDK not installed"
+        elif not razorpay_initialized:
+            status_message = "Client initialization failed"
+        
+        return {
+            "success": razorpay_initialized,
+            "configured": razorpay_initialized,
+            "status": status_message,
+            "key_id_set": key_id_set,
+            "key_secret_set": key_secret_set,
+            "key_id_valid": key_id_valid,
+            "sdk_installed": sdk_installed,
+            "client_initialized": razorpay_initialized
+        }
+    except Exception as e:
+        logger.error(f"Error checking payment status: {e}", exc_info=True)
+        return {
+            "success": False,
+            "configured": False,
+            "status": f"Error checking status: {str(e)}",
+            "error": str(e)
+        }
 
 
 @router.get("/payment/plans")
@@ -89,11 +147,56 @@ def create_order(
             )
         
         # Sync user and get local user ID
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-        if not user:
+        try:
+            user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+            if not user:
+                logger.warning("get_or_sync_user returned None")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to authenticate user"
+                )
+        except requests.exceptions.HTTPError as e:
+            # HTTP error from auth backend (401, 403, 404, 500, etc.)
+            status_code = e.response.status_code if e.response else 500
+            logger.warning(f"Auth backend returned HTTP {status_code}: {e}")
+            if status_code == 401 or status_code == 403:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired authorization token. Please login again."
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication service error. Please try again later."
+                )
+        except requests.exceptions.RequestException as e:
+            # Network/connection errors (not HTTP errors)
+            logger.error(f"Auth backend unavailable when syncing user: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service unavailable. Please try again later."
+            )
+        except ValueError as e:
+            # Invalid token or user not found
+            error_msg = str(e)
+            logger.warning(f"User authentication failed: {error_msg}")
+            # Provide user-friendly error message
+            if "Authorization header required" in error_msg:
+                detail_msg = "Authorization header required. Please login again."
+            elif "Could not extract user ID" in error_msg or "user not found" in error_msg.lower():
+                detail_msg = "Invalid or expired authorization token. Please login again."
+            else:
+                detail_msg = f"Authentication failed: {error_msg}"
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to authenticate user"
+                detail=detail_msg
+            )
+        except Exception as auth_error:
+            # Catch any other authentication-related errors
+            logger.error(f"Unexpected authentication error: {auth_error}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed. Please login again."
             )
         
         # Validate plan_id
@@ -131,7 +234,7 @@ def create_order(
         logger.error(f"Error creating payment order: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Error creating payment order: {str(e)}"
         )
 
 

@@ -45,16 +45,25 @@ def fetch_user_from_auth_backend(authorization: Optional[str] = None) -> Dict[st
     logger.info(f"AUTH API HIT → {url}")
     
     # Call auth backend user API
-    response = requests.get(
-        url,
-        headers=headers,
-        timeout=5
-    )
-    
-    # FAIL FAST: Raise exception if auth backend unavailable
-    response.raise_for_status()
-    
-    if response.status_code == 200:
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=5
+        )
+        
+        # Check status code explicitly before calling raise_for_status
+        if response.status_code == 401:
+            logger.warning(f"Auth backend returned 401 Unauthorized for user API call")
+            raise ValueError("Invalid or expired authorization token")
+        elif response.status_code == 403:
+            logger.warning(f"Auth backend returned 403 Forbidden for user API call")
+            raise ValueError("Access forbidden - invalid authorization token")
+        elif response.status_code != 200:
+            logger.error(f"Auth backend returned unexpected status {response.status_code}: {response.text}")
+            raise ValueError(f"Authentication failed: Auth backend returned status {response.status_code}")
+        
+        # Parse response
         data = response.json()
         # Adjust based on your auth backend response structure
         # Common formats: {"user": {...}} or {"data": {...}} or direct user object
@@ -63,8 +72,17 @@ def fetch_user_from_auth_backend(authorization: Optional[str] = None) -> Dict[st
             return user_data
         else:
             raise ValueError(f"Invalid user data format from auth backend: {type(user_data)}")
-    else:
-        raise ValueError(f"Unexpected response from auth backend: {response.status_code} - {response.text}")
+            
+    except requests.exceptions.Timeout:
+        logger.error(f"Auth backend request timeout: {url}")
+        raise requests.exceptions.RequestException("Auth backend request timeout")
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Auth backend connection error: {url}")
+        raise requests.exceptions.RequestException("Auth backend connection error")
+    except requests.exceptions.RequestException as e:
+        # Re-raise RequestException as-is (will be caught by caller)
+        logger.error(f"Auth backend request error: {e}")
+        raise
 
 
 def sync_user_to_local_db(
