@@ -194,6 +194,7 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         }
         
         # Create order using fresh client
+        logger.error("USING FRESH RAZORPAY CLIENT")  # TEMP: Verify new code is running
         order = client.order.create(order_data)
         
         if not order or 'id' not in order:
