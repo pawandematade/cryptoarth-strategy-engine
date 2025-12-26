@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# Razorpay client (will be initialized if keys are available)
+# DEPRECATED: Global razorpay_client is no longer used.
+# Each request creates a fresh client to prevent stale credential reuse.
+# Keeping variable for backward compatibility with status endpoint only.
 razorpay_client = None
 
 # Credit packages/plans
@@ -526,9 +528,7 @@ def get_credit_plans() -> Dict[str, Any]:
     }
 
 
-# Initialize Razorpay on module load
-try:
-    initialize_razorpay()
-except Exception as e:
-    logger.warning(f"Could not initialize Razorpay on module load: {e}")
+# DEPRECATED: Module-level Razorpay initialization removed.
+# Each request now creates a fresh client to prevent stale credential reuse.
+# No initialization needed on module load.
 

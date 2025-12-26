@@ -47,13 +47,14 @@ def get_payment_status():
         dict: Configuration status
     """
     try:
+        # Check if Razorpay keys are configured (no global client check)
         from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
-        from app.services.payment_service import razorpay_client
         
         key_id_set = bool(RAZORPAY_KEY_ID)
         key_secret_set = bool(RAZORPAY_KEY_SECRET)
         key_id_valid = key_id_set and RAZORPAY_KEY_ID.startswith('rzp_live_')
-        razorpay_initialized = razorpay_client is not None
+        # Check if keys are configured (fresh client created per request)
+        razorpay_initialized = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and RAZORPAY_KEY_ID.startswith('rzp_live_'))
         
         # Check if Razorpay SDK is installed
         try:
