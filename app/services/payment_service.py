@@ -10,6 +10,7 @@ import time
 import os
 from datetime import datetime
 from typing import Dict, Optional, Any
+from fastapi import HTTPException
 from app.store.redis_client import redis_client
 from app.services.credit_service import get_rupee_to_credit_ratio
 from app.models import PaymentTransaction
@@ -413,7 +414,10 @@ def process_payment_success(
             logger.error(
                 f"❌ INVALID AMOUNT BLOCKED: amount={amount} payment_id={payment_id}"
             )
-            raise ValueError("Invalid payment amount")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid payment amount"
+            )
         
         # STEP 2: Calculate credits from plan metadata (NOT from amount)
         credits_added = 0
@@ -526,17 +530,20 @@ def process_payment_success(
             "message": "Credits added successfully"
         }
         
-    except Exception as e:
-        # CRITICAL: On ANY exception, rollback and return error (do NOT return success)
-        logger.error(f"❌ EXCEPTION IN PAYMENT PROCESS: user_id={user_id}, error={e}", exc_info=True)
+    except HTTPException:
         db.rollback()
-        logger.error(f"❌ TRANSACTION ROLLED BACK: user_id={user_id}")
-        return {
-            'success': False,
-            'user_id': user_id,
-            'credits_added': 0,
-            'message': f'Error processing payment: {str(e)}'
-        }
+        raise
+
+    except Exception as e:
+        logger.error(
+            f"❌ EXCEPTION IN PAYMENT PROCESS: user_id={user_id}, error={e}",
+            exc_info=True
+        )
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Internal payment processing error"
+        )
 
 
 def get_credit_plans() -> Dict[str, Any]:
