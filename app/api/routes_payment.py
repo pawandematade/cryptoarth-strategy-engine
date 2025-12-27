@@ -44,12 +44,12 @@ def verify_payment(
 
     try:
         return process_payment_success(
-            db=db,
-            order_id=order_id,
-            payment_id=payment_id,
-            signature=signature,
-            user_id=user.id,
-            amount=amount,
+            db,
+            order_id,
+            payment_id,
+            signature,
+            user.id,
+            amount
         )
 
     except HTTPException:
