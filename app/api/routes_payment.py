@@ -1,36 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Optional
-import inspect
 
 from app.database import get_db
-from app.services import payment_service
+from app.services.payment_service import process_payment_success
 from app.services.user_sync_service import get_or_sync_user
 from app.models import User
 
-# Import function
-process_payment_success = payment_service.process_payment_success
-
-# Lazy signature validation (only logs warning, doesn't crash on import)
-def _validate_signature():
-    """Validate function signature and log warning if mismatch"""
-    try:
-        sig = inspect.signature(process_payment_success)
-        expected_params = ['db', 'order_id', 'payment_id', 'signature', 'user_id', 'amount']
-        actual_params = list(sig.parameters.keys())
-        if actual_params != expected_params:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                f"⚠️ Function signature mismatch! Expected {expected_params}, got {actual_params}. "
-                f"Please restart the server and clear Python cache."
-            )
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Could not validate function signature: {e}")
-
-router = APIRouter(prefix="/payment", tags=["Payment"])
+router = APIRouter(tags=["Payment"])
 
 
 def get_current_user(
@@ -48,7 +25,7 @@ def get_current_user(
     return user
 
 
-@router.post("/verify")
+@router.post("/payment/verify")
 def verify_payment(
     payload: dict,
     db: Session = Depends(get_db),
@@ -66,9 +43,6 @@ def verify_payment(
         )
 
     try:
-        # Validate signature on first call (lazy validation)
-        _validate_signature()
-        
         # CRITICAL: Call with positional arguments only (no keyword args)
         # Function signature: process_payment_success(db, order_id, payment_id, signature, user_id, amount)
         # Using tuple unpacking to ensure positional-only call

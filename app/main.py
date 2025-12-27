@@ -173,7 +173,7 @@ app.include_router(strategy_list_router, prefix="/auth", tags=["Strategy List"])
 app.include_router(strategy_run_router, prefix="/auth", tags=["Strategy Run"])  # Strategy run creation - /auth/strategy-runs/live, /auth/strategy-runs/stop
 app.include_router(paper_trades_router, prefix="", tags=["Paper Trades"])  # Paper trades & PDF export
 app.include_router(credits_router, prefix="/auth")  # Credits management
-app.include_router(payment_router, prefix="/auth")  # Payment gateway (Razorpay)
+app.include_router(payment_router, prefix="")  # Payment gateway (Razorpay) - routes are at /payment/*
 # CRITICAL: WebSocket for live prices is PUBLIC - no authentication required
 # Live market prices do not require user authentication
 app.include_router(websocket_router, prefix="")  # WebSocket for live prices (public endpoint)
