@@ -8,10 +8,7 @@ import time
 import threading
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from app.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
-from app.database import get_db
+from app.database import SessionLocal
 from app.models import StrategyExecution, ExecutionStatus
 from app.execution.execution_loop import ExecutionLoop
 from app.execution.execution_logger import (
@@ -51,15 +48,9 @@ class ExecutionManager:
         self.active_loops: Dict[int, ExecutionLoop] = {}
         self.lock = threading.Lock()
         
-        # Create database engine and session factory
-        # Handle empty password for XAMPP (local development)
-        if DB_PASSWORD:
-            db_url = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
-        else:
-            # Empty password - XAMPP default
-            db_url = f"mysql+pymysql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
-        self.db_engine = create_engine(db_url, pool_pre_ping=True)
-        self.SessionLocal = sessionmaker(bind=self.db_engine)
+        # CRITICAL: Use centralized database session from app.database
+        # This ensures DATABASE_URL is used as single source of truth
+        # DO NOT create separate engine or sessionmaker
     
     def start(self):
         """Start execution manager"""
@@ -109,8 +100,8 @@ class ExecutionManager:
         try:
             while not self.should_stop:
                 try:
-                    # Create new DB session for polling
-                    db = self.SessionLocal()
+                    # Create new DB session for polling using centralized SessionLocal
+                    db = SessionLocal()
                     try:
                         self._sync_executions(db)
                     finally:
@@ -154,7 +145,7 @@ class ExecutionManager:
                             )
                             
                             loop = ExecutionLoop(
-                                db_session_factory=self.SessionLocal,
+                                db_session_factory=SessionLocal,
                                 execution=execution,
                                 tick_interval_seconds=self.tick_interval_seconds
                             )

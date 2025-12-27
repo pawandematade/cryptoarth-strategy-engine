@@ -8,8 +8,6 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy import create_engine
-from app.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 from app.models import StrategyExecution, ExecutionStatus
 from app.execution.strategy_loader import load_strategy_for_execution
 from app.execution.decision_engine import evaluate_strategy
