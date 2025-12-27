@@ -482,42 +482,59 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
                 logger.error(f"Missing payment_id or order_id in webhook event {event}: {payload}")
                 return {"success": False, "message": "Missing payment_id or order_id"}
             
-            # Get payment signature for additional verification
+            # Get payment amount from webhook (convert from paise to INR)
+            payment_amount = None
+            if payment_entity and 'amount' in payment_entity:
+                payment_amount = float(payment_entity['amount']) / 100  # Convert from paise to INR
+                logger.info(f"Extracted payment amount from webhook: {payment_amount} INR")
+            
+            # Get payment signature for additional verification (bypassed in process_payment_success)
             payment_signature = payment_entity.get('signature', '') if payment_entity else ''
             
-            # Extract user_id from order notes (stored in Redis)
+            # Extract user_id from order notes (stored in Redis) - try Redis first, but don't fail if missing
             from app.store.redis_client import redis_client
+            user = None
             order_data_str = redis_client.get(f"PAYMENT_ORDER:{order_id}")
-            if not order_data_str:
-                logger.error(f"Order {order_id} not found in Redis")
-                return {"success": False, "message": "Order not found"}
+            if order_data_str:
+                try:
+                    order_data = json.loads(order_data_str)
+                    user_id_str = order_data.get('user_id')
+                    
+                    if user_id_str:
+                        # Get user from database (user_id in Redis is external_user_id as string)
+                        from app.models import User
+                        try:
+                            external_user_id = int(user_id_str)
+                            user = db.query(User).filter(User.external_user_id == external_user_id).first()
+                        except ValueError:
+                            logger.warning(f"Invalid user_id format in Redis order: {user_id_str}")
+                except Exception as redis_parse_error:
+                    logger.warning(f"Failed to parse Redis order data: {redis_parse_error}")
             
-            order_data = json.loads(order_data_str)
-            user_id_str = order_data.get('user_id')
-            
-            if not user_id_str:
-                logger.error(f"User ID not found in order {order_id}")
-                return {"success": False, "message": "User ID not found in order"}
-            
-            # Get user from database (user_id in Redis is external_user_id as string)
-            from app.models import User
-            try:
-                external_user_id = int(user_id_str)
-                user = db.query(User).filter(User.external_user_id == external_user_id).first()
-                if not user:
-                    logger.error(f"User not found for external_user_id={external_user_id}")
-                    return {"success": False, "message": "User not found"}
-            except ValueError:
-                logger.error(f"Invalid user_id format in order: {user_id_str}")
-                return {"success": False, "message": "Invalid user ID format"}
+            # If user not found from Redis, try to get from order notes (Razorpay)
+            if not user:
+                try:
+                    # Try to extract user_id from Razorpay order notes
+                    from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+                    import razorpay
+                    client = razorpay.Client(auth=(RAZORPAY_KEY_ID.strip(), RAZORPAY_KEY_SECRET.strip()))
+                    razorpay_order = client.order.fetch(order_id)
+                    if razorpay_order and 'notes' in razorpay_order:
+                        uid_str = razorpay_order['notes'].get('uid')
+                        if uid_str:
+                            from app.models import User
+                            external_user_id = int(uid_str)
+                            user = db.query(User).filter(User.external_user_id == external_user_id).first()
+                except Exception as razorpay_fetch_error:
+                    logger.warning(f"Failed to fetch user from Razorpay order: {razorpay_fetch_error}")
             
             # Safety guard: Validate user before processing payment
             if not user or user.id <= 0:
                 logger.error("Invalid user resolved from webhook order")
                 return {"success": False, "message": "Invalid user"}
             
-            # Process payment (will verify payment signature internally)
-            result = process_payment_success(db, order_id, payment_id, payment_signature, user.id)
+            # Process payment (signature validation bypassed, Redis dependency removed)
+            result = process_payment_success(db, order_id, payment_id, payment_signature, user.id, amount=payment_amount)
             
             if not result['success']:
                 logger.error(f"Failed to process payment: {result['message']}")
