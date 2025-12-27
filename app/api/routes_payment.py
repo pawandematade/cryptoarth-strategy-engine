@@ -111,6 +111,49 @@ class VerifyPaymentRequest(BaseModel):
     amount: float = Field(..., description="Payment amount in INR")
 
 
+@router.get("/payment/debug")
+def get_payment_debug():
+    """
+    CRITICAL: Diagnostic endpoint to verify which code is actually running.
+    Use this to confirm production is running the correct file.
+    
+    Returns:
+        dict: File paths, module info, and code version
+    """
+    import app.services.payment_service as payment_service_module
+    import inspect
+    
+    # Get actual file path from loaded module
+    payment_service_file = getattr(payment_service_module, '_PAYMENT_SERVICE_FILE', 'NOT LOADED')
+    payment_service_loaded = getattr(payment_service_module, '_PAYMENT_SERVICE_LOADED_AT', 'NOT LOADED')
+    
+    # Get source file path
+    try:
+        source_file = inspect.getfile(payment_service_module.create_razorpay_order)
+    except:
+        source_file = "UNKNOWN"
+    
+    # Check for temp_order_1 in source code (should be NONE)
+    temp_order_found = False
+    try:
+        with open(source_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            if 'temp_order_1' in content or 'TEMP MODE' in content:
+                temp_order_found = True
+    except:
+        pass
+    
+    return {
+        "payment_service_file": payment_service_file,
+        "payment_service_loaded_at": payment_service_loaded,
+        "source_file": source_file,
+        "routes_file": _PAYMENT_ROUTES_FILE,
+        "routes_loaded_at": _PAYMENT_ROUTES_LOADED_AT,
+        "temp_order_found_in_code": temp_order_found,
+        "code_version": "PRODUCTION_READY_NO_TEMP_MODE"
+    }
+
+
 @router.get("/payment/status")
 def get_payment_status():
     """
@@ -283,18 +326,42 @@ def create_order(
         
         plan_id = request.plan_id.strip().lower()
         
-        # Create Razorpay order (user.id is integer)
-        result = create_razorpay_order(plan_id, user.id)
-        
-        if not result['success']:
+        # CRITICAL: Create REAL Razorpay order - NO TEMP MODE, NO MOCK, NO FALLBACK
+        # This will raise exception if Razorpay fails - do NOT catch and return fake success
+        try:
+            result = create_razorpay_order(plan_id, user.id)
+        except (ValueError, RuntimeError) as razorpay_error:
+            # Razorpay validation or creation failed - return proper error
+            logger.error(f"Razorpay order creation failed: {razorpay_error}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result['message']
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create payment order: {str(razorpay_error)}"
             )
         
+        # HARD VALIDATION: Ensure result contains real Razorpay order_id
+        if not result or not result.get('success'):
+            error_msg = result.get('message', 'Failed to create payment order') if result else 'Failed to create payment order'
+            logger.error(f"Razorpay order creation returned failure: {error_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=error_msg
+            )
+        
+        order_id = result.get('order_id')
+        
+        # HARD ASSERT: order_id MUST be real Razorpay ID (starts with "order_")
+        if not order_id or not isinstance(order_id, str) or not order_id.startswith('order_'):
+            error_msg = f"Invalid Razorpay order_id received: {order_id}"
+            logger.error(f"❌ {error_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Payment gateway error. Please try again."
+            )
+        
+        # All validations passed - return real Razorpay order
         return {
             "success": True,
-            "order_id": result['order_id'],
+            "order_id": order_id,
             "amount": result['amount'],
             "currency": result['currency'],
             "key_id": result['key_id'],

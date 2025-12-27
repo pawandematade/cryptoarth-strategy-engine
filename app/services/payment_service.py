@@ -161,29 +161,53 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
             len(receipt)
         )
         
-        order = client.order.create({
-            "amount": amount_paise,
-            "currency": "INR",
-            "receipt": receipt,
-            "notes": {
-                "uid": str(user_id),
-                "pid": plan_id
-            }
-        })
+        # CRITICAL: Create REAL Razorpay order - NO TEMP MODE, NO MOCK, NO FALLBACK
+        # IMPORTANT: Razorpay order_id MUST always come from Razorpay API.
+        # Never generate, mock, or fallback order_id.
+        try:
+            order = client.order.create({
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": receipt,
+                "notes": {
+                    "uid": str(user_id),
+                    "pid": plan_id,
+                    "plan_name": plan['name']
+                }
+            })
+        except Exception as razorpay_error:
+            # Razorpay SDK raised exception - do NOT return fake success
+            error_msg = f"Razorpay API error: {str(razorpay_error)}"
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg) from razorpay_error
         
-        if not order or 'id' not in order:
-            logger.error(f"Failed to create Razorpay order: {order}")
-            return {
-                'success': False,
-                'order_id': None,
-                'amount': 0,
-                'currency': 'INR',
-                'key_id': None,
-                'credits': 0,
-                'message': 'Failed to create payment order. Please try again.'
-            }
+        # HARD VALIDATION: Ensure Razorpay returned a valid order
+        if not order:
+            error_msg = "Razorpay order creation returned None"
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        # Check for Razorpay error response (SDK may return error dict instead of raising)
+        if isinstance(order, dict) and 'error' in order:
+            error_msg = f"Razorpay API error: {order.get('error', {}).get('description', 'Unknown error')}"
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg)
+        
+        if 'id' not in order:
+            error_msg = f"Razorpay order missing 'id' field: {order}"
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
         
         order_id = order['id']
+        
+        # HARD ASSERT: order_id MUST start with "order_" (Razorpay format)
+        # This prevents ANY fake/mock/temp order_id from being returned
+        if not isinstance(order_id, str) or not order_id.startswith('order_'):
+            error_msg = f"Invalid Razorpay order_id format: {order_id}. Must start with 'order_'"
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info(f"✅ Razorpay order created successfully: {order_id}")
         
         # Store order details in Redis (for webhook verification)
         order_key = f"PAYMENT_ORDER:{order_id}"
@@ -222,17 +246,15 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
             'message': 'Order created successfully'
         }
         
+    except ValueError as e:
+        # Validation errors - re-raise as ValueError (do NOT return fake success)
+        logger.error(f"❌ Razorpay order validation failed: {e}", exc_info=True)
+        raise  # Re-raise to let caller handle
     except Exception as e:
-        logger.error(f"Error creating Razorpay order: {e}", exc_info=True)
-        return {
-            'success': False,
-            'order_id': None,
-            'amount': 0,
-            'currency': 'INR',
-            'key_id': None,
-            'credits': 0,
-            'message': f'Error creating payment order: {str(e)}'
-        }
+        # CRITICAL: On ANY exception, DO NOT return fake success or temp_order_1
+        # ALWAYS raise exception - let the API route handle error response
+        logger.error(f"❌ Error creating Razorpay order: {e}", exc_info=True)
+        raise RuntimeError(f"Failed to create Razorpay order: {str(e)}") from e
 
 
 def verify_razorpay_signature(order_id: str, payment_id: str, signature: str) -> bool:
