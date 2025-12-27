@@ -32,7 +32,7 @@ if not os.getenv("STRATEGY_ENGINE_BASE_URL"):
 
 # Frontend URL for CORS (using STRATEGY_ prefixed name)
 # Default to production frontend URL if not set
-STRATEGY_ENGINE_FRONTEND_URL = os.getenv("STRATEGY_ENGINE_FRONTEND_URL", "https://panel.cryptoarth.in")
+STRATEGY_ENGINE_FRONTEND_URL = os.getenv("STRATEGY_ENGINE_FRONTEND_URL", "https://trade-panel.cryptoarth.in")
 if not os.getenv("STRATEGY_ENGINE_FRONTEND_URL"):
     import logging
     logging.warning(f"STRATEGY_ENGINE_FRONTEND_URL not set in {env_file}, using default: {STRATEGY_ENGINE_FRONTEND_URL}")
