@@ -1,0 +1,18 @@
+[Unit]
+Description=CryptoArth Strategy Engine API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/cryptoarth-strategy-engine
+Environment="PATH=/var/www/cryptoarth-strategy-engine/venv/bin"
+EnvironmentFile=/var/www/cryptoarth-strategy-engine/.env.local
+ExecStart=/var/www/cryptoarth-strategy-engine/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
