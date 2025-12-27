@@ -24,14 +24,18 @@ IS_LOCAL = not IS_PRODUCTION
 STRATEGY_ENGINE_ENV = os.getenv("STRATEGY_ENGINE_ENV", APP_ENV)
 
 # API Configuration (using STRATEGY_ prefixed names)
-STRATEGY_ENGINE_BASE_URL = os.getenv("STRATEGY_ENGINE_BASE_URL")
-if not STRATEGY_ENGINE_BASE_URL:
-    raise ValueError(f"STRATEGY_ENGINE_BASE_URL must be set in {env_file}")
+# Default to production URL if not set (allows service to start)
+STRATEGY_ENGINE_BASE_URL = os.getenv("STRATEGY_ENGINE_BASE_URL", "https://aistrategy.cryptoarth.in")
+if not os.getenv("STRATEGY_ENGINE_BASE_URL"):
+    import logging
+    logging.warning(f"STRATEGY_ENGINE_BASE_URL not set in {env_file}, using default: {STRATEGY_ENGINE_BASE_URL}")
 
 # Frontend URL for CORS (using STRATEGY_ prefixed name)
-STRATEGY_ENGINE_FRONTEND_URL = os.getenv("STRATEGY_ENGINE_FRONTEND_URL")
-if not STRATEGY_ENGINE_FRONTEND_URL:
-    raise ValueError(f"STRATEGY_ENGINE_FRONTEND_URL must be set in {env_file}")
+# Default to production frontend URL if not set
+STRATEGY_ENGINE_FRONTEND_URL = os.getenv("STRATEGY_ENGINE_FRONTEND_URL", "https://panel.cryptoarth.in")
+if not os.getenv("STRATEGY_ENGINE_FRONTEND_URL"):
+    import logging
+    logging.warning(f"STRATEGY_ENGINE_FRONTEND_URL not set in {env_file}, using default: {STRATEGY_ENGINE_FRONTEND_URL}")
 
 # Backward compatibility aliases (for existing code)
 BASE_API_URL = STRATEGY_ENGINE_BASE_URL
