@@ -301,7 +301,6 @@ def verify_razorpay_signature(order_id: str, payment_id: str, signature: str) ->
 
 
 def process_payment_success(
-    *,
     db: Session,
     order_id: str,
     payment_id: str,
