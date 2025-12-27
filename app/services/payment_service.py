@@ -408,16 +408,6 @@ def process_payment_success(
             logger.error(f"⚠️ Amount missing or invalid for payment_id={payment_id}. Continuing without blocking DB update.")
             amount = amount or total_amount or 0
         
-        # HARD GUARD: Block invalid amounts (< ₹10 minimum)
-        if amount and amount < 10:
-            logger.error(
-                f"❌ INVALID AMOUNT BLOCKED: amount={amount} payment_id={payment_id}"
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid payment amount"
-            )
-        
         # STEP 2: Calculate credits from plan metadata (NOT from amount)
         credits_added = 0
         
