@@ -11,20 +11,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Construct database URL
-# Priority: 1) DATABASE_URL from .env, 2) Build from components
+# CRITICAL: SQLAlchemy ONLY reads DATABASE_URL from environment
+# DATABASE_URL is the single source of truth - no fallback logic
 import os
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    # Build DATABASE_URL from individual components
-    # Handle empty password for XAMPP (local development)
-    if DB_PASSWORD:
-        DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
-    else:
-        # Empty password - XAMPP default
-        DATABASE_URL = f"mysql+pymysql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
-else:
-    logger.info(f"Using DATABASE_URL from environment variable")
+    error_msg = (
+        "CRITICAL: DATABASE_URL environment variable is not set. "
+        "Please set DATABASE_URL in your .env file. "
+        "Format: mysql+pymysql://user:password@host:port/database"
+    )
+    logger.error(error_msg)
+    raise ValueError(error_msg)
+
+logger.info("Using DATABASE_URL from environment variable")
 
 # Create engine with safe configuration
 # TEMP: Enable SQL logging to debug insert issues
