@@ -58,3 +58,5 @@ strategies.json
 .coverage
 htmlcov/
 
+__pycache__/
+*.pyc
