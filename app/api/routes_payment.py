@@ -1,14 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Optional
+import inspect
 
 from app.database import get_db
 from app.services import payment_service
 from app.services.user_sync_service import get_or_sync_user
 from app.models import User
 
-# Import function directly to avoid any import caching issues
+# Import function and verify signature at runtime
 process_payment_success = payment_service.process_payment_success
+
+# Verify function signature matches expected parameters
+sig = inspect.signature(process_payment_success)
+expected_params = ['db', 'order_id', 'payment_id', 'signature', 'user_id', 'amount']
+actual_params = list(sig.parameters.keys())
+if actual_params != expected_params:
+    raise RuntimeError(
+        f"Function signature mismatch! Expected {expected_params}, got {actual_params}. "
+        f"Please restart the server and clear Python cache."
+    )
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
@@ -46,16 +57,11 @@ def verify_payment(
         )
 
     try:
-        # Call with positional arguments matching function signature:
-        # process_payment_success(db, order_id, payment_id, signature, user_id, amount)
-        result = process_payment_success(
-            db,              # Position 1: db: Session
-            order_id,        # Position 2: order_id: str
-            payment_id,      # Position 3: payment_id: str
-            signature,       # Position 4: signature: str
-            user.id,         # Position 5: user_id: int
-            amount           # Position 6: amount: Optional[float] = None
-        )
+        # CRITICAL: Call with positional arguments only (no keyword args)
+        # Function signature: process_payment_success(db, order_id, payment_id, signature, user_id, amount)
+        # Using tuple unpacking to ensure positional-only call
+        args = (db, order_id, payment_id, signature, user.id, amount)
+        result = process_payment_success(*args)
         return result
         
     except HTTPException:
