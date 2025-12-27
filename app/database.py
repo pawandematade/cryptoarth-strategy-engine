@@ -5,30 +5,21 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
-from app.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, APP_ENV
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # Construct database URL
 # CRITICAL: SQLAlchemy ONLY reads DATABASE_URL from environment
-# DATABASE_URL is the single source of truth - no fallback logic
-import os
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    error_msg = (
-        "CRITICAL: DATABASE_URL environment variable is not set. "
-        "Please set DATABASE_URL in your .env file. "
-        "Format: mysql+pymysql://user:password@host:port/database"
-    )
-    logger.error(error_msg)
-    raise ValueError(error_msg)
+# DATABASE_URL is the single source of truth - hard fail if missing
+# NO fallback logic, NO postgres, NO localhost defaults
+DATABASE_URL = os.environ["DATABASE_URL"]  # Hard fail if missing
 
 logger.info("Using DATABASE_URL from environment variable")
 
 # Create engine with safe configuration
-# TEMP: Enable SQL logging to debug insert issues
+# CRITICAL: Only ONE engine in entire project - uses DATABASE_URL directly
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,  # Verify connections before using
@@ -74,12 +65,10 @@ def test_db_connection() -> bool:
             # Simple query to test connection
             result = connection.execute(text("SELECT 1"))
             result.fetchone()
-            logger.info(f"✅ Database connection successful (APP_ENV={APP_ENV}, DB={DB_NAME})")
+            logger.info("✅ Database connection successful")
             return True
     except OperationalError as e:
         logger.error(f"❌ Database connection failed (OperationalError): {e}")
-        logger.warning(f"   Database: {DB_NAME} on {DB_HOST}:{DB_PORT}")
-        logger.warning(f"   User: {DB_USER}")
         return False
     except SQLAlchemyError as e:
         logger.error(f"❌ Database connection failed (SQLAlchemyError): {e}")
@@ -121,7 +110,7 @@ def init_db() -> bool:
         
         # Create all tables
         Base.metadata.create_all(bind=engine)
-        logger.info(f"✅ Database tables initialized successfully (DB={DB_NAME})")
+        logger.info("✅ Database tables initialized successfully")
         logger.info(f"   Created/verified {len(tables)} table(s): {', '.join(tables)}")
         return True
     except OperationalError as e:
