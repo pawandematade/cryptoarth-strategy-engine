@@ -31,30 +31,22 @@ def verify_payment(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    try:
-        order_id = payload.get("order_id")
-        payment_id = payload.get("payment_id")
-        signature = payload.get("signature", "")
-        amount = payload.get("amount")
+    order_id = payload.get("order_id")
+    payment_id = payload.get("payment_id")
+    signature = payload.get("signature", "")
+    amount = payload.get("amount")
 
-        if not order_id or not payment_id:
-            raise HTTPException(
-                status_code=400,
-                detail="order_id and payment_id are required"
-            )
-
-        result = process_payment_success(
-            db=db,
-            order_id=order_id,
-            payment_id=payment_id,
-            signature=signature,
-            user_id=user.id,
-            amount=amount,
+    if not order_id or not payment_id:
+        raise HTTPException(
+            status_code=400,
+            detail="order_id and payment_id are required"
         )
 
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return process_payment_success(
+        db=db,
+        order_id=order_id,
+        payment_id=payment_id,
+        signature=signature,
+        user_id=user.id,
+        amount=amount,
+    )
