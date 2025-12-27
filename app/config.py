@@ -2,18 +2,29 @@ import os
 from dotenv import load_dotenv
 
 # Load environment-specific .env file based on APP_ENV
-# First, check APP_ENV from environment (before loading .env files)
-APP_ENV = os.getenv("APP_ENV", "local").lower()  # local or production
+# CRITICAL: Check multiple sources for APP_ENV to ensure production is detected
+# Priority: 1) Environment variable, 2) .env.production file, 3) Default to local
+APP_ENV = os.getenv("APP_ENV", "").lower()
 
-# Load the appropriate .env file
+# Try to load .env.production first to check if it exists and has APP_ENV
+# This helps detect production environment even if APP_ENV env var is not set
+if not APP_ENV:
+    # Try loading production file first to check APP_ENV
+    load_dotenv(".env.production", override=False)
+    APP_ENV = os.getenv("APP_ENV", "").lower()
+
+# Determine which env file to use
 if APP_ENV == "production":
     env_file = ".env.production"
 else:
     env_file = ".env.local"
 
-# Load environment-specific file (with fallback to .env if specific file doesn't exist)
-load_dotenv(env_file, override=False)  # Don't override if already set
-load_dotenv(".env", override=False)  # Fallback to .env if exists
+# Load the appropriate .env file
+# CRITICAL: Use override=True to ensure env file values are loaded
+load_dotenv(env_file, override=True)
+
+# Also load .env as fallback (but don't override values already set)
+load_dotenv(".env", override=False)
 
 # Re-read APP_ENV after loading env files (in case it was set in the file)
 APP_ENV = os.getenv("APP_ENV", "local").lower()
@@ -85,12 +96,23 @@ STRATEGY_DB_NAME = os.getenv("STRATEGY_DB_NAME")
 # if not STRATEGY_DB_NAME:
 #     raise ValueError(f"STRATEGY_DB_NAME must be set in {env_file}")
 
-# Backward compatibility aliases (with defaults to prevent errors)
-DB_HOST = STRATEGY_DB_HOST or "127.0.0.1"
-DB_PORT = STRATEGY_DB_PORT
-DB_USER = STRATEGY_DB_USER or "root"
-DB_PASSWORD = STRATEGY_DB_PASSWORD
-DB_NAME = STRATEGY_DB_NAME or "tradearth_db_local"
+# Backward compatibility aliases
+# CRITICAL: Only use defaults for local development, not production
+# Production MUST have these set in .env.production
+if IS_PRODUCTION:
+    # Production: Use values from env or None (will fail gracefully if missing)
+    DB_HOST = STRATEGY_DB_HOST
+    DB_USER = STRATEGY_DB_USER
+    DB_NAME = STRATEGY_DB_NAME
+    DB_PASSWORD = STRATEGY_DB_PASSWORD
+    DB_PORT = STRATEGY_DB_PORT
+else:
+    # Local: Use defaults for development
+    DB_HOST = STRATEGY_DB_HOST or "127.0.0.1"
+    DB_USER = STRATEGY_DB_USER or "root"
+    DB_NAME = STRATEGY_DB_NAME or "tradearth_db_local"
+    DB_PASSWORD = STRATEGY_DB_PASSWORD
+    DB_PORT = STRATEGY_DB_PORT
 
 # Auth Backend Configuration
 # IMPORTANT: Auth backend is the source of truth for user data
