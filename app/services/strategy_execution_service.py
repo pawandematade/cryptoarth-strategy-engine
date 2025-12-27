@@ -199,6 +199,7 @@ def activate_strategy_execution(
         
         if execution:
             # Update existing execution record
+            execution.user_id = strategy.user_id  # CRITICAL: Ensure user_id is set
             execution.status = ExecutionStatus.active
             execution.activated_at = datetime.now(timezone.utc)
             execution.deactivated_at = None
@@ -208,6 +209,7 @@ def activate_strategy_execution(
             # MANDATORY: Explicitly set run_source - DO NOT rely on DB defaults
             execution = StrategyExecution(
                 strategy_id=strategy.id,
+                user_id=strategy.user_id,  # CRITICAL: Set user_id from strategy
                 strategy_version=version,
                 status=ExecutionStatus.active,
                 activated_at=datetime.now(timezone.utc),

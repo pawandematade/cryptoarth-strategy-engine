@@ -21,7 +21,7 @@ import logging
 
 from app.database import get_db
 from app.models import Strategy, StrategyVersion, StrategyExecution, User
-from app.services.user_sync_service import get_or_sync_user
+from app.api.user_dependencies import get_current_user_strict
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +79,8 @@ class StrategyRunsResponse(BaseModel):
 
 @router.get("/strategies", response_model=StrategyListResponse)
 def get_strategies(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_strict),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0)
 ):
@@ -91,8 +91,8 @@ def get_strategies(
     Used by Template tab to show strategy cards.
     
     Args:
-        authorization: Authorization header (Bearer token)
         db: Database session
+        user: Authenticated user (from JWT)
         limit: Maximum number of strategies to return
         offset: Number of strategies to skip
     
@@ -100,22 +100,25 @@ def get_strategies(
         StrategyListResponse with strategies list
     """
     try:
-        # Sync user from auth backend
-        if not authorization:
-            raise HTTPException(status_code=401, detail="Authorization header required")
+        # CRITICAL: JWT user.id is the ONLY source of truth
+        # Show ACTIVE and DRAFT strategies only (no admin logic, no created_by filter)
+        logger.error(f"JWT USER ID = {user.id}")
         
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-        if not user:
-            raise HTTPException(status_code=401, detail="Failed to authenticate user")
+        # Import StrategyStatus enum for proper filtering
+        from app.models import StrategyStatus
         
-        # CRITICAL: Get ALL strategies for this user (draft + active + paused + archived)
-        # NO status filtering - Template tab must show all strategies
-        strategies = db.query(Strategy).filter(
-            Strategy.user_id == user.id
-        ).order_by(desc(Strategy.updated_at)).offset(offset).limit(limit).all()
+        query = db.query(Strategy).filter(
+            Strategy.user_id == user.id,
+            Strategy.status.in_([StrategyStatus.ACTIVE, StrategyStatus.DRAFT])
+        )
         
-        # Get total count (all statuses)
-        total = db.query(Strategy).filter(Strategy.user_id == user.id).count()
+        # Debug: Log row count before pagination
+        row_count = query.count()
+        logger.error(f"ROW COUNT = {row_count}")
+        
+        strategies = query.order_by(desc(Strategy.updated_at)).offset(offset).limit(limit).all()
+        total = row_count
+        logger.info(f"[Templates] Found {len(strategies)} strategies (total={total}) for user_id={user.id}")
         
         # Build response
         strategy_items = []
@@ -152,8 +155,8 @@ def get_strategies(
 @router.get("/strategies/{strategy_id}", response_model=StrategyDetailResponse)
 def get_strategy_by_id(
     strategy_id: int,
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_strict)
 ):
     """
     Get a specific strategy by ID with full details.
@@ -163,20 +166,13 @@ def get_strategy_by_id(
     
     Args:
         strategy_id: Strategy ID
-        authorization: Authorization header (Bearer token)
         db: Database session
+        user: Authenticated user (from JWT)
     
     Returns:
         StrategyDetailResponse with full strategy details
     """
     try:
-        # Sync user from auth backend
-        if not authorization:
-            raise HTTPException(status_code=401, detail="Authorization header required")
-        
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-        if not user:
-            raise HTTPException(status_code=401, detail="Failed to authenticate user")
         
         # Get strategy by ID
         strategy = db.query(Strategy).filter(
@@ -239,8 +235,8 @@ def get_strategy_by_id(
 
 @router.get("/strategy-runs", response_model=StrategyRunsResponse)
 def get_strategy_runs(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_strict),
     strategy_id: Optional[int] = Query(None, description="Filter by strategy ID"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0)
@@ -252,8 +248,8 @@ def get_strategy_runs(
     Used by History tab to show execution history.
     
     Args:
-        authorization: Authorization header (Bearer token)
         db: Database session
+        user: Authenticated user (from JWT)
         strategy_id: Optional filter by strategy ID
         limit: Maximum number of runs to return
         offset: Number of runs to skip
@@ -262,26 +258,25 @@ def get_strategy_runs(
         StrategyRunsResponse with runs list
     """
     try:
-        # Sync user from auth backend
-        if not authorization:
-            raise HTTPException(status_code=401, detail="Authorization header required")
+        # CRITICAL: JWT user.id is the ONLY source of truth
+        # NO joins - direct filter by user_id
+        # NO status filters, NO admin logic
+        logger.error(f"JWT USER ID = {user.id}")
         
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-        if not user:
-            raise HTTPException(status_code=401, detail="Failed to authenticate user")
-        
-        # CRITICAL: Group executions by strategy_code
-        # Return ONE card per strategy_code with paper and live status
-        
-        # Get all executions for user's strategies
-        query = db.query(StrategyExecution).join(Strategy).filter(
-            Strategy.user_id == user.id
+        # Get all executions for user - direct query (no join)
+        query = db.query(StrategyExecution).filter(
+            StrategyExecution.user_id == user.id
         )
         
         if strategy_id:
             query = query.filter(StrategyExecution.strategy_id == strategy_id)
         
+        # Debug: Log row count
+        row_count = query.count()
+        logger.error(f"ROW COUNT = {row_count}")
+        
         executions = query.order_by(desc(StrategyExecution.created_at)).all()
+        logger.info(f"[History] Found {len(executions)} executions for user_id={user.id}")
         
         # Group by strategy_code
         strategy_groups = defaultdict(lambda: {

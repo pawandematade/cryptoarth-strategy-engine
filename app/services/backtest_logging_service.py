@@ -66,6 +66,7 @@ def log_backtest_execution(
         # MANDATORY: Explicitly set run_source - DO NOT rely on DB defaults
         execution = StrategyExecution(
             strategy_id=strategy_id,
+            user_id=strategy.user_id,  # CRITICAL: Set user_id from strategy
             strategy_version=strategy_version,
             status=ExecutionStatus.inactive,  # Backtests are not active executions
             run_source=run_source,  # MANDATORY: Explicitly set - Track source of backtest

@@ -2,11 +2,12 @@
 Credits API Routes
 Manages user credits for AI and backtesting operations
 """
-from fastapi import APIRouter, HTTPException, status, Header
+from fastapi import APIRouter, HTTPException, status, Header, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
 from datetime import date, datetime, timezone
+from sqlalchemy.orm import Session
 from app.services.credit_service import (
     get_user_credits,
     check_credits_available,
@@ -15,9 +16,8 @@ from app.services.credit_service import (
     correct_credits
 )
 from app.services.user_sync_service import get_or_sync_user
+from app.api.user_dependencies import get_current_user_strict
 from app.database import get_db
-from sqlalchemy.orm import Session
-from fastapi import Depends
 from app.models import User, UserCredits
 
 logger = logging.getLogger(__name__)
@@ -203,8 +203,8 @@ class DeductCreditRequest(BaseModel):
 
 @router.get("/user/credits")
 def get_credits(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_strict)
 ):
     """
     Get current credit balance for the authenticated user
@@ -219,37 +219,35 @@ def get_credits(
         }
     """
     try:
-        if not authorization:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization header required"
-            )
+        # CRITICAL: Get credits directly by user_id (JWT source of truth)
+        # NO phone-based queries, NO admin overrides
+        logger.error(f"JWT USER ID = {user.id}")
         
-        # Sync user and get local user ID
-        # CRITICAL: Ensure user is resolved correctly
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
+        query = db.query(UserCredits).filter(
+            UserCredits.user_id == user.id
+        )
         
-        # MANDATORY: User must NOT be None
-        if not user:
-            logger.error("Credits API | User resolution failed - user is None")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to authenticate user"
-            )
+        # Debug: Log row count
+        row_count = query.count()
+        logger.error(f"ROW COUNT = {row_count}")
         
-        # Verify user has phone number
-        if not user.phone:
-            logger.error(f"Credits API | User has no phone - user_id={user.id}")
-            # 🚫 ALWAYS return number, never None
-            return {
-                "success": True,
-                "data": {
-                    "credits": 0  # ALWAYS a number
-                }
+        user_credits = query.first()
+        
+        # Calculate available credits
+        if user_credits:
+            credits = max(0, user_credits.total_credits - user_credits.used_credits)
+            logger.info(f"[Credits Balance] Found: user_id={user.id}, total={user_credits.total_credits}, used={user_credits.used_credits}, available={credits}")
+        else:
+            # No credits record - return 0
+            credits = 0
+            logger.info(f"[Credits Balance] No record found for user_id={user.id}, returning 0")
+        
+        result = {
+            "success": True,
+            "data": {
+                "credits": int(credits)  # ALWAYS a number
             }
-        
-        # CRITICAL: Get credits by phone (production-safe query)
-        result = get_credits_by_phone(db, user)
+        }
         
         # 🚫 FINAL SAFETY: Ensure credits is a number in response
         if result and result.get("data") and result["data"].get("credits") is not None:
@@ -1192,8 +1190,8 @@ def admin_get_all_credit_transactions(
 
 @router.get("/credits/transactions")
 def get_credit_transactions(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_strict)
 ):
     """
     Get credit transaction history for the authenticated user
@@ -1216,29 +1214,34 @@ def get_credit_transactions(
         }
     """
     try:
-        if not authorization:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization header required"
-            )
+        # CRITICAL: Get user credits directly by user_id (JWT source of truth)
+        # NO phone-based queries, NO admin overrides
+        logger.error(f"JWT USER ID = {user.id}")
         
-        # Sync user and get local user ID
-        user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to authenticate user"
-            )
+        from app.models import UserCredits
+        user_credits_query = db.query(UserCredits).filter(
+            UserCredits.user_id == user.id
+        )
+        user_credits = user_credits_query.first()
         
-        # Get user credits to calculate balance
-        user_credits = get_user_credits(db, user.id)
-        current_balance = user_credits.available_credits if user_credits else 0
+        # Calculate available credits
+        if user_credits:
+            current_balance = max(0, user_credits.total_credits - user_credits.used_credits)
+        else:
+            current_balance = 0
         
-        # Get credit transactions for user
+        # Get credit transactions for user - JWT user.id is ONLY source of truth
         from app.models import CreditTransaction
-        transactions = db.query(CreditTransaction).filter(
+        query = db.query(CreditTransaction).filter(
             CreditTransaction.user_id == user.id
-        ).order_by(CreditTransaction.created_at.desc()).all()
+        )
+        
+        # Debug: Log row count
+        row_count = query.count()
+        logger.error(f"ROW COUNT = {row_count}")
+        
+        transactions = query.order_by(CreditTransaction.created_at.desc()).all()
+        logger.info(f"[Credit Transactions] Found {len(transactions)} transactions for user_id={user.id}")
         
         # Format credit transactions with running balance
         # We need to calculate balance backwards from current balance

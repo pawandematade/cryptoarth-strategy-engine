@@ -5,32 +5,23 @@ from datetime import datetime
 
 from app.database import get_db
 from app.services.payment_service import process_payment_success, create_razorpay_order, get_credit_plans
-from app.services.user_sync_service import get_or_sync_user
+from app.api.user_dependencies import get_current_user_strict
 from app.models import User, PaymentTransaction
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Payment"])
 
 
-def get_current_user(
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db)
-) -> User:
-    """Get current authenticated user from JWT token."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    
-    user = get_or_sync_user(db, external_user_id=None, authorization=authorization)
-    if not user:
-        raise HTTPException(status_code=401, detail="Failed to authenticate user")
-    
-    return user
+# All user dependencies use get_current_user_strict from user_dependencies
 
 
 @router.post("/payment/create-order")
 def create_order(
     payload: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_strict),
 ):
     """Create a Razorpay order for credit purchase."""
     plan_id = payload.get("plan_id")
@@ -65,7 +56,7 @@ def create_order(
 def verify_payment(
     payload: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_strict),
 ):
     """Verify payment and add credits to user."""
     order_id = payload.get("order_id")
@@ -170,15 +161,25 @@ async def razorpay_webhook(
 @router.get("/payment/history")
 def get_payment_history(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_strict),
 ):
     """Get payment history for the authenticated user."""
     try:
-        payments = db.query(PaymentTransaction).filter(
+        # CRITICAL: JWT user.id is the ONLY source of truth
+        logger.error(f"JWT USER ID = {user.id}")
+        
+        query = db.query(PaymentTransaction).filter(
             PaymentTransaction.user_id == user.id
-        ).order_by(
+        )
+        
+        # Debug: Log row count
+        row_count = query.count()
+        logger.error(f"ROW COUNT = {row_count}")
+        
+        payments = query.order_by(
             PaymentTransaction.created_at.desc()
         ).limit(50).all()
+        logger.info(f"[Payment History] Found {len(payments)} payments for user_id={user.id}")
         
         history = []
         for payment in payments:

@@ -122,21 +122,34 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(APIObservabilityMiddleware)  # API observability - tracks metrics
 
 # Configure CORS based on environment
+# CRITICAL: When allow_credentials=True, browsers BLOCK allow_origins=["*"]
+# Must use explicit origin list - never use wildcard with credentials
 if IS_PRODUCTION:
-    # Production: Only allow specific origins
+    # Production: Only allow specific origins (explicit list, no wildcards)
     allowed_origins = [
-        FRONTEND_URL,
-        BASE_API_URL,
-        "https://aistrategy.cryptoarth.in",
         "https://cryptoarth.in",
-        "https://panel.cryptoarth.in",
+        "https://aistrategy.cryptoarth.in",
         "https://trade-panel.cryptoarth.in",  # Main trading panel frontend
         "https://www.trade-panel.cryptoarth.in",  # With www subdomain
+        "https://panel.cryptoarth.in",
     ]
+    # Add FRONTEND_URL and BASE_API_URL if they're set and not already in list
+    if FRONTEND_URL and FRONTEND_URL not in allowed_origins:
+        allowed_origins.append(FRONTEND_URL)
+    if BASE_API_URL and BASE_API_URL not in allowed_origins:
+        allowed_origins.append(BASE_API_URL)
     # Remove duplicates and None values
     allowed_origins = list(set(filter(None, allowed_origins)))
+    # CRITICAL: Ensure we never have an empty list (would cause issues)
+    if not allowed_origins:
+        logger.warning("⚠️  No allowed origins configured for production CORS - using defaults")
+        allowed_origins = [
+            "https://cryptoarth.in",
+            "https://aistrategy.cryptoarth.in",
+            "https://trade-panel.cryptoarth.in",
+        ]
 else:
-    # Local development: Allow localhost ports
+    # Local development: Allow localhost ports (explicit list, no wildcards)
     allowed_origins = [
         "http://localhost:5173",  # Vite default port
         "http://localhost:3000",  # React default port
@@ -145,17 +158,29 @@ else:
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8000",  # Allow backend origin
         "http://localhost:8000",  # Allow backend origin
-        FRONTEND_URL,
     ]
+    # Add FRONTEND_URL if set and not already in list
+    if FRONTEND_URL and FRONTEND_URL not in allowed_origins:
+        allowed_origins.append(FRONTEND_URL)
     # Remove duplicates and None values
     allowed_origins = list(set(filter(None, allowed_origins)))
+    # CRITICAL: Ensure we never have an empty list
+    if not allowed_origins:
+        logger.warning("⚠️  No allowed origins configured for local CORS - using defaults")
+        allowed_origins = [
+            "http://localhost:5173",
+            "http://localhost:3000",
+        ]
+
+# CRITICAL: Log configured origins for debugging
+logger.info(f"🌐 CORS configured with {len(allowed_origins)} allowed origin(s): {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,  # Explicit list - NEVER use ["*"] with allow_credentials=True
+    allow_credentials=True,  # Required for Authorization headers
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers (including Authorization)
 )
 
 # Include routers with /auth prefix

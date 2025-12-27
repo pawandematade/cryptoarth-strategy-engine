@@ -142,6 +142,7 @@ class StrategyExecution(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True, comment="User who owns this execution (denormalized from strategies.user_id)")
     strategy_version = Column(Integer, nullable=False, comment="Version number from strategy_versions")
     strategy_name = Column(String(255), nullable=False, comment="Strategy name snapshot")
     strategy_code = Column(String(50), nullable=False, index=True, comment="Strategy code snapshot")

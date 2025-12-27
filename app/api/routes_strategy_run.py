@@ -150,6 +150,7 @@ def create_strategy_run(
         if existing_execution:
             # UPDATE existing execution row
             existing_execution.strategy_id = strategy.id  # Update in case strategy_id changed
+            existing_execution.user_id = strategy.user_id  # CRITICAL: Ensure user_id is set
             existing_execution.strategy_version = latest_version.version
             existing_execution.strategy_name = strategy.name
             existing_execution.status = ExecutionStatus.running
@@ -167,6 +168,7 @@ def create_strategy_run(
             # INSERT new execution row
             execution = StrategyExecution(
                 strategy_id=strategy.id,
+                user_id=strategy.user_id,  # CRITICAL: Set user_id from strategy
                 strategy_version=latest_version.version,
                 strategy_name=strategy.name,
                 strategy_code=strategy.strategy_code,
@@ -255,9 +257,10 @@ def stop_strategy_run(
             raise HTTPException(status_code=401, detail="Failed to authenticate user")
         
         # Find active execution for this strategy
-        execution = db.query(StrategyExecution).join(Strategy).filter(
+        # CRITICAL: Filter by user_id directly (no join)
+        execution = db.query(StrategyExecution).filter(
             StrategyExecution.strategy_id == request.strategy_id,
-            Strategy.user_id == user.id,
+            StrategyExecution.user_id == user.id,  # CRITICAL: Direct user_id filter
             StrategyExecution.status == ExecutionStatus.running
         ).first()
         
