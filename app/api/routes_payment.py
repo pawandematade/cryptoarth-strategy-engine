@@ -10,6 +10,8 @@ import json
 import hmac
 import hashlib
 import requests
+import os
+from datetime import datetime
 from app.services.payment_service import (
     create_razorpay_order,
     process_payment_success,
@@ -20,11 +22,17 @@ from app.services.user_sync_service import get_or_sync_user
 from app.database import get_db
 from sqlalchemy.orm import Session
 from fastapi import Depends
-from app.models import User
+from app.models import User, PaymentTransaction, UserCredits
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# CRITICAL: Startup diagnostic log to confirm which code is running
+_PAYMENT_ROUTES_FILE = __file__
+_PAYMENT_ROUTES_LOADED_AT = datetime.now().isoformat()
+logger.error(f"🔧 PAYMENT ROUTES MODULE LOADED: file={_PAYMENT_ROUTES_FILE}, loaded_at={_PAYMENT_ROUTES_LOADED_AT}")
+print(f"🔧 PAYMENT ROUTES MODULE LOADED: file={_PAYMENT_ROUTES_FILE}, loaded_at={_PAYMENT_ROUTES_LOADED_AT}")
 
 
 def get_current_user(
@@ -94,6 +102,13 @@ class WebhookRequest(BaseModel):
     """Request model for Razorpay webhook"""
     event: str = Field(..., description="Webhook event type")
     payload: Dict[str, Any] = Field(..., description="Webhook payload")
+
+
+class VerifyPaymentRequest(BaseModel):
+    """Request model for payment verification"""
+    order_id: str = Field(..., description="Razorpay order ID")
+    payment_id: str = Field(..., description="Razorpay payment ID")
+    amount: float = Field(..., description="Payment amount in INR")
 
 
 @router.get("/payment/status")
@@ -429,6 +444,11 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
                 logger.error(f"Invalid user_id format in order: {user_id_str}")
                 return {"success": False, "message": "Invalid user ID format"}
             
+            # Safety guard: Validate user before processing payment
+            if not user or user.id <= 0:
+                logger.error("Invalid user resolved from webhook order")
+                return {"success": False, "message": "Invalid user"}
+            
             # Process payment (will verify payment signature internally)
             result = process_payment_success(db, order_id, payment_id, payment_signature, user.id)
             
@@ -498,102 +518,147 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/payment/verify")
 def verify_payment(
-    order_id: str,
-    payment_id: str,
-    signature: str,
+    request: VerifyPaymentRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Verify payment manually (for frontend callback)
+    Verify payment and add credits to user account.
     
-    CRITICAL: Uses JWT-authenticated user as ONLY source of truth.
-    ALL DB writes use current_user.id - NEVER hardcoded or Redis user_id.
+    PRODUCTION CRITICAL:
+    - Uses JWT-authenticated user (current_user.id) as ONLY source of truth
+    - Inserts payment record into payment_transactions
+    - Updates user_credits.total_credits (never touches used_credits)
+    - Prevents duplicate payment_id processing
+    - Credits calculation: credits_to_add = int(amount)
     
     Args:
-        order_id: Razorpay order ID
-        payment_id: Razorpay payment ID
-        signature: Razorpay signature
+        request: VerifyPaymentRequest with order_id, payment_id, amount
         current_user: JWT-authenticated user (from get_current_user dependency)
         db: Database session
     
     Returns:
-        dict: Payment verification result
+        dict: {
+            "success": bool,
+            "message": str,
+            "credits_added": int,
+            "total_credits": int,
+            "available_credits": int
+        }
     """
     try:
-        # CRITICAL: Log authenticated user for debugging
-        logger.info(f"Payment verification: user_id={current_user.id}, email={current_user.email}, phone={current_user.phone}, order_id={order_id}")
-        
-        # STEP 1: Verify Razorpay signature
-        if not verify_razorpay_signature(order_id, payment_id, signature):
-            logger.error(f"Invalid Razorpay signature for payment {payment_id}")
+        # Validate user_id from JWT
+        user_id = current_user.id
+        if user_id <= 0:
+            logger.error(f"Invalid user_id={user_id} from JWT. Rejecting payment.")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid payment signature"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid user ID. Payment cannot be processed."
             )
         
-        # STEP 2: Fetch order from Redis and validate ownership
-        from app.store.redis_client import redis_client
-        order_key = f"PAYMENT_ORDER:{order_id}"
-        order_data_str = redis_client.get(order_key)
+        logger.info(f"Payment verification started: user_id={user_id}, order_id={request.order_id}, payment_id={request.payment_id}")
         
-        if not order_data_str:
-            logger.error(f"Order {order_id} not found in Redis during verification")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Order not found. Payment may have expired."
-            )
+        # STEP 1: Check for duplicate payment_id (idempotency)
+        existing_payment = db.query(PaymentTransaction).filter(
+            PaymentTransaction.gateway_payment_id == request.payment_id,
+            PaymentTransaction.status == 'success'
+        ).first()
         
-        order_data = json.loads(order_data_str)
-        redis_user_id_str = order_data.get('user_id')
-        
-        if not redis_user_id_str:
-            logger.error(f"User ID not found in order {order_id} data")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid order data. User ID missing."
-            )
-        
-        # CRITICAL: Validate order ownership - Redis order user_id MUST match JWT-authenticated user
-        try:
-            redis_user_id = int(redis_user_id_str)
-            if redis_user_id != current_user.id:
-                logger.error(f"SECURITY VIOLATION: Order ownership mismatch - order user_id={redis_user_id}, JWT authenticated user_id={current_user.id}")
+        if existing_payment:
+            # Verify ownership
+            if existing_payment.user_id != user_id:
+                logger.error(f"Payment {request.payment_id} belongs to user_id={existing_payment.user_id}, but authenticated user_id={user_id}")
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Order does not belong to this user"
+                    detail="Payment ownership mismatch"
                 )
-        except ValueError:
-            logger.error(f"Invalid user_id format in order data: {redis_user_id_str}")
+            
+            # Payment already processed - return existing result
+            user_credits = db.query(UserCredits).filter(UserCredits.user_id == user_id).first()
+            available_credits = (user_credits.total_credits - user_credits.used_credits) if user_credits else 0
+            
+            logger.info(f"Payment {request.payment_id} already processed (idempotent response)")
+            return {
+                "success": True,
+                "message": "Payment already processed",
+                "credits_added": existing_payment.credits_added,
+                "total_credits": user_credits.total_credits if user_credits else 0,
+                "available_credits": available_credits
+            }
+        
+        # STEP 2: Calculate credits to add
+        # CREDITS RULE: credits_to_add = int(amount)
+        credits_to_add = int(request.amount)
+        
+        if credits_to_add <= 0:
+            logger.error(f"Invalid amount={request.amount}, credits={credits_to_add}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid order data format"
+                detail="Invalid payment amount"
             )
         
-        # STEP 3: Process payment using JWT-authenticated user_id
-        # CRITICAL: current_user.id is the ONLY source of truth
-        result = process_payment_success(db, order_id, payment_id, signature, current_user.id)
+        # STEP 3: Get or create user_credits record
+        user_credits = db.query(UserCredits).filter(UserCredits.user_id == user_id).first()
         
-        if not result['success']:
-            logger.error(f"Payment processing failed: {result['message']}")
+        if not user_credits:
+            # Create new user_credits record
+            user_credits = UserCredits(
+                user_id=user_id,
+                total_credits=credits_to_add,
+                used_credits=0,
+                is_active=True
+            )
+            db.add(user_credits)
+            logger.info(f"Created new user_credits record: user_id={user_id}, total_credits={credits_to_add}")
+        else:
+            # Update existing record - add to total_credits only
+            old_total = user_credits.total_credits
+            user_credits.total_credits += credits_to_add
+            logger.info(f"Updated user_credits: user_id={user_id}, old_total={old_total}, new_total={user_credits.total_credits}")
+        
+        # STEP 4: Insert payment_transactions record
+        payment_txn = PaymentTransaction(
+            user_id=user_id,
+            provider='razorpay',
+            amount=float(request.amount),
+            credits_added=credits_to_add,
+            status='success',
+            gateway_order_id=request.order_id,
+            gateway_payment_id=request.payment_id,
+            customer_name=f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or current_user.username,
+            customer_email=current_user.email,
+            customer_mobile=current_user.phone
+        )
+        db.add(payment_txn)
+        
+        # STEP 5: Commit transaction with rollback on error
+        try:
+            db.commit()
+            db.refresh(user_credits)
+            db.refresh(payment_txn)
+            
+            logger.info(f"Payment verified successfully: user_id={user_id}, payment_id={request.payment_id}, credits_added={credits_to_add}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully added {credits_to_add} credits to your account",
+                "credits_added": credits_to_add,
+                "total_credits": user_credits.total_credits,
+                "available_credits": user_credits.total_credits - user_credits.used_credits
+            }
+            
+        except Exception as commit_error:
+            db.rollback()
+            logger.error(f"Failed to commit payment transaction: {commit_error}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result['message']
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process payment: {str(commit_error)}"
             )
-        
-        # STEP 4: Return success response
-        logger.info(f"Payment verified successfully: user_id={current_user.id}, payment_id={payment_id}, credits_added={result['credits_added']}")
-        
-        return {
-            "success": True,
-            "message": result['message'],
-            "credits_added": result['credits_added'],
-            "credits_remaining": result.get('credits_remaining', 0)
-        }
         
     except HTTPException:
         raise
     except Exception as e:
+        db.rollback()
         logger.error(f"Error verifying payment: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

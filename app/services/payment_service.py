@@ -7,6 +7,8 @@ import hmac
 import hashlib
 import json
 import time
+import os
+from datetime import datetime
 from typing import Dict, Optional, Any
 from app.store.redis_client import redis_client
 from app.services.credit_service import get_rupee_to_credit_ratio
@@ -15,6 +17,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 logger = logging.getLogger(__name__)
+
+# CRITICAL: Startup diagnostic log to confirm which code is running
+_PAYMENT_SERVICE_FILE = __file__
+_PAYMENT_SERVICE_LOADED_AT = datetime.now().isoformat()
+logger.error(f"🔧 PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded_at={_PAYMENT_SERVICE_LOADED_AT}")
+print(f"🔧 PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded_at={_PAYMENT_SERVICE_LOADED_AT}")
 
 # Credit packages/plans
 # CRITICAL: Single source of truth for backend pricing
@@ -319,7 +327,8 @@ def process_payment_success(
         }
     
     # CRITICAL: Log the user_id being used for payment processing
-    logger.info(f"PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
+    logger.info(f"🚀 PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
+    logger.info(f"🚀 AUTHENTICATED USER_ID: {user_id} (MUST NOT be 1 unless admin is paying)")
     
     try:
         # STEP 1: Verify Razorpay signature
@@ -426,40 +435,70 @@ def process_payment_success(
         # STEP 6: Update user_credits table (BALANCE TABLE)
         # CRITICAL: This updates the balance that UI reads from
         # CRITICAL: MUST use current_user.id - NEVER hardcoded or admin user_id
-        from app.services.credit_service import get_user_credits, UserCredits
-        user_credits = get_user_credits(db, user_id)
+        # CRITICAL: Use explicit query to ensure we get the correct user's credits
+        from app.models import UserCredits
+        
+        logger.error(f"🔍 BEFORE user_credits UPSERT: querying for user_id={user_id}")
+        print(f"🔍 BEFORE user_credits UPSERT: querying for user_id={user_id}")
+        
+        # Explicit query for user_credits by user_id
+        user_credits = db.query(UserCredits).filter(UserCredits.user_id == user_id).first()
         
         if not user_credits:
             # Create new user_credits record for this user
-            logger.info(f"CREATING NEW user_credits record: user_id={user_id} (NOT admin user_id=1)")
+            logger.error(f"📝 CREATING NEW user_credits record: user_id={user_id} (NOT admin user_id=1)")
+            logger.error(f"📝 NEW RECORD DETAILS: user_id={user_id}, mobile={customer_mobile}, total_credits={credits_added}, used_credits=0, is_active=True")
+            print(f"📝 CREATING NEW user_credits record: user_id={user_id}")
+            
             user_credits = UserCredits(
                 user_id=user_id,  # CRITICAL: Use JWT-authenticated user_id
-                total_credits=0,
+                total_credits=credits_added,  # Set initial credits directly
                 used_credits=0,
                 is_active=True
             )
             db.add(user_credits)
-            db.flush()  # Flush to get the record
-            logger.info(f"NEW user_credits record created: user_id={user_id}")
+            db.flush()  # Flush to get the record and catch any constraint violations
+            
+            # Verify the record was added correctly
+            db.refresh(user_credits)
+            logger.error(f"✅ NEW user_credits record created: id={user_credits.id}, user_id={user_credits.user_id}, total_credits={user_credits.total_credits}")
+            print(f"✅ NEW user_credits record created: id={user_credits.id}, user_id={user_credits.user_id}")
+            
+            # CRITICAL: Verify we created the record for the correct user
+            if user_credits.user_id != user_id:
+                logger.error(f"❌ CRITICAL BUG: Created user_credits.user_id={user_credits.user_id} != authenticated user_id={user_id}. Rejecting payment.")
+                db.rollback()
+                return {
+                    'success': False,
+                    'user_id': user_id,
+                    'credits_added': 0,
+                    'message': 'User credits ownership mismatch. Security violation.'
+                }
         else:
-            logger.info(f"UPDATING EXISTING user_credits: user_id={user_id}, current_total={user_credits.total_credits}, adding={credits_added}")
+            # Update existing user_credits record
+            logger.error(f"📝 UPDATING EXISTING user_credits: id={user_credits.id}, user_id={user_credits.user_id}, current_total={user_credits.total_credits}, adding={credits_added}")
+            print(f"📝 UPDATING EXISTING user_credits: user_id={user_credits.user_id}")
+            
+            # CRITICAL: Verify we're updating the correct user's credits
+            if user_credits.user_id != user_id:
+                logger.error(f"❌ CRITICAL BUG: Existing user_credits.user_id={user_credits.user_id} != authenticated user_id={user_id}. Rejecting payment.")
+                db.rollback()
+                return {
+                    'success': False,
+                    'user_id': user_id,
+                    'credits_added': 0,
+                    'message': 'User credits ownership mismatch. Security violation.'
+                }
+            
+            # Add credits to balance
+            old_total = user_credits.total_credits
+            user_credits.total_credits += credits_added
+            user_credits.updated_at = func.now()
+            logger.error(f"📝 user_credits UPDATE: user_id={user_id}, old_total={old_total}, new_total={user_credits.total_credits}")
+            print(f"📝 user_credits UPDATE: user_id={user_id}, new_total={user_credits.total_credits}")
         
-        # CRITICAL: Verify we're updating the correct user's credits
-        if user_credits.user_id != user_id:
-            logger.error(f"CRITICAL BUG: user_credits.user_id={user_credits.user_id} != authenticated user_id={user_id}. Rejecting payment.")
-            db.rollback()
-            return {
-                'success': False,
-                'user_id': user_id,
-                'credits_added': 0,
-                'message': 'User credits ownership mismatch. Security violation.'
-            }
-        
-        # Add credits to balance
-        old_total = user_credits.total_credits
-        user_credits.total_credits += credits_added
-        user_credits.updated_at = func.now()
-        logger.info(f"user_credits UPDATE: user_id={user_id}, old_total={old_total}, new_total={user_credits.total_credits}")
+        logger.error(f"✅ AFTER user_credits UPSERT: user_id={user_id}, total_credits={user_credits.total_credits}")
+        print(f"✅ AFTER user_credits UPSERT: user_id={user_id}, total_credits={user_credits.total_credits}")
         
         # STEP 7: Insert credit_transactions row (LEDGER - HISTORY ONLY)
         # CRITICAL: This is for audit trail, NOT for balance calculation
@@ -496,10 +535,15 @@ def process_payment_success(
         
         # CRITICAL: Commit all three operations atomically
         # This ensures: user_credits, credit_transactions, and payment_transactions are all saved together
+        logger.error(f"🔄 BEFORE DB COMMIT: user_id={user_id}, user_credits.id={user_credits.id if user_credits else None}, credits={credits_added}")
+        print(f"🔄 BEFORE DB COMMIT: user_id={user_id}, credits={credits_added}")
+        
         try:
             db.flush()  # Flush to catch constraint violations before commit
+            logger.error(f"✅ DB FLUSH SUCCESS: All objects flushed to session")
+            print(f"✅ DB FLUSH SUCCESS")
         except Exception as flush_error:
-            logger.error(f"Error flushing payment transaction to DB: {flush_error}", exc_info=True)
+            logger.error(f"❌ DB FLUSH FAILED: Error flushing payment transaction to DB: {flush_error}", exc_info=True)
             db.rollback()
             return {
                 'success': False,
@@ -510,10 +554,11 @@ def process_payment_success(
         
         try:
             db.commit()
-            logger.info(f"✅ PAYMENT COMMITTED: payment_id={payment_id}, user_id={user_id}, amount={total_amount}, credits={credits_added}, customer={customer_name}")
-            logger.info(f"✅ DB WRITES COMPLETE: user_credits.user_id={user_id}, credit_transactions.user_id={user_id}, payment_transactions.user_id={user_id}")
+            logger.error(f"✅ DB COMMIT SUCCESS: payment_id={payment_id}, user_id={user_id}, amount={total_amount}, credits={credits_added}, customer={customer_name}")
+            logger.error(f"✅ DB WRITES COMPLETE: user_credits.user_id={user_id}, credit_transactions.user_id={user_id}, payment_transactions.user_id={user_id}")
+            print(f"✅ DB COMMIT SUCCESS: user_id={user_id}, credits={credits_added}")
         except Exception as commit_error:
-            logger.error(f"CRITICAL: Failed to commit payment transaction to DB: {commit_error}", exc_info=True)
+            logger.error(f"❌ DB COMMIT FAILED: Failed to commit payment transaction to DB: {commit_error}", exc_info=True)
             db.rollback()
             return {
                 'success': False,
@@ -522,17 +567,62 @@ def process_payment_success(
                 'message': f'Failed to save payment transaction: {str(commit_error)}'
             }
         
-        # Verify payment transaction was saved
+        # CRITICAL: Verify all records were saved correctly
         try:
+            # Refresh all objects to get IDs
+            db.refresh(user_credits)
+            db.refresh(credit_txn)
             db.refresh(payment_txn)
+            
+            # Verify user_credits was saved
+            if not user_credits.id:
+                logger.error(f"❌ CRITICAL: user_credits committed but ID is None. user_id={user_id}")
+            else:
+                logger.info(f"✅ VERIFIED: user_credits.id={user_credits.id}, user_id={user_credits.user_id}, total_credits={user_credits.total_credits}")
+            
+            # Verify payment_transaction was saved
             if not payment_txn.id:
-                logger.error(f"CRITICAL: PaymentTransaction committed but ID is None. payment_id={payment_id}")
+                logger.error(f"❌ CRITICAL: PaymentTransaction committed but ID is None. payment_id={payment_id}")
+            else:
+                logger.info(f"✅ VERIFIED: payment_txn.id={payment_txn.id}, user_id={payment_txn.user_id}, credits_added={payment_txn.credits_added}")
+            
+            # CRITICAL: Post-commit verification - Query DB directly to ensure record exists
+            logger.error(f"🔍 POST-COMMIT VERIFICATION: Querying user_credits for user_id={user_id}")
+            print(f"🔍 POST-COMMIT VERIFICATION: Querying user_credits for user_id={user_id}")
+            verified_credits = db.query(UserCredits).filter(UserCredits.user_id == user_id).first()
+            
+            if not verified_credits:
+                logger.error(f"❌ CRITICAL: user_credits record NOT FOUND in DB after commit! user_id={user_id}")
+                print(f"❌ CRITICAL: user_credits record NOT FOUND in DB after commit! user_id={user_id}")
+                # This is a critical error - transaction may have been rolled back
+                return {
+                    'success': False,
+                    'user_id': user_id,
+                    'credits_added': 0,
+                    'message': 'Payment transaction failed: user_credits record not found after commit'
+                }
+            else:
+                logger.error(f"✅ POST-COMMIT VERIFIED: user_credits found in DB - id={verified_credits.id}, user_id={verified_credits.user_id}, total_credits={verified_credits.total_credits}")
+                print(f"✅ POST-COMMIT VERIFIED: user_credits found - id={verified_credits.id}, user_id={verified_credits.user_id}, total_credits={verified_credits.total_credits}")
+                
+                # Verify it's the correct user
+                if verified_credits.user_id != user_id:
+                    logger.error(f"❌ CRITICAL: Verified user_credits.user_id={verified_credits.user_id} != authenticated user_id={user_id}")
+                    return {
+                        'success': False,
+                        'user_id': user_id,
+                        'credits_added': 0,
+                        'message': 'Payment transaction failed: user_credits ownership mismatch after commit'
+                    }
+                
         except Exception as refresh_error:
-            logger.warning(f"Could not refresh PaymentTransaction after commit: {refresh_error}")
+            logger.error(f"❌ CRITICAL: Error verifying records after commit: {refresh_error}", exc_info=True)
+            # Don't fail payment if verification fails, but log the error
+            logger.warning(f"⚠️ Could not verify records after commit: {refresh_error}")
         
         # Get updated credits for response
-        db.refresh(user_credits)
         credits_remaining = user_credits.available_credits
+        logger.info(f"✅ FINAL CREDITS: user_id={user_id}, credits_remaining={credits_remaining}")
         
         # Update order status in Redis (non-critical - don't fail payment if this fails)
         try:
@@ -598,8 +688,10 @@ def process_payment_success(
         }
         
     except Exception as e:
+        # CRITICAL: On ANY exception, rollback and return error (do NOT return success)
+        logger.error(f"❌ EXCEPTION IN PAYMENT PROCESS: user_id={user_id}, error={e}", exc_info=True)
         db.rollback()
-        logger.error(f"Error processing payment: {e}", exc_info=True)
+        logger.error(f"❌ TRANSACTION ROLLED BACK: user_id={user_id}")
         return {
             'success': False,
             'user_id': user_id,
