@@ -3,9 +3,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.services.payment_service import process_payment_success
+from app.services import payment_service
 from app.services.user_sync_service import get_or_sync_user
 from app.models import User
+
+# Import function directly to avoid any import caching issues
+process_payment_success = payment_service.process_payment_success
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
@@ -43,15 +46,18 @@ def verify_payment(
         )
 
     try:
-        return process_payment_success(
-            db,
-            order_id,
-            payment_id,
-            signature,
-            user.id,
-            amount
+        # Call with positional arguments matching function signature:
+        # process_payment_success(db, order_id, payment_id, signature, user_id, amount)
+        result = process_payment_success(
+            db,              # Position 1: db: Session
+            order_id,        # Position 2: order_id: str
+            payment_id,      # Position 3: payment_id: str
+            signature,       # Position 4: signature: str
+            user.id,         # Position 5: user_id: int
+            amount           # Position 6: amount: Optional[float] = None
         )
-
+        return result
+        
     except HTTPException:
         # IMPORTANT: propagate correct HTTP status (400)
         raise
