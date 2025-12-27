@@ -42,11 +42,22 @@ def verify_payment(
             detail="order_id and payment_id are required"
         )
 
-    return process_payment_success(
-        db=db,
-        order_id=order_id,
-        payment_id=payment_id,
-        signature=signature,
-        user_id=user.id,
-        amount=amount,
-    )
+    try:
+        return process_payment_success(
+            db=db,
+            order_id=order_id,
+            payment_id=payment_id,
+            signature=signature,
+            user_id=user.id,
+            amount=amount,
+        )
+
+    except HTTPException:
+        # IMPORTANT: propagate correct HTTP status (400)
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail="Payment verification failed"
+        )
