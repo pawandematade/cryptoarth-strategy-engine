@@ -16,7 +16,17 @@ logger = logging.getLogger(__name__)
 # NO fallback logic, NO postgres, NO localhost defaults
 DATABASE_URL = os.environ["DATABASE_URL"]  # Hard fail if missing
 
-logger.info("Using DATABASE_URL from environment variable")
+# CRITICAL: Explicitly validate DATABASE_URL is MySQL - block PostgreSQL
+if not DATABASE_URL.startswith("mysql+pymysql://"):
+    error_msg = (
+        f"CRITICAL: DATABASE_URL must use MySQL (mysql+pymysql://). "
+        f"Found: {DATABASE_URL[:30]}... "
+        f"PostgreSQL and other databases are NOT supported."
+    )
+    logger.error(error_msg)
+    raise ValueError(error_msg)
+
+logger.info("Using DATABASE_URL from environment variable (MySQL only)")
 
 # Create engine with safe configuration
 # CRITICAL: Only ONE engine in entire project - uses DATABASE_URL directly
