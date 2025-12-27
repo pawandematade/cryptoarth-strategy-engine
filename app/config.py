@@ -42,11 +42,13 @@ BASE_API_URL = STRATEGY_ENGINE_BASE_URL
 FRONTEND_URL = STRATEGY_ENGINE_FRONTEND_URL
 
 # Redis Configuration (using STRATEGY_ prefixed names)
-STRATEGY_REDIS_HOST = os.getenv("STRATEGY_REDIS_HOST")
+# Default to localhost if not set (allows service to start)
+STRATEGY_REDIS_HOST = os.getenv("STRATEGY_REDIS_HOST", "127.0.0.1")
 STRATEGY_REDIS_PORT = int(os.getenv("STRATEGY_REDIS_PORT", "6379"))
 STRATEGY_REDIS_PASSWORD = os.getenv("STRATEGY_REDIS_PASSWORD", "")  # Optional password
-if not STRATEGY_REDIS_HOST:
-    raise ValueError(f"STRATEGY_REDIS_HOST must be set in {env_file}")
+if not os.getenv("STRATEGY_REDIS_HOST"):
+    import logging
+    logging.warning(f"STRATEGY_REDIS_HOST not set in {env_file}, using default: {STRATEGY_REDIS_HOST}")
 
 # Backward compatibility aliases
 REDIS_HOST = STRATEGY_REDIS_HOST
