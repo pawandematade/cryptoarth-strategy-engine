@@ -121,56 +121,48 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(APIObservabilityMiddleware)  # API observability - tracks metrics
 
-# Configure CORS based on environment
+# Configure CORS - CRITICAL: Single unified list for all environments
 # CRITICAL: When allow_credentials=True, browsers BLOCK allow_origins=["*"]
 # Must use explicit origin list - never use wildcard with credentials
-if IS_PRODUCTION:
-    # Production: Only allow specific origins (explicit list, no wildcards)
+# CRITICAL: DO NOT declare allowed_origins twice - merge production + local into ONE list
+allowed_origins = [
+    # Production domains
+    "https://cryptoarth.in",
+    "https://trade-panel.cryptoarth.in",
+    "https://aistrategy.cryptoarth.in",
+    "https://www.trade-panel.cryptoarth.in",  # With www subdomain
+    "https://panel.cryptoarth.in",
+    # Local development
+    "http://localhost:3000",  # React default port
+    "http://localhost:5173",  # Vite default port
+    "http://localhost:5174",  # Alternative Vite port
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8000",  # Allow backend origin
+    "http://localhost:8000",  # Allow backend origin
+]
+
+# Add FRONTEND_URL and BASE_API_URL if they're set and not already in list
+if FRONTEND_URL and FRONTEND_URL not in allowed_origins:
+    allowed_origins.append(FRONTEND_URL)
+if BASE_API_URL and BASE_API_URL not in allowed_origins:
+    allowed_origins.append(BASE_API_URL)
+
+# Remove duplicates and None values
+allowed_origins = list(set(filter(None, allowed_origins)))
+
+# CRITICAL: Ensure we never have an empty list (would cause issues)
+if not allowed_origins:
+    logger.warning("⚠️  No allowed origins configured for CORS - using defaults")
     allowed_origins = [
+        # Production domains
         "https://cryptoarth.in",
+        "https://trade-panel.cryptoarth.in",
         "https://aistrategy.cryptoarth.in",
-        "https://trade-panel.cryptoarth.in",  # Main trading panel frontend
-        "https://www.trade-panel.cryptoarth.in",  # With www subdomain
-        "https://panel.cryptoarth.in",
+        # Local development
+        "http://localhost:3000",
+        "http://localhost:5173",
     ]
-    # Add FRONTEND_URL and BASE_API_URL if they're set and not already in list
-    if FRONTEND_URL and FRONTEND_URL not in allowed_origins:
-        allowed_origins.append(FRONTEND_URL)
-    if BASE_API_URL and BASE_API_URL not in allowed_origins:
-        allowed_origins.append(BASE_API_URL)
-    # Remove duplicates and None values
-    allowed_origins = list(set(filter(None, allowed_origins)))
-    # CRITICAL: Ensure we never have an empty list (would cause issues)
-    if not allowed_origins:
-        logger.warning("⚠️  No allowed origins configured for production CORS - using defaults")
-        allowed_origins = [
-            "https://cryptoarth.in",
-            "https://aistrategy.cryptoarth.in",
-            "https://trade-panel.cryptoarth.in",
-        ]
-else:
-    # Local development: Allow localhost ports (explicit list, no wildcards)
-    allowed_origins = [
-        "http://localhost:5173",  # Vite default port
-        "http://localhost:3000",  # React default port
-        "http://localhost:5174",  # Alternative Vite port
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8000",  # Allow backend origin
-        "http://localhost:8000",  # Allow backend origin
-    ]
-    # Add FRONTEND_URL if set and not already in list
-    if FRONTEND_URL and FRONTEND_URL not in allowed_origins:
-        allowed_origins.append(FRONTEND_URL)
-    # Remove duplicates and None values
-    allowed_origins = list(set(filter(None, allowed_origins)))
-    # CRITICAL: Ensure we never have an empty list
-    if not allowed_origins:
-        logger.warning("⚠️  No allowed origins configured for local CORS - using defaults")
-        allowed_origins = [
-            "http://localhost:5173",
-            "http://localhost:3000",
-        ]
 
 # CRITICAL: Log configured origins for debugging
 logger.info(f"🌐 CORS configured with {len(allowed_origins)} allowed origin(s): {allowed_origins}")
