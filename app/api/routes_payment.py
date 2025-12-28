@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.services.payment_service import process_payment_success, create_razorpay_order, get_credit_plans
@@ -12,6 +13,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Payment"])
+
+
+class PaymentHistoryItem(BaseModel):
+    """Payment history item"""
+    id: int
+    order_id: Optional[str] = None
+    payment_id: Optional[str] = None
+    amount: float
+    credits_added: Optional[int] = None
+    status: str
+    provider: str
+    created_at: Optional[str] = None
+
+
+class PaymentHistoryResponse(BaseModel):
+    """Response model for GET /payment/history"""
+    success: bool
+    data: List[PaymentHistoryItem]
+    message: Optional[str] = None
 
 
 # All user dependencies use get_current_user_strict from user_dependencies
@@ -158,7 +178,7 @@ async def razorpay_webhook(
         return {"success": False, "message": f"Webhook processing failed: {str(e)}"}
 
 
-@router.get("/payment/history")
+@router.get("/payment/history", response_model=PaymentHistoryResponse)
 def get_payment_history(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user_strict),
@@ -183,23 +203,25 @@ def get_payment_history(
         
         history = []
         for payment in payments:
-            history.append({
-                "id": payment.id,
-                "order_id": payment.gateway_order_id,
-                "payment_id": payment.gateway_payment_id,
-                "amount": payment.amount,
-                "credits_added": payment.credits_added,
-                "status": payment.status,
-                "provider": payment.provider,
-                "created_at": payment.created_at.isoformat() if payment.created_at else None,
-            })
+            history.append(PaymentHistoryItem(
+                id=payment.id,
+                order_id=payment.gateway_order_id,
+                payment_id=payment.gateway_payment_id,
+                amount=payment.amount,
+                credits_added=payment.credits_added,
+                status=payment.status,
+                provider=payment.provider,
+                created_at=payment.created_at.isoformat() if payment.created_at else None,
+            ))
         
-        return {
-            "success": True,
-            "payments": history,
-            "count": len(history)
-        }
+        return PaymentHistoryResponse(
+            success=True,
+            data=history
+        )
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error fetching payment history: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to fetch payment history"

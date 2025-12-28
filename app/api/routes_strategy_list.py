@@ -39,17 +39,23 @@ class StrategyListItem(BaseModel):
     description: Optional[str] = None
 
 
+class StrategyListData(BaseModel):
+    """Data payload for GET /strategies"""
+    strategies: List[StrategyListItem]
+    total: int
+
+
 class StrategyListResponse(BaseModel):
     """Response model for GET /strategies"""
     success: bool
-    strategies: List[StrategyListItem]
-    total: int
+    data: StrategyListData
+    message: Optional[str] = None
 
 
 class StrategyDetailResponse(BaseModel):
     """Response model for GET /strategies/{id}"""
     success: bool
-    strategy: Dict[str, Any]
+    data: Dict[str, Any]  # Strategy payload wrapped in "data" key
     message: Optional[str] = None
 
 
@@ -70,11 +76,17 @@ class StrategyRunItem(BaseModel):
     live: ModeStatus
 
 
+class StrategyRunsData(BaseModel):
+    """Data payload for GET /strategy-runs"""
+    runs: List[StrategyRunItem]
+    total: int
+
+
 class StrategyRunsResponse(BaseModel):
     """Response model for GET /strategy-runs - Returns ONE card per strategy"""
     success: bool
-    runs: List[StrategyRunItem]
-    total: int
+    data: StrategyRunsData
+    message: Optional[str] = None
 
 
 @router.get("/strategies", response_model=StrategyListResponse)
@@ -141,8 +153,10 @@ def get_strategies(
         
         return StrategyListResponse(
             success=True,
-            strategies=strategy_items,
-            total=total
+            data=StrategyListData(
+                strategies=strategy_items,
+                total=total
+            )
         )
         
     except HTTPException:
@@ -222,7 +236,7 @@ def get_strategy_by_id(
         
         return StrategyDetailResponse(
             success=True,
-            strategy=strategy_payload,  # CRITICAL: Return strategy_payload directly (frontend expects this)
+            data=strategy_payload,  # Strategy payload wrapped in "data" key
             message="Strategy loaded successfully"
         )
         
@@ -361,8 +375,10 @@ def get_strategy_runs(
         
         return StrategyRunsResponse(
             success=True,
-            runs=run_items,
-            total=total
+            data=StrategyRunsData(
+                runs=run_items,
+                total=total
+            )
         )
         
     except HTTPException:

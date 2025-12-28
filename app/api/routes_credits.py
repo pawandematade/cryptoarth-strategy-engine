@@ -4,7 +4,7 @@ Manages user credits for AI and backtesting operations
 """
 from fastapi import APIRouter, HTTPException, status, Header, Depends
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import logging
 from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
@@ -23,6 +23,36 @@ from app.models import User, UserCredits
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class CreditsData(BaseModel):
+    """Data payload for GET /auth/user/credits"""
+    credits: int
+
+
+class CreditsResponse(BaseModel):
+    """Response model for GET /auth/user/credits"""
+    success: bool
+    data: CreditsData
+    message: Optional[str] = None
+
+
+class CreditTransactionItem(BaseModel):
+    """Credit transaction item"""
+    id: int
+    date: str
+    type: str
+    credits: int
+    source: str
+    balance_after: int
+    reason: str
+
+
+class CreditTransactionsResponse(BaseModel):
+    """Response model for GET /auth/credits/transactions"""
+    success: bool
+    data: List[CreditTransactionItem]
+    message: Optional[str] = None
 
 
 def get_credits_by_phone(db: Session, user: User) -> dict:
@@ -201,7 +231,7 @@ class DeductCreditRequest(BaseModel):
     remark: str = Field(..., min_length=1, description="Required remark for deducting credits")
 
 
-@router.get("/user/credits")
+@router.get("/user/credits", response_model=CreditsResponse)
 def get_credits(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user_strict)
@@ -242,38 +272,22 @@ def get_credits(
             credits = 0
             logger.info(f"[Credits Balance] No record found for user_id={user.id}, returning 0")
         
-        result = {
-            "success": True,
-            "data": {
-                "credits": int(credits)  # ALWAYS a number
-            }
-        }
-        
-        # 🚫 FINAL SAFETY: Ensure credits is a number in response
-        if result and result.get("data") and result["data"].get("credits") is not None:
-            result["data"]["credits"] = int(result["data"]["credits"])
-        else:
-            logger.error(f"[CREDITS_API] CRITICAL: Invalid response structure, forcing credits=0")
-            result = {
-                "success": True,
-                "data": {
-                    "credits": 0
-                }
-            }
-        
-        return result
+        return CreditsResponse(
+            success=True,
+            data=CreditsData(
+                credits=int(credits)  # ALWAYS a number
+            )
+        )
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting credits: {e}", exc_info=True)
         # 🚫 ALWAYS return number on error (never None)
-        return {
-            "success": True,
-            "data": {
-                "credits": 0  # ALWAYS a number
-            }
-        }
+        return CreditsResponse(
+            success=True,
+            data=CreditsData(credits=0)
+        )
 
 
 @router.post("/user/consume-credit")
@@ -1188,7 +1202,7 @@ def admin_get_all_credit_transactions(
         )
 
 
-@router.get("/credits/transactions")
+@router.get("/credits/transactions", response_model=CreditTransactionsResponse)
 def get_credit_transactions(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user_strict)
@@ -1267,21 +1281,21 @@ def get_credit_transactions(
             elif "backtest" in reason_lower:
                 source = "Backtest"
             
-            transaction_list.append({
-                "id": txn.id,
-                "date": txn.created_at.isoformat() if txn.created_at else "",
-                "type": txn.type,
-                "credits": txn.credits,
-                "source": source,
-                "balance_after": balance_after,
-                "reason": txn.reason or ""
-            })
+            transaction_list.append(CreditTransactionItem(
+                id=txn.id,
+                date=txn.created_at.isoformat() if txn.created_at else "",
+                type=txn.type,
+                credits=txn.credits,
+                source=source,
+                balance_after=balance_after,
+                reason=txn.reason or ""
+            ))
         
-        return {
-            "success": True,
-            "transactions": transaction_list,
-            "message": f"Retrieved {len(transaction_list)} credit transactions"
-        }
+        return CreditTransactionsResponse(
+            success=True,
+            data=transaction_list,
+            message=f"Retrieved {len(transaction_list)} credit transactions"
+        )
         
     except HTTPException:
         raise
