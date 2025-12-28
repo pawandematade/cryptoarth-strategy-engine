@@ -28,6 +28,9 @@ router = APIRouter()
 class CreditsData(BaseModel):
     """Data payload for GET /auth/user/credits"""
     credits: int
+    total_credits: Optional[int] = None
+    used_credits: Optional[int] = None
+    available_credits: Optional[int] = None
 
 
 class CreditsResponse(BaseModel):
@@ -48,102 +51,20 @@ class CreditTransactionItem(BaseModel):
     reason: str
 
 
+class CreditTransactionsData(BaseModel):
+    """Paginated credit transactions data"""
+    items: List[CreditTransactionItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
 class CreditTransactionsResponse(BaseModel):
     """Response model for GET /auth/credits/transactions"""
     success: bool
-    data: List[CreditTransactionItem]
+    data: CreditTransactionsData
     message: Optional[str] = None
-
-
-def get_credits_by_phone(db: Session, user: User) -> dict:
-    """
-    Get credits for user by phone number (production-safe).
-    🔒 FINAL LOGIC - NEVER RETURNS None:
-    - 10 credits ONLY IF user signed up TODAY
-    - Otherwise, return actual DB credits (never override for old users)
-    - ALWAYS returns a number (never None/null)
-    
-    Args:
-        db: Database session
-        user: User model instance with phone field
-    
-    Returns:
-        dict: {
-            "success": True,
-            "data": {
-                "credits": int  # ALWAYS a number, never None
-            }
-        }
-    """
-    phone = user.phone
-    
-    # Get today's date (timezone-aware)
-    today = datetime.now(timezone.utc).date()
-    
-    # Get user's signup date (created_at) - timezone-aware comparison
-    user_joined_date = None
-    if user.created_at:
-        # Handle both timezone-aware and naive datetimes
-        if user.created_at.tzinfo is not None:
-            user_joined_date = user.created_at.date()
-        else:
-            # If naive, assume UTC
-            user_joined_date = user.created_at.date()
-    
-    # CRITICAL: Query credits by joining UserCredits with User table
-    user_credits = (
-        db.query(UserCredits)
-        .join(User, UserCredits.user_id == User.id)
-        .filter(User.phone == phone)
-        .first()
-    )
-    
-    # 🔒 FINAL RULE: Extract credits - NEVER return None
-    if user_credits:
-        # Credits record exists - use DB value
-        credits_value = user_credits.available_credits
-        
-        # 🚫 STRICTLY FORBIDDEN: Never return None
-        if credits_value is None:
-            credits_value = 0
-        elif not isinstance(credits_value, (int, float)):
-            # Convert to int if not numeric
-            try:
-                credits_value = int(float(credits_value))
-            except (ValueError, TypeError):
-                credits_value = 0
-        
-        # Ensure it's an integer
-        credits = int(credits_value) if credits_value is not None else 0
-        
-        logger.info(f"[CREDITS_API] DB credits found: phone={phone}, credits={credits}")
-    else:
-        # No credits record found
-        # 🔒 FINAL RULE: 10 credits ONLY if user signed up TODAY
-        if user_joined_date and user_joined_date == today:
-            # New signup today - return 10 credits
-            credits = 10
-            logger.info(f"[CREDITS_API] New signup today - returning 10 credits for phone={phone}")
-        else:
-            # Old user or no signup date - return 0 (never return 10 for old users)
-            credits = 0
-            logger.info(f"[CREDITS_API] No credits record - returning 0 for phone={phone}, joined_date={user_joined_date}, today={today}")
-    
-    # 🚫 FINAL SAFETY CHECK: Ensure credits is ALWAYS a number
-    if credits is None:
-        logger.error(f"[CREDITS_API] CRITICAL: credits is None for phone={phone}, forcing to 0")
-        credits = 0
-    
-    # Ensure integer type
-    credits = int(credits) if credits is not None else 0
-    
-    # CRITICAL: Always return data object with number (never None)
-    return {
-        "success": True,
-        "data": {
-            "credits": credits  # ALWAYS a number
-        }
-    }
 
 
 def normalize_mobile(mobile: str) -> str:
@@ -217,7 +138,7 @@ class ManualCreditUpdateRequest(BaseModel):
     admin_name: Optional[str] = Field(None, description="Optional admin name who added the credits")
 
 
-class AddCreditRequest(BaseModel):
+class AdminAddCreditRequest(BaseModel):
     """Request model for adding credits by admin"""
     mobile: str = Field(..., min_length=10, max_length=10, description="10-digit mobile number")
     amount: int = Field(..., gt=0, description="Amount of credits to add")
@@ -249,8 +170,9 @@ def get_credits(
         }
     """
     try:
-        # CRITICAL: Business tables store external_user_id in user_id column
-        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
+        # CRITICAL: ALL business tables store external_user_id in user_id column
+        # user_credits.user_id stores external_user_id (canonical ID), NOT users.id (local ID)
+        # This is consistent with credit_transactions, payment_transactions, etc.
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         query = db.query(UserCredits).filter(
@@ -265,19 +187,32 @@ def get_credits(
         
         # Calculate available credits
         if user_credits:
-            credits = max(0, user_credits.total_credits - user_credits.used_credits)
-            logger.info(f"[Credits Balance] Found: external_user_id={user.external_user_id}, total={user_credits.total_credits}, used={user_credits.used_credits}, available={credits}")
+            total_credits = user_credits.total_credits or 0
+            used_credits = user_credits.used_credits or 0
+            available_credits = max(0, total_credits - used_credits)
+            logger.info(f"[Credits Balance] Found: external_user_id={user.external_user_id}, total={total_credits}, used={used_credits}, available={available_credits}")
+            
+            return CreditsResponse(
+                success=True,
+                data=CreditsData(
+                    credits=int(available_credits),
+                    total_credits=int(total_credits),
+                    used_credits=int(used_credits),
+                    available_credits=int(available_credits)
+                )
+            )
         else:
             # No credits record - return 0
-            credits = 0
             logger.info(f"[Credits Balance] No record found for external_user_id={user.external_user_id}, returning 0")
-        
-        return CreditsResponse(
-            success=True,
-            data=CreditsData(
-                credits=int(credits)  # ALWAYS a number
+            return CreditsResponse(
+                success=True,
+                data=CreditsData(
+                    credits=0,
+                    total_credits=0,
+                    used_credits=0,
+                    available_credits=0
+                )
             )
-        )
         
     except HTTPException:
         raise
@@ -544,20 +479,24 @@ def admin_correct_credits(
                 detail="This transaction is already a correction. Cannot correct a correction."
             )
         
-        # Get user mobile for correction transaction
+        # CRITICAL: original_txn.user_id already stores external_user_id (business table)
+        # No need to look up user - use transaction's user_id directly
+        business_user_id = original_txn.user_id
+        
+        # Get user mobile for correction transaction (optional, for logging)
         from app.models import User
-        user = db.query(User).filter(User.id == original_txn.user_id).first()
+        user = db.query(User).filter(User.external_user_id == business_user_id).first()
         user_mobile = user.phone if user and user.phone else ""
         
         # Get admin name from auth context (TODO: extract from JWT token)
         admin_name = "Admin"  # TODO: Extract from JWT token
         
-        # Apply correction
+        # Apply correction using external_user_id
         action_lower = request.action.lower()
         if action_lower == 'add':
             success, error_msg = add_credits(
                 db=db,
-                user_id=original_txn.user_id,
+                user_id=business_user_id,
                 credits=request.amount,
                 reason=f"Correction: {request.remark}",
                 reference_id=None,
@@ -567,7 +506,7 @@ def admin_correct_credits(
         else:  # deduct
             success, error_msg = deduct_credits(
                 db=db,
-                user_id=original_txn.user_id,
+                user_id=business_user_id,
                 credits=request.amount,
                 reason=f"Correction: {request.remark}",
                 reference_id=None,
@@ -583,7 +522,7 @@ def admin_correct_credits(
         
         # Get the last transaction (the correction we just created)
         correction_txn = db.query(CreditTransaction).filter(
-            CreditTransaction.user_id == original_txn.user_id
+            CreditTransaction.user_id == business_user_id
         ).order_by(CreditTransaction.created_at.desc()).first()
         
         # Link correction to original transaction
@@ -593,8 +532,8 @@ def admin_correct_credits(
             correction_txn.admin_name = "Admin"  # TODO: Get from session
             db.commit()
         
-        # Get updated balance
-        user_credits = get_user_credits(db, original_txn.user_id)
+        # Get updated balance using external_user_id
+        user_credits = get_user_credits(db, business_user_id)
         
         return {
             "success": True,
@@ -669,8 +608,11 @@ def admin_credits_lookup(
                 "message": "Number not present in credit database"
             }
         
-        # Get user credits
-        user_credits = get_user_credits(db, user.id)
+        # CRITICAL: Business tables use external_user_id, not user.id
+        business_user_id = user.external_user_id
+        
+        # Get user credits using external_user_id
+        user_credits = get_user_credits(db, business_user_id)
         total_credits = user_credits.total_credits if user_credits else 0
         
         # Get recent credit transactions (last 10 only)
@@ -802,11 +744,14 @@ def admin_manual_credit_update(
         # Get admin name from auth context (TODO: extract from JWT token)
         admin_name = request.admin_name or "Admin"  # TODO: Extract from JWT token
         
+        # CRITICAL: Business tables use external_user_id, not user.id
+        business_user_id = user.external_user_id
+        
         # Add credits (this will create user_credits if it doesn't exist)
-        # CRITICAL: Pass normalized_mobile and admin_name
+        # CRITICAL: Pass normalized_mobile and admin_name, use external_user_id
         success, error_msg = add_credits(
             db=db,
-            user_id=user.id,
+            user_id=business_user_id,
             credits=request.amount,
             reason=request.reason or f"Manual credit addition by admin",
             reference_id=None,
@@ -820,8 +765,8 @@ def admin_manual_credit_update(
                 detail=error_msg or "Failed to add credits"
             )
         
-        # Get updated user credits
-        user_credits = get_user_credits(db, user.id)
+        # Get updated user credits using external_user_id
+        user_credits = get_user_credits(db, business_user_id)
         
         # Get the last transaction (the one we just created)
         # CRITICAL: Business tables store external_user_id in user_id column
@@ -850,7 +795,7 @@ def admin_manual_credit_update(
 
 @router.post("/admin/credits/add")
 def admin_add_credits_by_mobile(
-    request: AddCreditRequest,
+    request: AdminAddCreditRequest,
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db)
 ):
@@ -908,11 +853,14 @@ def admin_add_credits_by_mobile(
         # For now, use placeholder - should be extracted from authorization header
         admin_name = "Admin"  # TODO: Extract from JWT token
         
+        # CRITICAL: Business tables use external_user_id, not user.id
+        business_user_id = user.external_user_id
+        
         # Add credits (this will create user_credits if it doesn't exist)
-        # CRITICAL: Pass normalized_mobile and admin_name
+        # CRITICAL: Pass normalized_mobile and admin_name, use external_user_id
         success, error_msg = add_credits(
             db=db,
-            user_id=user.id,
+            user_id=business_user_id,
             credits=request.amount,
             reason=request.remark,
             reference_id=None,
@@ -926,8 +874,8 @@ def admin_add_credits_by_mobile(
                 detail=error_msg or "Failed to add credits"
             )
         
-        # Get updated user credits
-        user_credits = get_user_credits(db, user.id)
+        # Get updated user credits using external_user_id
+        user_credits = get_user_credits(db, business_user_id)
         
         return {
             "success": True,
@@ -995,8 +943,11 @@ def admin_deduct_credits_by_mobile(
                 detail="User not found"
             )
         
-        # Check available credits
-        user_credits = get_user_credits(db, user.id)
+        # CRITICAL: Business tables use external_user_id, not user.id
+        business_user_id = user.external_user_id
+        
+        # Check available credits using external_user_id
+        user_credits = get_user_credits(db, business_user_id)
         if not user_credits or user_credits.total_credits < request.amount:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1006,11 +957,11 @@ def admin_deduct_credits_by_mobile(
         # Get admin name from auth context (TODO: extract from JWT token)
         admin_name = "Admin"  # TODO: Extract from JWT token
         
-        # Deduct credits
+        # Deduct credits using external_user_id
         # CRITICAL: Pass normalized_mobile and admin_name
         success, error_msg = deduct_credits(
             db=db,
-            user_id=user.id,
+            user_id=business_user_id,
             credits=request.amount,  # Direct credit amount
             reason=request.remark,
             reference_id=None,
@@ -1024,8 +975,8 @@ def admin_deduct_credits_by_mobile(
                 detail=error_msg or "Failed to deduct credits"
             )
         
-        # Get updated user credits
-        user_credits = get_user_credits(db, user.id)
+        # Get updated user credits using external_user_id
+        user_credits = get_user_credits(db, business_user_id)
         
         return {
             "success": True,
@@ -1206,30 +1157,32 @@ def admin_get_all_credit_transactions(
 
 @router.get("/credits/transactions", response_model=CreditTransactionsResponse)
 def get_credit_transactions(
+    page: int = 1,
+    limit: int = 10,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user_strict)
 ):
     """
-    Get credit transaction history for the authenticated user
+    Get paginated credit transaction history for the authenticated user
     
     Returns:
         dict: {
             "success": bool,
-            "transactions": [
-                {
-                    "id": int,
-                    "date": str,
-                    "type": str,
-                    "credits": int,
-                    "source": str,
-                    "balance_after": int,
-                    "reason": str
-                }
-            ],
+            "data": {
+                "items": [...],
+                "total": int,
+                "page": int,
+                "limit": int,
+                "total_pages": int
+            },
             "message": str
         }
     """
     try:
+        # Validate pagination params
+        page = max(1, page)
+        limit = max(1, min(limit, 100))  # Cap at 100 per page
+        
         # CRITICAL: Business tables store external_user_id in user_id column
         # Use user.external_user_id (canonical ID) NOT user.id (local ID)
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
@@ -1252,27 +1205,46 @@ def get_credit_transactions(
             CreditTransaction.user_id == user.external_user_id
         )
         
-        # Debug: Log row count
-        row_count = query.count()
-        logger.error(f"ROW COUNT = {row_count}")
+        # Get total count before pagination
+        total = query.count()
+        logger.error(f"ROW COUNT = {total}")
         
-        transactions = query.order_by(CreditTransaction.created_at.desc()).all()
-        logger.info(f"[Credit Transactions] Found {len(transactions)} transactions for external_user_id={user.external_user_id}")
+        # Calculate pagination
+        total_pages = (total + limit - 1) // limit if total > 0 else 0
+        
+        # Apply pagination
+        offset = (page - 1) * limit
+        transactions = query.order_by(CreditTransaction.created_at.desc()).offset(offset).limit(limit).all()
+        
+        logger.info(f"[Credit Transactions] Found {len(transactions)} transactions for external_user_id={user.external_user_id}, page={page}, limit={limit}")
         
         # Format credit transactions with running balance
         # We need to calculate balance backwards from current balance
-        transaction_list = []
-        running_balance = current_balance
+        # For pagination, we need to calculate balance from the FIRST transaction on the page
+        # This requires getting all transactions up to the current page to calculate running balance correctly
+        # However, for performance, we'll calculate balance from the start of the page
+        # This means balance_after might not be 100% accurate for paginated results, but it's acceptable for UX
         
-        for txn in transactions:
-            # Calculate balance after this transaction
+        # Get all transactions up to current page to calculate accurate running balance
+        all_transactions_up_to_page = db.query(CreditTransaction).filter(
+            CreditTransaction.user_id == user.external_user_id
+        ).order_by(CreditTransaction.created_at.desc()).limit(offset + limit).all()
+        
+        # Calculate running balance from the end (most recent)
+        running_balance = current_balance
+        balance_map = {}  # Map transaction ID to balance_after
+        
+        for txn in reversed(all_transactions_up_to_page):
             if txn.type == 'credit':
                 balance_after = running_balance
-                running_balance -= txn.credits  # Subtract to get previous balance
+                running_balance -= txn.credits
             else:  # debit
                 balance_after = running_balance
-                running_balance += txn.credits  # Add to get previous balance
-            
+                running_balance += txn.credits
+            balance_map[txn.id] = balance_after
+        
+        transaction_list = []
+        for txn in transactions:
             # Determine source from reason
             source = "Other"
             reason_lower = (txn.reason or "").lower()
@@ -1289,13 +1261,19 @@ def get_credit_transactions(
                 type=txn.type,
                 credits=txn.credits,
                 source=source,
-                balance_after=balance_after,
+                balance_after=balance_map.get(txn.id, current_balance),
                 reason=txn.reason or ""
             ))
         
         return CreditTransactionsResponse(
             success=True,
-            data=transaction_list,
+            data=CreditTransactionsData(
+                items=transaction_list,
+                total=total,
+                page=page,
+                limit=limit,
+                total_pages=total_pages
+            ),
             message=f"Retrieved {len(transaction_list)} credit transactions"
         )
         

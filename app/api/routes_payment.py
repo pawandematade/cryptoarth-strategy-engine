@@ -27,10 +27,19 @@ class PaymentHistoryItem(BaseModel):
     created_at: Optional[str] = None
 
 
+class PaymentHistoryData(BaseModel):
+    """Paginated payment history data"""
+    items: List[PaymentHistoryItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
 class PaymentHistoryResponse(BaseModel):
     """Response model for GET /payment/history"""
     success: bool
-    data: List[PaymentHistoryItem]
+    data: PaymentHistoryData
     message: Optional[str] = None
 
 
@@ -178,13 +187,19 @@ async def razorpay_webhook(
         return {"success": False, "message": f"Webhook processing failed: {str(e)}"}
 
 
-@router.get("/payment/history", response_model=PaymentHistoryResponse)
+@router.get("/payment/history")
 def get_payment_history(
+    page: int = 1,
+    limit: int = 10,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user_strict),
 ):
-    """Get payment history for the authenticated user."""
+    """Get paginated payment history for the authenticated user."""
     try:
+        # Validate pagination params
+        page = max(1, page)
+        limit = max(1, min(limit, 100))  # Cap at 100 per page
+        
         # CRITICAL: Business tables store external_user_id in user_id column
         # Use user.external_user_id (canonical ID) NOT user.id (local ID)
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
@@ -193,32 +208,44 @@ def get_payment_history(
             PaymentTransaction.user_id == user.external_user_id
         )
         
-        # Debug: Log row count
-        row_count = query.count()
-        logger.error(f"ROW COUNT = {row_count}")
+        # Get total count before pagination
+        total = query.count()
+        logger.error(f"ROW COUNT = {total}")
         
+        # Calculate pagination
+        total_pages = (total + limit - 1) // limit if total > 0 else 0
+        
+        # Apply pagination
+        offset = (page - 1) * limit
         payments = query.order_by(
             PaymentTransaction.created_at.desc()
-        ).limit(50).all()
-        logger.info(f"[Payment History] Found {len(payments)} payments for external_user_id={user.external_user_id}")
+        ).offset(offset).limit(limit).all()
+        
+        logger.info(f"[Payment History] Found {len(payments)} payments for external_user_id={user.external_user_id}, page={page}, limit={limit}")
         
         history = []
         for payment in payments:
-            history.append(PaymentHistoryItem(
-                id=payment.id,
-                order_id=payment.gateway_order_id,
-                payment_id=payment.gateway_payment_id,
-                amount=payment.amount,
-                credits_added=payment.credits_added,
-                status=payment.status,
-                provider=payment.provider,
-                created_at=payment.created_at.isoformat() if payment.created_at else None,
-            ))
+            history.append({
+                "id": payment.id,
+                "order_id": payment.gateway_order_id,
+                "payment_id": payment.gateway_payment_id,
+                "amount": payment.amount,
+                "credits_added": payment.credits_added,
+                "status": payment.status,
+                "provider": payment.provider,
+                "created_at": payment.created_at.isoformat() if payment.created_at else None,
+            })
         
-        return PaymentHistoryResponse(
-            success=True,
-            data=history
-        )
+        return {
+            "success": True,
+            "data": {
+                "items": history,
+                "total": total,
+                "page": page,
+                "limit": limit,
+                "total_pages": total_pages
+            }
+        }
     except HTTPException:
         raise
     except Exception as e:
