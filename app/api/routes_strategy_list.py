@@ -93,6 +93,7 @@ class StrategyRunsResponse(BaseModel):
 def get_strategies(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user_strict),
+    strategy_type: Optional[str] = Query(None, description="Filter by strategy type: 'template' for global templates, None for user strategies"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0)
 ):
@@ -105,6 +106,7 @@ def get_strategies(
     Args:
         db: Database session
         user: Authenticated user (from JWT)
+        strategy_type: Optional filter - 'template' for global templates, None for user strategies
         limit: Maximum number of strategies to return
         offset: Number of strategies to skip
     
@@ -114,16 +116,24 @@ def get_strategies(
     try:
         # CRITICAL: Business tables store external_user_id in user_id column
         # Use user.external_user_id (canonical ID) NOT user.id (local ID)
-        # Show ACTIVE and DRAFT strategies only (no admin logic, no created_by filter)
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         # Import StrategyStatus enum for proper filtering
         from app.models import StrategyStatus
         
-        query = db.query(Strategy).filter(
-            Strategy.user_id == user.external_user_id,
-            Strategy.status.in_([StrategyStatus.ACTIVE, StrategyStatus.DRAFT])
-        )
+        # CRITICAL: Templates are GLOBAL and must not be user-scoped
+        if strategy_type == "template":
+            # Template strategies: Global, no user_id filter
+            query = db.query(Strategy).filter(
+                Strategy.is_template == True,
+                Strategy.status == StrategyStatus.ACTIVE
+            )
+        else:
+            # User strategies: Keep existing user_id + ACTIVE/DRAFT logic
+            query = db.query(Strategy).filter(
+                Strategy.user_id == user.external_user_id,
+                Strategy.status.in_([StrategyStatus.ACTIVE, StrategyStatus.DRAFT])
+            )
         
         # Debug: Log row count before pagination
         row_count = query.count()
@@ -189,17 +199,36 @@ def get_strategy_by_id(
     """
     try:
         
-        # Get strategy by ID
+        # CRITICAL: First fetch strategy by ID only (no user_id filter)
+        # Template strategies are GLOBAL and must be accessible without user_id filter
         strategy = db.query(Strategy).filter(
-            Strategy.id == strategy_id,
-            Strategy.user_id == user.external_user_id  # CRITICAL: Use canonical ID
+            Strategy.id == strategy_id
         ).first()
         
         if not strategy:
             raise HTTPException(
                 status_code=404,
-                detail=f"Strategy with ID {strategy_id} not found or access denied"
+                detail=f"Strategy with ID {strategy_id} not found"
             )
+        
+        # CRITICAL: Template strategies are GLOBAL - allow access without user_id filter
+        # User strategies must enforce ownership check
+        if strategy.is_template == True:
+            # Template strategy: Only allow access if ACTIVE
+            from app.models import StrategyStatus
+            if strategy.status != StrategyStatus.ACTIVE:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Strategy with ID {strategy_id} not found"
+                )
+            # Template strategy is ACTIVE: Allow access (global, no user_id check)
+        else:
+            # User strategy: Enforce ownership check
+            if strategy.user_id != user.external_user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Access denied to strategy {strategy_id}"
+                )
         
         # Get latest version with strategy_payload
         latest_version = db.query(StrategyVersion).filter(
