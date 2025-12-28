@@ -41,7 +41,7 @@ def _verify_strategy_access(
     Verify that strategy exists and user has access.
     
     Access is granted if:
-    - User owns the strategy (strategy.user_id == user.id), OR
+    - User owns the strategy (strategy.user_id == user.external_user_id), OR
     - User is vendor (user.is_vendor == True), OR
     - User is admin (check via auth backend or is_admin field if exists)
     
@@ -98,10 +98,10 @@ def _verify_strategy_access(
     # 4. Check access: owner, vendor, or admin
     has_access = False
     
-    # Check if user owns the strategy
-    if strategy.user_id == user.id:
+    # Check if user owns the strategy - Business tables store external_user_id in user_id column
+    if strategy.user_id == user.external_user_id:
         has_access = True
-        logger.debug(f"User {user.id} owns strategy {strategy_id}")
+        logger.debug(f"User {user.external_user_id} owns strategy {strategy_id}")
     
     # Check if user is vendor
     if not has_access and user.is_vendor:

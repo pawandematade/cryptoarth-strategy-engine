@@ -674,10 +674,11 @@ def admin_credits_lookup(
         total_credits = user_credits.total_credits if user_credits else 0
         
         # Get recent credit transactions (last 10 only)
+        # CRITICAL: Business tables store external_user_id in user_id column
         transactions_query = db.query(CreditTransaction).options(
             joinedload(CreditTransaction.user)
         ).filter(
-            CreditTransaction.user_id == user.id
+            CreditTransaction.user_id == user.external_user_id
         ).order_by(
             CreditTransaction.created_at.desc()
         ).limit(10)
@@ -823,9 +824,10 @@ def admin_manual_credit_update(
         user_credits = get_user_credits(db, user.id)
         
         # Get the last transaction (the one we just created)
+        # CRITICAL: Business tables store external_user_id in user_id column
         from app.models import CreditTransaction
         last_transaction = db.query(CreditTransaction).filter(
-            CreditTransaction.user_id == user.id
+            CreditTransaction.user_id == user.external_user_id
         ).order_by(CreditTransaction.created_at.desc()).first()
         
         return {

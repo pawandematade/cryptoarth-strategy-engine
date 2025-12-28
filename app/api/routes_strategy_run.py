@@ -69,7 +69,7 @@ def create_strategy_run(
         # Validate strategy exists and is active
         strategy = db.query(Strategy).filter(
             Strategy.id == request.strategy_id,
-            Strategy.user_id == user.id
+            Strategy.user_id == user.external_user_id
         ).first()
         
         if not strategy:
@@ -257,10 +257,11 @@ def stop_strategy_run(
             raise HTTPException(status_code=401, detail="Failed to authenticate user")
         
         # Find active execution for this strategy
-        # CRITICAL: Filter by user_id directly (no join)
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # Filter by user_id directly (no join)
         execution = db.query(StrategyExecution).filter(
             StrategyExecution.strategy_id == request.strategy_id,
-            StrategyExecution.user_id == user.id,  # CRITICAL: Direct user_id filter
+            StrategyExecution.user_id == user.external_user_id,  # CRITICAL: Use canonical ID
             StrategyExecution.status == ExecutionStatus.running
         ).first()
         

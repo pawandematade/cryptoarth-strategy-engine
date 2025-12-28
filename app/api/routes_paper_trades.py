@@ -86,10 +86,10 @@ def get_paper_trades(
                 detail=f"Execution with ID {execution_id} not found"
             )
         
-        # Verify ownership
+        # Verify ownership - Business tables store external_user_id in user_id column
         strategy = db.query(Strategy).filter(
             Strategy.id == execution.strategy_id,
-            Strategy.user_id == user.id
+            Strategy.user_id == user.external_user_id
         ).first()
         
         if not strategy:
@@ -187,10 +187,10 @@ def get_paper_trades_pdf(
                 detail=f"Execution with ID {execution_id} not found"
             )
         
-        # Verify ownership
+        # Verify ownership - Business tables store external_user_id in user_id column
         strategy = db.query(Strategy).filter(
             Strategy.id == execution.strategy_id,
-            Strategy.user_id == user.id
+            Strategy.user_id == user.external_user_id
         ).first()
         
         if not strategy:

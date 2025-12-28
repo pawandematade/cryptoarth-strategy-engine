@@ -112,15 +112,16 @@ def get_strategies(
         StrategyListResponse with strategies list
     """
     try:
-        # CRITICAL: JWT user.id is the ONLY source of truth
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
         # Show ACTIVE and DRAFT strategies only (no admin logic, no created_by filter)
-        logger.error(f"JWT USER ID = {user.id}")
+        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         # Import StrategyStatus enum for proper filtering
         from app.models import StrategyStatus
         
         query = db.query(Strategy).filter(
-            Strategy.user_id == user.id,
+            Strategy.user_id == user.external_user_id,
             Strategy.status.in_([StrategyStatus.ACTIVE, StrategyStatus.DRAFT])
         )
         
@@ -130,7 +131,7 @@ def get_strategies(
         
         strategies = query.order_by(desc(Strategy.updated_at)).offset(offset).limit(limit).all()
         total = row_count
-        logger.info(f"[Templates] Found {len(strategies)} strategies (total={total}) for user_id={user.id}")
+        logger.info(f"[Templates] Found {len(strategies)} strategies (total={total}) for external_user_id={user.external_user_id}")
         
         # Build response
         strategy_items = []
@@ -191,7 +192,7 @@ def get_strategy_by_id(
         # Get strategy by ID
         strategy = db.query(Strategy).filter(
             Strategy.id == strategy_id,
-            Strategy.user_id == user.id  # CRITICAL: Verify ownership
+            Strategy.user_id == user.external_user_id  # CRITICAL: Use canonical ID
         ).first()
         
         if not strategy:
@@ -272,14 +273,15 @@ def get_strategy_runs(
         StrategyRunsResponse with runs list
     """
     try:
-        # CRITICAL: JWT user.id is the ONLY source of truth
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
         # NO joins - direct filter by user_id
         # NO status filters, NO admin logic
-        logger.error(f"JWT USER ID = {user.id}")
+        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         # Get all executions for user - direct query (no join)
         query = db.query(StrategyExecution).filter(
-            StrategyExecution.user_id == user.id
+            StrategyExecution.user_id == user.external_user_id
         )
         
         if strategy_id:
@@ -290,7 +292,7 @@ def get_strategy_runs(
         logger.error(f"ROW COUNT = {row_count}")
         
         executions = query.order_by(desc(StrategyExecution.created_at)).all()
-        logger.info(f"[History] Found {len(executions)} executions for user_id={user.id}")
+        logger.info(f"[History] Found {len(executions)} executions for external_user_id={user.external_user_id}")
         
         # Group by strategy_code
         strategy_groups = defaultdict(lambda: {
