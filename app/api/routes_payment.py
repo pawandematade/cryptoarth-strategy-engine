@@ -185,11 +185,12 @@ def get_payment_history(
 ):
     """Get payment history for the authenticated user."""
     try:
-        # CRITICAL: JWT user.id is the ONLY source of truth
-        logger.error(f"JWT USER ID = {user.id}")
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
+        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         query = db.query(PaymentTransaction).filter(
-            PaymentTransaction.user_id == user.id
+            PaymentTransaction.user_id == user.external_user_id
         )
         
         # Debug: Log row count
@@ -199,7 +200,7 @@ def get_payment_history(
         payments = query.order_by(
             PaymentTransaction.created_at.desc()
         ).limit(50).all()
-        logger.info(f"[Payment History] Found {len(payments)} payments for user_id={user.id}")
+        logger.info(f"[Payment History] Found {len(payments)} payments for external_user_id={user.external_user_id}")
         
         history = []
         for payment in payments:

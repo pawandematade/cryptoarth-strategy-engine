@@ -249,12 +249,12 @@ def get_credits(
         }
     """
     try:
-        # CRITICAL: Get credits directly by user_id (JWT source of truth)
-        # NO phone-based queries, NO admin overrides
-        logger.error(f"JWT USER ID = {user.id}")
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
+        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         query = db.query(UserCredits).filter(
-            UserCredits.user_id == user.id
+            UserCredits.user_id == user.external_user_id
         )
         
         # Debug: Log row count
@@ -266,11 +266,11 @@ def get_credits(
         # Calculate available credits
         if user_credits:
             credits = max(0, user_credits.total_credits - user_credits.used_credits)
-            logger.info(f"[Credits Balance] Found: user_id={user.id}, total={user_credits.total_credits}, used={user_credits.used_credits}, available={credits}")
+            logger.info(f"[Credits Balance] Found: external_user_id={user.external_user_id}, total={user_credits.total_credits}, used={user_credits.used_credits}, available={credits}")
         else:
             # No credits record - return 0
             credits = 0
-            logger.info(f"[Credits Balance] No record found for user_id={user.id}, returning 0")
+            logger.info(f"[Credits Balance] No record found for external_user_id={user.external_user_id}, returning 0")
         
         return CreditsResponse(
             success=True,
@@ -1228,13 +1228,13 @@ def get_credit_transactions(
         }
     """
     try:
-        # CRITICAL: Get user credits directly by user_id (JWT source of truth)
-        # NO phone-based queries, NO admin overrides
-        logger.error(f"JWT USER ID = {user.id}")
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
+        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         from app.models import UserCredits
         user_credits_query = db.query(UserCredits).filter(
-            UserCredits.user_id == user.id
+            UserCredits.user_id == user.external_user_id
         )
         user_credits = user_credits_query.first()
         
@@ -1244,10 +1244,10 @@ def get_credit_transactions(
         else:
             current_balance = 0
         
-        # Get credit transactions for user - JWT user.id is ONLY source of truth
+        # Get credit transactions for user - Use external_user_id (canonical ID)
         from app.models import CreditTransaction
         query = db.query(CreditTransaction).filter(
-            CreditTransaction.user_id == user.id
+            CreditTransaction.user_id == user.external_user_id
         )
         
         # Debug: Log row count
@@ -1255,7 +1255,7 @@ def get_credit_transactions(
         logger.error(f"ROW COUNT = {row_count}")
         
         transactions = query.order_by(CreditTransaction.created_at.desc()).all()
-        logger.info(f"[Credit Transactions] Found {len(transactions)} transactions for user_id={user.id}")
+        logger.info(f"[Credit Transactions] Found {len(transactions)} transactions for external_user_id={user.external_user_id}")
         
         # Format credit transactions with running balance
         # We need to calculate balance backwards from current balance
