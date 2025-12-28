@@ -139,12 +139,14 @@ def create_strategy_run(
         # run_source matches execution_mode (use lowercase string for run_source)
         run_source = execution_mode_input
         
-        # CRITICAL: Check for existing row by (strategy_code + execution_mode)
-        # RULE: Max 1 row per (strategy_code + execution_mode)
+        # CRITICAL: Check for existing row by (strategy_code + execution_mode + user_id)
+        # RULE: Max 1 row per (strategy_code + execution_mode) per user
+        # ALWAYS scope by user.external_user_id to prevent cross-user data access
         # If exists → UPDATE, If not exists → INSERT
         existing_execution = db.query(StrategyExecution).filter(
             StrategyExecution.strategy_code == strategy.strategy_code,
-            StrategyExecution.execution_mode == execution_mode
+            StrategyExecution.execution_mode == execution_mode,
+            StrategyExecution.user_id == user.external_user_id  # CRITICAL: User scoping
         ).first()
         
         if existing_execution:

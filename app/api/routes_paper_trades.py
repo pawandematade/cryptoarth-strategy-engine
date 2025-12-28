@@ -75,9 +75,12 @@ def get_paper_trades(
         if not user:
             raise HTTPException(status_code=401, detail="Failed to authenticate user")
         
-        # Get execution
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # ALWAYS scope StrategyExecution queries by user.external_user_id
+        # Get execution - scoped by user to prevent data leakage
         execution = db.query(StrategyExecution).filter(
-            StrategyExecution.id == execution_id
+            StrategyExecution.id == execution_id,
+            StrategyExecution.user_id == user.external_user_id  # CRITICAL: User scoping
         ).first()
         
         if not execution:
@@ -176,9 +179,12 @@ def get_paper_trades_pdf(
         if not user:
             raise HTTPException(status_code=401, detail="Failed to authenticate user")
         
-        # Get execution
+        # CRITICAL: Business tables store external_user_id in user_id column
+        # ALWAYS scope StrategyExecution queries by user.external_user_id
+        # Get execution - scoped by user to prevent data leakage
         execution = db.query(StrategyExecution).filter(
-            StrategyExecution.id == execution_id
+            StrategyExecution.id == execution_id,
+            StrategyExecution.user_id == user.external_user_id  # CRITICAL: User scoping
         ).first()
         
         if not execution:
