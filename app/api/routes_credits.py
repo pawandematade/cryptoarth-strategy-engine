@@ -6,16 +6,12 @@ from fastapi import APIRouter, HTTPException, status, Header, Depends
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import logging
-from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 from app.services.credit_service import (
     get_user_credits,
-    check_credits_available,
     deduct_credits,
-    add_credits,
-    correct_credits
+    add_credits
 )
-from app.services.user_sync_service import get_or_sync_user
 from app.api.user_dependencies import get_current_user_strict
 from app.database import get_db
 from app.models import User, UserCredits
@@ -111,10 +107,6 @@ def format_mobile_display(mobile: str) -> str:
     return mobile
 
 
-class ConsumeCreditRequest(BaseModel):
-    """Request model for consuming credits"""
-    action_type: str = Field(..., description="Action type: 'ai_generate', 'ai_improve', or 'backtest'")
-    amount: Optional[int] = Field(None, description="Optional custom credit amount (uses default cost if not provided)")
 
 
 class AddCreditRequest(BaseModel):
@@ -173,7 +165,7 @@ def get_credits(
         # CRITICAL: ALL business tables store external_user_id in user_id column
         # user_credits.user_id stores external_user_id (canonical ID), NOT users.id (local ID)
         # This is consistent with credit_transactions, payment_transactions, etc.
-        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
+        logger.debug(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         query = db.query(UserCredits).filter(
             UserCredits.user_id == user.external_user_id
@@ -181,7 +173,7 @@ def get_credits(
         
         # Debug: Log row count
         row_count = query.count()
-        logger.error(f"ROW COUNT = {row_count}")
+        logger.debug(f"ROW COUNT = {row_count}")
         
         user_credits = query.first()
         
@@ -225,113 +217,10 @@ def get_credits(
         )
 
 
-@router.post("/user/consume-credit")
-def consume_credit(request: ConsumeCreditRequest, authorization: Optional[str] = Header(None)):
-    """
-    Consume credits for an action (AI generate, improve, or backtest)
-    
-    Args:
-        request: ConsumeCreditRequest with action_type and optional amount
-        authorization: Authorization header with user ID
-    
-    Returns:
-        dict: {
-            "success": bool,
-            "credits_remaining": int,
-            "credits_consumed": int,
-            "message": str
-        }
-    """
-    try:
-        user_id = get_user_id_from_header(authorization)
-        
-        # Validate action type
-        if request.action_type not in CREDIT_COSTS and request.amount is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid action type: {request.action_type}. Allowed: {', '.join(CREDIT_COSTS.keys())}"
-            )
-        
-        # Consume credits
-        result = consume_credits(user_id, request.action_type, request.amount)
-        
-        if not result['success']:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,  # 402 Payment Required
-                detail=result['message']
-            )
-        
-        return {
-            "success": True,
-            "credits_remaining": result['credits_remaining'],
-            "credits_consumed": result['credits_consumed'],
-            "message": result['message']
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error consuming credits: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-
-@router.post("/user/check-credits")
-def check_credits(request: ConsumeCreditRequest, authorization: Optional[str] = Header(None)):
-    """
-    Check if user has enough credits for an action (without consuming)
-    
-    Args:
-        request: ConsumeCreditRequest with action_type
-        authorization: Authorization header with user ID
-    
-    Returns:
-        dict: {
-            "has_credits": bool,
-            "credits_required": int,
-            "credits_available": int,
-            "message": str
-        }
-    """
-    try:
-        user_id = get_user_id_from_header(authorization)
-        
-        # Validate action type
-        if request.action_type not in CREDIT_COSTS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid action type: {request.action_type}. Allowed: {', '.join(CREDIT_COSTS.keys())}"
-            )
-        
-        result = check_credits_available(user_id, request.action_type)
-        
-        return {
-            "has_credits": result['has_credits'],
-            "credits_required": result['credits_required'],
-            "credits_available": result['credits_available'],
-            "message": result['message']
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error checking credits: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-
 @router.post("/user/initialize-credits")
 def initialize_credits(authorization: Optional[str] = Header(None)):
     """
-    Initialize credits for a new user (called on user registration)
-    Assigns default free credits (10)
-    
-    Args:
-        authorization: Authorization header with user ID
+    Initialize credits endpoint (DISABLED - free credits discontinued)
     
     Returns:
         dict: {
@@ -340,45 +229,28 @@ def initialize_credits(authorization: Optional[str] = Header(None)):
             "message": str
         }
     """
-    try:
-        user_id = get_user_id_from_header(authorization)
-        
-        # Initialize credits (only if user doesn't have credits yet)
-        success = initialize_user_credits(user_id, DEFAULT_FREE_CREDITS)
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to initialize credits"
-            )
-        
-        credits = get_user_credits(user_id)
-        
-        return {
-            "success": True,
-            "credits": credits,
-            "message": f"Initialized {DEFAULT_FREE_CREDITS} free credits"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error initializing credits: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
+    # FREE CREDITS DISCONTINUED - Return 0 credits
+    return {
+        "success": True,
+        "credits": 0,
+        "message": "Free credits discontinued. Credits can be added via payment or admin."
+    }
 
 
 @router.post("/admin/add-credits")
-def admin_add_credits(user_id: str, request: AddCreditRequest):
+def admin_add_credits(
+    user_id: str,
+    request: ManualCreditUpdateRequest,
+    db: Session = Depends(get_db)
+):
     """
     Admin endpoint to add credits to a user account
     (For future payment integration or admin operations)
     
     Args:
-        user_id: User ID to add credits to
+        user_id: external_user_id (canonical user ID) to add credits to
         request: AddCreditRequest with amount
+        db: Database session
     
     Returns:
         dict: {
@@ -395,19 +267,48 @@ def admin_add_credits(user_id: str, request: AddCreditRequest):
                 detail="User ID is required"
             )
         
-        result = add_credits(user_id, request.amount)
+        # Validate external_user_id exists in users table
+        user = db.query(User).filter(User.external_user_id == int(user_id)).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with external_user_id={user_id} not found"
+            )
         
-        if not result['success']:
+        # CRITICAL: Business tables use external_user_id, not user.id
+        business_user_id = user.external_user_id
+        
+        # Admin name (JWT parsing not implemented)
+        admin_name = "SYSTEM_ADMIN"
+        
+        # Add credits using external_user_id
+        success, error_msg = add_credits(
+            db=db,
+            user_id=business_user_id,
+            credits=request.amount,
+            reason=request.reason,
+            reference_id=None,
+            mobile=user.phone or "",
+            admin_name=admin_name
+        )
+        
+        if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result['message']
+                detail=error_msg or "Failed to add credits"
             )
+        
+        # Get updated user credits
+        user_credits = get_user_credits(db, business_user_id)
+        total_credits = user_credits.total_credits if user_credits else 0
+        used_credits = user_credits.used_credits if user_credits else 0
+        credits_remaining = max(0, total_credits - used_credits)
         
         return {
             "success": True,
-            "credits_remaining": result['credits_remaining'],
-            "credits_added": result['credits_added'],
-            "message": result['message']
+            "credits_remaining": credits_remaining,
+            "credits_added": request.amount,
+            "message": f"Successfully added {request.amount} credits"
         }
         
     except HTTPException:
@@ -603,9 +504,11 @@ def admin_credits_lookup(
         ).first()
         
         if not user:
+            # STANDARDIZED: Always return { found, user, transactions }
             return {
                 "found": False,
-                "message": "Number not present in credit database"
+                "user": None,
+                "transactions": []
             }
         
         # CRITICAL: Business tables use external_user_id, not user.id
@@ -741,8 +644,8 @@ def admin_manual_credit_update(
                 detail="User not registered with this mobile number"
             )
         
-        # Get admin name from auth context (TODO: extract from JWT token)
-        admin_name = request.admin_name or "Admin"  # TODO: Extract from JWT token
+        # Admin name (JWT parsing not implemented)
+        admin_name = "SYSTEM_ADMIN"
         
         # CRITICAL: Business tables use external_user_id, not user.id
         business_user_id = user.external_user_id
@@ -1185,7 +1088,7 @@ def get_credit_transactions(
         
         # CRITICAL: Business tables store external_user_id in user_id column
         # Use user.external_user_id (canonical ID) NOT user.id (local ID)
-        logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
+        logger.debug(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         from app.models import UserCredits
         user_credits_query = db.query(UserCredits).filter(
@@ -1207,7 +1110,7 @@ def get_credit_transactions(
         
         # Get total count before pagination
         total = query.count()
-        logger.error(f"ROW COUNT = {total}")
+        logger.debug(f"ROW COUNT = {total}")
         
         # Calculate pagination
         total_pages = (total + limit - 1) // limit if total > 0 else 0
@@ -1242,7 +1145,7 @@ def get_credit_transactions(
                 balance_after = running_balance
                 running_balance += txn.credits
             balance_map[txn.id] = balance_after
-        
+            
         transaction_list = []
         for txn in transactions:
             # Determine source from reason
