@@ -326,29 +326,38 @@ def get_strategy_runs(
             status_str = execution.status.value if hasattr(execution.status, 'value') else str(execution.status)
             mode_str = execution.execution_mode.value if hasattr(execution.execution_mode, 'value') else str(execution.execution_mode)
             
+            # CRITICAL: Normalize execution mode (handle paper, paper_trade, live, live_trade variants)
+            # Database may store different formats, but we need consistent grouping
+            if mode_str in ["paper", "paper_trade"]:
+                mode_key = "paper"
+            elif mode_str in ["live", "live_trade"]:
+                mode_key = "live"
+            else:
+                # Skip unknown modes (template, etc.)
+                continue
+            
             # Update mode-specific data
-            if mode_str in ['paper', 'live']:
-                mode_data = group[mode_str]
-                mode_data['exists'] = True
-                mode_data['status'] = status_str
-                
-                # Get P&L
-                try:
-                    pnl_value = float(execution.pnl) if execution.pnl else 0.0
-                    # Keep latest P&L if multiple executions exist
-                    if mode_data['pnl'] is None or execution.updated_at > mode_data.get('_last_update', datetime.min):
-                        mode_data['pnl'] = pnl_value
-                        mode_data['_last_update'] = execution.updated_at
-                except (ValueError, TypeError):
-                    mode_data['pnl'] = 0.0
-                
-                # Get started_at (use activated_at if available, else created_at)
-                if execution.activated_at:
-                    if mode_data['started_at'] is None or execution.activated_at > mode_data['started_at']:
-                        mode_data['started_at'] = execution.activated_at
-                elif execution.created_at:
-                    if mode_data['started_at'] is None or execution.created_at > mode_data['started_at']:
-                        mode_data['started_at'] = execution.created_at
+            mode_data = group[mode_key]
+            mode_data['exists'] = True
+            mode_data['status'] = status_str
+            
+            # Get P&L
+            try:
+                pnl_value = float(execution.pnl) if execution.pnl else 0.0
+                # Keep latest P&L if multiple executions exist
+                if mode_data['pnl'] is None or execution.updated_at > mode_data.get('_last_update', datetime.min):
+                    mode_data['pnl'] = pnl_value
+                    mode_data['_last_update'] = execution.updated_at
+            except (ValueError, TypeError):
+                mode_data['pnl'] = 0.0
+            
+            # Get started_at (use activated_at if available, else created_at)
+            if execution.activated_at:
+                if mode_data['started_at'] is None or execution.activated_at > mode_data['started_at']:
+                    mode_data['started_at'] = execution.activated_at
+            elif execution.created_at:
+                if mode_data['started_at'] is None or execution.created_at > mode_data['started_at']:
+                    mode_data['started_at'] = execution.created_at
         
         # Build response - ONE item per strategy_code
         run_items = []
