@@ -31,27 +31,29 @@ print(f"🔧 PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded
 # GST: 18% of base price
 # Total payable = base_price + gst
 # NO 'amount' field - use total_amount only
+# TESTING MODE: All plans hard-coded to ₹5 for payment gateway testing
+# TODO: Revert to original prices after testing
 CREDIT_PLANS = {
     'starter': {
         'name': 'Starter Pack',
         'credits': 50,
-        'base_price': 500,
-        'gst': 90,
-        'total_amount': 590
+        'base_price': 5,  # TESTING: Original 500
+        'gst': 0,  # TESTING: Original 90
+        'total_amount': 5  # TESTING: Original 590
     },
     'professional': {
         'name': 'Professional Pack',
         'credits': 150,
-        'base_price': 1500,
-        'gst': 270,
-        'total_amount': 1770
+        'base_price': 5,  # TESTING: Original 1500
+        'gst': 0,  # TESTING: Original 270
+        'total_amount': 5  # TESTING: Original 1770
     },
     'enterprise': {
         'name': 'Enterprise Pack',
         'credits': 300,
-        'base_price': 3000,
-        'gst': 540,
-        'total_amount': 3540
+        'base_price': 5,  # TESTING: Original 3000
+        'gst': 0,  # TESTING: Original 540
+        'total_amount': 5  # TESTING: Original 3540
     }
 }
 
