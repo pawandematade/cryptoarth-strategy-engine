@@ -355,9 +355,15 @@ def process_payment_success(
             'message': 'Invalid user ID. Payment cannot be processed.'
         }
     
+    # CRITICAL: Warn if user_id = 1 (admin user) - this should only happen if admin is actually paying
+    if user_id == 1:
+        logger.warning(f"⚠️ WARNING: user_id=1 (admin user) detected. Verify this is intentional admin payment.")
+        print(f"⚠️ WARNING: user_id=1 (admin user) detected. Verify this is intentional admin payment.")
+    
     # CRITICAL: Log the user_id being used for payment processing
     logger.info(f"🚀 PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
     logger.info(f"🚀 AUTHENTICATED USER_ID: {user_id} (MUST NOT be 1 unless admin is paying)")
+    print(f"🚀 PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
     
     try:
         # PRODUCTION FIX: BYPASS signature validation (frontend doesn't send signature)
@@ -422,29 +428,12 @@ def process_payment_success(
                 f"No credits added to prevent inflation."
             )
         
-        # STEP 3: Fetch user from database (JWT user_id is source of truth)
-        from app.models import User
-        user = db.query(User).filter(User.id == user_id).first()
-        
-        if not user:
-            logger.error(f"CRITICAL: JWT-authenticated user_id={user_id} not found in database. Payment cannot be processed.")
-            return {
-                'success': False,
-                'user_id': user_id,
-                'credits_added': 0,
-                'message': 'Authenticated user not found'
-            }
-        
-        # Capture customer details snapshot from authenticated user record
-        # CRITICAL: Customer details MUST come from users table, NOT Razorpay or frontend
+        # STEP 3: Use JWT-authenticated user_id directly (NO User table query)
+        # CRITICAL: JWT user_id is the ONLY source of truth - never re-query User table
+        # This prevents mismatch between user.id and user.external_user_id
         customer_name = None
-        if user.first_name or user.last_name:
-            customer_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        elif user.username:
-            customer_name = user.username
-        
-        customer_email = user.email
-        customer_mobile = user.phone
+        customer_email = None
+        customer_mobile = None
         
         # HARD LOG - PROOF EXECUTION (MANDATORY)
         logger.error("🔥 PAYMENT DB UPDATE START")
@@ -497,6 +486,9 @@ def process_payment_success(
         db.add(payment_tx)
         
         # STEP 7: Commit - ONLY ONCE (ISSUE 2 FIX: Single commit, no flush)
+        # CRITICAL: Log user_id before commit to verify correct user
+        print(f"VERIFY PAYMENT USER_ID: {user_id}")
+        logger.error(f"VERIFY PAYMENT USER_ID: {user_id}")
         try:
             db.commit()
             db.refresh(user_credits)

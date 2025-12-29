@@ -100,11 +100,24 @@ def verify_payment(
         )
 
     try:
+        # CRITICAL: JWT authenticated user is the ONLY source of truth
+        # Log user details to verify correct user_id
+        logger.error(f"VERIFY PAYMENT ROUTE: user.id={user.id}, user.external_user_id={user.external_user_id}, order_id={order_id}")
+        print(f"VERIFY PAYMENT ROUTE: user.id={user.id}, user.external_user_id={user.external_user_id}, order_id={order_id}")
+        
+        # CRITICAL: Use user.id (local DB ID) - this is the JWT-authenticated user
+        user_id = user.id
+        
         # CRITICAL: Call with positional arguments only (no keyword args)
         # Function signature: process_payment_success(db, order_id, payment_id, signature, user_id, amount)
         # Using tuple unpacking to ensure positional-only call
-        args = (db, order_id, payment_id, signature, user.id, amount)
+        args = (db, order_id, payment_id, signature, user_id, amount)
         result = process_payment_success(*args)
+        
+        # CRITICAL: Log response to verify user_id in response
+        logger.error(f"VERIFY PAYMENT RESPONSE: result.user_id={result.get('user_id')}, expected={user_id}")
+        print(f"VERIFY PAYMENT RESPONSE: result.user_id={result.get('user_id')}, expected={user_id}")
+        
         return result
         
     except HTTPException:
