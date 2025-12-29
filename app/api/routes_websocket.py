@@ -264,33 +264,60 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning("❌ Legacy subscribe ignored")
                         continue
 
-                    symbols = message.get("symbols", [])
-                    if isinstance(symbols, (int, str)):
-                        symbols = [symbols]
-
-                    product_ids = [
-                        int(s) for s in symbols
-                        if isinstance(s, int) or (isinstance(s, str) and s.isdigit())
-                    ]
+                    # ✅ FIX: Handle product_ids from frontend subscribe message
+                    product_ids = message.get("product_ids", [])
+                    if not product_ids:
+                        # Fallback to symbols for backward compatibility
+                        symbols = message.get("symbols", [])
+                        if isinstance(symbols, (int, str)):
+                            symbols = [symbols]
+                        product_ids = [
+                            int(s) for s in symbols
+                            if isinstance(s, int) or (isinstance(s, str) and s.isdigit())
+                        ]
 
                     if not product_ids:
+                        logger.warning(f"❌ Subscribe message missing product_ids: {message}")
                         continue
 
+                    logger.info(f"📥 Subscribe received: product_ids={product_ids}")
+
+                    # Get symbol mapping from database
                     mapping = get_symbol_mapping(product_ids)
                     delta_symbols = list(mapping.values())
 
+                    if not delta_symbols:
+                        logger.warning(f"❌ No symbols found for product_ids: {product_ids}")
+                        continue
+
+                    # Store subscriptions for this connection
                     connection_manager.connection_subscriptions[websocket].update(
                         [str(pid) for pid in product_ids]
                     )
 
+                    # Send confirmation to frontend
                     await websocket.send_json({
                         "type": "subscribed",
-                        "symbols": product_ids,
+                        "product_ids": product_ids,
+                        "symbols": delta_symbols,
                     })
 
+                    # Subscribe to Delta for new symbols
                     new = [s for s in delta_symbols if s not in subscribed_symbols]
-                    if new and delta_ws:
-                        subscribe_to_delta(delta_ws, new)
+                    if new:
+                        logger.info(f"🚀 Subscribing to Delta for new symbols: {new}")
+                        # Ensure Delta WebSocket is connected
+                        start_price_broadcast_if_needed()
+                        # Wait a bit for Delta connection to establish
+                        await asyncio.sleep(0.5)
+                        if delta_ws:
+                            subscribe_to_delta(delta_ws, new)
+                        else:
+                            logger.warning("❌ Delta WebSocket not available, retrying connection...")
+                            connect_to_delta()
+                            await asyncio.sleep(1)
+                            if delta_ws:
+                                subscribe_to_delta(delta_ws, new)
 
             except asyncio.TimeoutError:
                 continue
