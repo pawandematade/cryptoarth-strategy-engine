@@ -78,6 +78,11 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # Default to gpt-4o-min
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 
+# Internal Service Token (TEMP - for Django → FastAPI bridge until backend merge)
+# This token is used to authenticate internal service-to-service calls
+# Only Django backend will use this token - never exposed to frontend
+INTERNAL_SERVICE_TOKEN = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+
 # Database Configuration (using STRATEGY_ prefixed names)
 # NOTE: Strategy Engine is now part of Django - database is managed by Django
 # These variables are kept for backward compatibility but are optional

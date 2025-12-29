@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from sqlalchemy.orm import Session
-from typing import Optional, List, Dict, Any
+import os
+import logging
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+
+from app.config import INTERNAL_SERVICE_TOKEN
 from app.database import get_db
 from app.services.payment_service import process_payment_success, create_razorpay_order, get_credit_plans
 from app.api.user_dependencies import get_current_user_strict
 from app.models import User, PaymentTransaction
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +131,126 @@ def verify_payment(
         raise HTTPException(
             status_code=500,
             detail="Payment verification failed"
+        )
+
+
+# ============================================================================
+# ============================================================================
+# TEMP INTERNAL ENDPOINT - REMOVE AFTER DJANGO + FASTAPI MERGE
+# ============================================================================
+# ============================================================================
+# This endpoint is a TEMPORARY bridge for Django backend to call FastAPI
+# payment processing. Django has authenticated user, so it passes user_id to FastAPI.
+# 
+# CRITICAL: This is TEMPORARY until backends are merged and JWT flows directly to FastAPI.
+# 
+# REMOVAL INSTRUCTIONS:
+# 1. After backend merge, delete this entire endpoint (lines below this marker)
+# 2. Remove InternalPaymentVerifyPayload model
+# 3. Remove INTERNAL_SERVICE_TOKEN from config.py
+# 4. Update Django to call FastAPI directly with JWT
+# ============================================================================
+# ============================================================================
+
+class InternalPaymentVerifyPayload(BaseModel):
+    """Request model for internal payment verification (Django → FastAPI)"""
+    user_id: int = Field(..., description="Authenticated user ID from Django backend")
+    razorpay_order_id: str = Field(..., description="Razorpay order ID")
+    razorpay_payment_id: str = Field(..., description="Razorpay payment ID")
+    razorpay_signature: str = Field(..., description="Razorpay signature")
+    amount: float = Field(..., description="Payment amount in INR")
+
+
+@router.post("/payment/verify-internal")
+def verify_payment_internal(
+    payload: InternalPaymentVerifyPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    TEMPORARY: Internal endpoint for Django backend to verify payments.
+    
+    This endpoint is protected by INTERNAL_SERVICE_TOKEN and is only called
+    by Django backend after Razorpay verification succeeds.
+    
+    CRITICAL RULES:
+    - user_id comes from Django authenticated user (trusted internal call)
+    - NO User table query in FastAPI
+    - NO frontend user_id trust
+    - Reuses existing process_payment_success logic
+    
+    Args:
+        payload: InternalPaymentVerifyPayload with user_id and payment details
+        request: FastAPI Request object (for Authorization header)
+        db: Database session
+    
+    Returns:
+        dict: {
+            "success": bool,
+            "user_id": int,
+            "credits_added": int,
+            "credits_remaining": int,
+            "message": str
+        }
+    """
+    # CRITICAL: Validate INTERNAL_SERVICE_TOKEN (STRICT)
+    # Token must be configured - fail fast if missing
+    if not INTERNAL_SERVICE_TOKEN:
+        logger.error("INTERNAL_SERVICE_TOKEN not configured - internal endpoint disabled")
+        raise HTTPException(
+            status_code=503,
+            detail="Internal service token not configured"
+        )
+    
+    # Validate Authorization header exists and matches token
+    auth = request.headers.get("Authorization")
+    if not auth or auth != f"Bearer {INTERNAL_SERVICE_TOKEN}":
+        logger.warning(f"Unauthorized internal call attempt - invalid or missing token")
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized internal call"
+        )
+    
+    # CRITICAL: Validate user_id is positive
+    if payload.user_id <= 0:
+        logger.error(f"Invalid user_id={payload.user_id} in internal payment verify")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid user_id"
+        )
+    
+    # CRITICAL: Use user_id from Django (trusted internal call)
+    # DO NOT query User table - user_id is trusted from Django authenticated user
+    user_id = payload.user_id
+    
+    logger.info(f"🔐 INTERNAL PAYMENT VERIFY: user_id={user_id}, order_id={payload.razorpay_order_id}, payment_id={payload.razorpay_payment_id}")
+    
+    try:
+        # Reuse existing payment processing logic
+        # CRITICAL: Call with positional arguments only (no keyword args)
+        # Function signature: process_payment_success(db, order_id, payment_id, signature, user_id, amount)
+        args = (
+            db,
+            payload.razorpay_order_id,
+            payload.razorpay_payment_id,
+            payload.razorpay_signature,
+            user_id,
+            payload.amount
+        )
+        result = process_payment_success(*args)
+        
+        logger.info(f"✅ INTERNAL PAYMENT VERIFY SUCCESS: user_id={user_id}, credits_added={result.get('credits_added', 0)}")
+        
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"❌ INTERNAL PAYMENT VERIFY ERROR: user_id={user_id}, error={e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal payment verification failed"
         )
 
 
