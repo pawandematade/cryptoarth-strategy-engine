@@ -182,13 +182,10 @@ def subscribe_to_delta(ws, symbols: List[str], orderbook: bool):
     if not symbols:
         return
 
-    new_symbols = [s for s in symbols if s not in subscribed_symbols]
-    if not new_symbols:
-        return
+    channels = [{"name": "v2/ticker", "symbols": symbols}]
 
-    channels = [{"name": "v2/ticker", "symbols": new_symbols}]
     if orderbook:
-        channels.append({"name": "l1_orderbook", "symbols": new_symbols})
+        channels.append({"name": "l1_orderbook", "symbols": symbols})
 
     payload = {
         "type": "subscribe",
@@ -198,7 +195,11 @@ def subscribe_to_delta(ws, symbols: List[str], orderbook: bool):
     }
 
     ws.send(json.dumps(payload))
-    subscribed_symbols.update(new_symbols)
+
+    # IMPORTANT: Update after sending (Delta allows duplicate subscribe safely)
+    subscribed_symbols.update(symbols)
+
+    logger.info(f"🚀 Delta subscribed symbols: {symbols}")
 
 
 def connect_to_delta():
