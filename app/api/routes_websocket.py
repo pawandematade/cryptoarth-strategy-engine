@@ -44,6 +44,14 @@ product_to_symbol: Dict[int, str] = {}
 symbol_to_product: Dict[str, int] = {}
 symbol_mapping_lock = threading.Lock()
 
+GLOBAL_HEADER_PRODUCTS = {
+    27: "BTCUSD",
+    3136: "ETHUSD",
+    14823: "SOLUSD",
+}
+
+delta_orderbook_required = False
+
 # ===============================
 # CONNECTION MANAGER
 # ===============================
@@ -51,13 +59,16 @@ symbol_mapping_lock = threading.Lock()
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
-        self.connection_subscriptions: Dict[WebSocket, Set[str]] = {}
+        self.connection_subscriptions: Dict[WebSocket, Dict] = {}
         self.connection_loops: Dict[WebSocket, asyncio.AbstractEventLoop] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
-        self.connection_subscriptions[websocket] = set()
+        self.connection_subscriptions[websocket] = {
+            "product_ids": set(),
+            "orderbook": False
+        }
         self.connection_loops[websocket] = asyncio.get_event_loop()
         logger.info(f"✅ WS connected | total={len(self.active_connections)}")
 
@@ -67,7 +78,13 @@ class ConnectionManager:
         self.connection_loops.pop(websocket, None)
         logger.info(f"❌ WS disconnected | total={len(self.active_connections)}")
 
-    def broadcast(self, message: dict):
+    def broadcast_ticker(self, message):
+        self._broadcast(message)
+
+    def broadcast_orderbook(self, message):
+        self._broadcast(message, orderbook_only=True)
+
+    def _broadcast(self, message, orderbook_only=False):
         if not self.active_connections:
             return
 
@@ -76,20 +93,26 @@ class ConnectionManager:
 
         for ws in list(self.active_connections):
             try:
-                if ws.client_state != WebSocketState.CONNECTED:
-                    dead.append(ws)
+                subs = self.connection_subscriptions.get(ws)
+                if not subs:
                     continue
 
                 pid = message.get("product_id")
                 if pid is None:
                     continue
 
-                if str(pid) not in self.connection_subscriptions.get(ws, set()):
+                if str(pid) not in subs["product_ids"]:
                     continue
 
-                loop = self.connection_loops.get(ws)
-                if loop and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(ws.send_text(msg), loop)
+                if message.get("type") == "l1_orderbook" and not subs["orderbook"]:
+                    continue
+
+                if ws.client_state == WebSocketState.CONNECTED:
+                    loop = self.connection_loops.get(ws)
+                    if loop and loop.is_running():
+                        asyncio.run_coroutine_threadsafe(ws.send_text(msg), loop)
+                else:
+                    dead.append(ws)
 
             except Exception:
                 dead.append(ws)
@@ -130,7 +153,7 @@ def on_delta_message(ws, message):
                     logger.warning(f"Redis write failed: {e}")
 
                 # ✅ FIX: Include ALL ticker fields (OHLC, Change %)
-                connection_manager.broadcast({
+                connection_manager.broadcast_ticker({
                     "type": "ticker",
                     "symbol": symbol,
                     "product_id": product_id,
@@ -143,7 +166,7 @@ def on_delta_message(ws, message):
                 })
 
         elif data.get("type") == "l1_orderbook":
-            connection_manager.broadcast({
+            connection_manager.broadcast_orderbook({
                 "type": "l1_orderbook",
                 "symbol": symbol,
                 "product_id": product_id,
@@ -155,23 +178,27 @@ def on_delta_message(ws, message):
         logger.warning(f"Delta parse error: {e}")
 
 
-def subscribe_to_delta(ws, symbols: List[str]):
+def subscribe_to_delta(ws, symbols: List[str], orderbook: bool):
     if not symbols:
         return
+
+    new_symbols = [s for s in symbols if s not in subscribed_symbols]
+    if not new_symbols:
+        return
+
+    channels = [{"name": "v2/ticker", "symbols": new_symbols}]
+    if orderbook:
+        channels.append({"name": "l1_orderbook", "symbols": new_symbols})
 
     payload = {
         "type": "subscribe",
         "payload": {
-            "channels": [
-                {"name": "v2/ticker", "symbols": symbols},
-                {"name": "l1_orderbook", "symbols": symbols},
-            ]
+            "channels": channels
         },
     }
 
     ws.send(json.dumps(payload))
-    subscribed_symbols.update(symbols)
-    logger.info(f"🚀 Delta subscribed → {symbols}")
+    subscribed_symbols.update(new_symbols)
 
 
 def connect_to_delta():
@@ -186,7 +213,7 @@ def connect_to_delta():
         # 🔥 AUTO subscribe to already requested symbols
         if subscribed_symbols:
             logger.info(f"🚀 Auto-subscribing on Delta connect: {list(subscribed_symbols)}")
-            subscribe_to_delta(ws, list(subscribed_symbols))
+            subscribe_to_delta(ws, list(subscribed_symbols), delta_orderbook_required)
 
     delta_ws = websocket.WebSocketApp(
         DELTA_WS_URL,
@@ -227,10 +254,6 @@ def get_symbol_mapping(product_ids: List[int]) -> Dict[int, str]:
         )
         for r in res:
             mapping[int(r[0])] = r[1]
-
-        with symbol_mapping_lock:
-            product_to_symbol.update(mapping)
-            symbol_to_product.update({v: k for k, v in mapping.items()})
 
     finally:
         db.close()
@@ -282,18 +305,43 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     logger.info(f"📥 Subscribe received: product_ids={product_ids}")
 
-                    # Get symbol mapping from database
-                    mapping = get_symbol_mapping(product_ids)
-                    delta_symbols = list(mapping.values())
+                    # Global Header FIX: use hardcoded symbols (no DB call)
+                    delta_symbols = []
+                    mapping = {}
+
+                    for pid in product_ids:
+                        if pid in GLOBAL_HEADER_PRODUCTS:
+                            symbol = GLOBAL_HEADER_PRODUCTS[pid]
+                            mapping[pid] = symbol
+                            delta_symbols.append(symbol)
+
+                    # Fallback to DB for non-header products (copy trade, etc.)
+                    missing_pids = [pid for pid in product_ids if pid not in mapping]
+
+                    if missing_pids:
+                        db_mapping = get_symbol_mapping(missing_pids)
+                        mapping.update(db_mapping)
+                        delta_symbols.extend(db_mapping.values())
 
                     if not delta_symbols:
                         logger.warning(f"❌ No symbols found for product_ids: {product_ids}")
                         continue
 
+                    # Update symbol maps
+                    with symbol_mapping_lock:
+                        product_to_symbol.update(mapping)
+                        symbol_to_product.update({v: k for k, v in mapping.items()})
+
                     # Store subscriptions for this connection
-                    connection_manager.connection_subscriptions[websocket].update(
+                    connection_manager.connection_subscriptions[websocket]["product_ids"].update(
                         [str(pid) for pid in product_ids]
                     )
+                    
+                    # Enable orderbook ONLY if explicitly requested
+                    global delta_orderbook_required
+                    if message.get("orderbook") is True:
+                        connection_manager.connection_subscriptions[websocket]["orderbook"] = True
+                        delta_orderbook_required = True
 
                     # Send confirmation to frontend
                     await websocket.send_json({
@@ -303,21 +351,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
 
                     # Subscribe to Delta for new symbols
-                    new = [s for s in delta_symbols if s not in subscribed_symbols]
-                    if new:
-                        logger.info(f"🚀 Subscribing to Delta for new symbols: {new}")
-                        # Ensure Delta WebSocket is connected
-                        start_price_broadcast_if_needed()
-                        # Wait a bit for Delta connection to establish
-                        await asyncio.sleep(0.5)
+                    need_orderbook = message.get("orderbook") is True
+
+                    start_price_broadcast_if_needed()
+                    await asyncio.sleep(0.5)
+
+                    if delta_ws:
+                        subscribe_to_delta(delta_ws, delta_symbols, need_orderbook)
+                    else:
+                        logger.warning("❌ Delta WebSocket not available, retrying connection...")
+                        connect_to_delta()
+                        await asyncio.sleep(1)
                         if delta_ws:
-                            subscribe_to_delta(delta_ws, new)
-                        else:
-                            logger.warning("❌ Delta WebSocket not available, retrying connection...")
-                            connect_to_delta()
-                            await asyncio.sleep(1)
-                            if delta_ws:
-                                subscribe_to_delta(delta_ws, new)
+                            subscribe_to_delta(delta_ws, delta_symbols, need_orderbook)
 
             except asyncio.TimeoutError:
                 continue
