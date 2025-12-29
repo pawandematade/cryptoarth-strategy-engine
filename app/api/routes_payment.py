@@ -1,7 +1,7 @@
-import os
 import logging
+import requests
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -16,6 +16,39 @@ from app.models import User, PaymentTransaction
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Payment"])
+
+
+def fetch_user_from_django(request: Request) -> Optional[int]:
+    """
+    Fetch user ID from Django user profile API as fallback.
+    
+    Args:
+        request: FastAPI Request object (for Authorization header)
+        
+    Returns:
+        Optional[int]: User ID from Django, or None if fetch fails
+    """
+    try:
+        token = request.headers.get("Authorization")
+        if not token:
+            return None
+
+        resp = requests.get(
+            "https://trade-api.cryptoarth.in/auth/user/",
+            headers={"Authorization": token},
+            timeout=5,
+        )
+
+        if resp.status_code != 200:
+            return None
+
+        user_data = resp.json()
+        user_id = user_data.get("id")
+        return user_id if user_id else None
+        
+    except Exception as e:
+        logger.warning(f"Failed to fetch user from Django: {e}")
+        return None
 
 
 class PaymentHistoryItem(BaseModel):
@@ -87,8 +120,8 @@ def create_order(
 @router.post("/payment/verify")
 def verify_payment(
     payload: dict,
+    request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user_strict),
 ):
     """Verify payment and add credits to user."""
     order_id = payload.get("order_id")
@@ -103,13 +136,20 @@ def verify_payment(
         )
 
     try:
-        # CRITICAL: JWT authenticated user is the ONLY source of truth
-        # Log user details to verify correct user_id
-        logger.error(f"VERIFY PAYMENT ROUTE: user.id={user.id}, user.external_user_id={user.external_user_id}, order_id={order_id}")
-        print(f"VERIFY PAYMENT ROUTE: user.id={user.id}, user.external_user_id={user.external_user_id}, order_id={order_id}")
-        
-        # CRITICAL: Use user.id (local DB ID) - this is the JWT-authenticated user
-        user_id = user.id
+        # Try to resolve user_id from JWT first
+        user = None
+        try:
+            user = get_current_user_strict(request, request.headers.get("Authorization"), db)
+        except Exception:
+            user = None
+
+        if not user:
+            user_id = fetch_user_from_django(request)
+        else:
+            user_id = user.id
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Unable to resolve user")
         
         # CRITICAL: Call with positional arguments only (no keyword args)
         # Function signature: process_payment_success(db, order_id, payment_id, signature, user_id, amount)
@@ -118,16 +158,17 @@ def verify_payment(
         result = process_payment_success(*args)
         
         # CRITICAL: Log response to verify user_id in response
-        logger.error(f"VERIFY PAYMENT RESPONSE: result.user_id={result.get('user_id')}, expected={user_id}")
+        logger.info(f"VERIFY PAYMENT RESPONSE: result.user_id={result.get('user_id')}, expected={user_id}")
         print(f"VERIFY PAYMENT RESPONSE: result.user_id={result.get('user_id')}, expected={user_id}")
         
         return result
         
     except HTTPException:
-        # IMPORTANT: propagate correct HTTP status (400)
+        # IMPORTANT: propagate correct HTTP status
         raise
 
     except Exception as e:
+        logger.error(f"Payment verification failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Payment verification failed"
