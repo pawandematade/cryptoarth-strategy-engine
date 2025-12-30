@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Dict, Optional, Any
 from fastapi import HTTPException
 from app.store.redis_client import redis_client
-from app.services.credit_service import get_rupee_to_credit_ratio
 from app.models import PaymentTransaction
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
@@ -382,22 +381,8 @@ def process_payment_success(
                 "message": "Payment already processed"
             }
         
-        # PRODUCTION FIX: REMOVE Redis order dependency (causes early return if Redis miss)
-        # Try to get amount from Redis if not provided, but don't fail if Redis miss
-        order_data = None
-        total_amount = 0
-        if not amount:
-            try:
-                order_key = f"PAYMENT_ORDER:{order_id}"
-                order_data_str = redis_client.get(order_key)
-                if order_data_str:
-                    order_data = json.loads(order_data_str)
-                    amount = order_data.get('amount', 0)  # Total payable (base + GST) in INR
-                    total_amount = amount
-            except Exception as redis_error:
-                logger.warning(f"Redis lookup failed for order {order_id}: {redis_error}. Continuing without Redis data.")
-        
-        # If still no amount, try to fetch from Razorpay API
+        # STEP 1: Fetch amount from Razorpay API if not provided
+        # REMOVED: Redis/plan/ratio logic - amount is the ONLY source of truth
         if not amount or amount <= 0:
             try:
                 from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
@@ -406,76 +391,41 @@ def process_payment_success(
                 payment_data = client.payment.fetch(payment_id)
                 if payment_data and 'amount' in payment_data:
                     amount = float(payment_data['amount']) / 100  # Convert from paise to INR
-                    total_amount = amount
                     logger.info(f"Fetched amount from Razorpay API: {amount} INR")
             except Exception as razorpay_error:
                 logger.error(f"Failed to fetch payment amount from Razorpay: {razorpay_error}")
         
-        # STEP 2: Calculate credits from plan metadata (NOT from amount)
-        credits_added = 0
-        
-        if order_data and "credits" in order_data:
-            credits_added = int(order_data["credits"])
-            logger.info(f"Credits derived from plan metadata: {credits_added}")
-        else:
-            logger.warning(
-                f"Credits missing in order metadata for payment_id={payment_id}. "
-                f"Will calculate from amount using fallback ratio."
-            )
-        
-        # CRITICAL FIX 2: Credits fallback logic - calculate from amount if Redis metadata missing
-        if credits_added <= 0:
-            if amount and amount > 0:
-                try:
-                    ratio = get_rupee_to_credit_ratio()
-                    credits_added = int(amount / ratio)
-                    logger.error(f"🔍 CREDITS FALLBACK: amount={amount}, ratio={ratio}, credits_added={credits_added}")
-                    if credits_added <= 0:
-                        logger.error(f"⚠️ WARNING: Credits fallback resulted in 0 or negative: amount={amount}, ratio={ratio}")
-                except Exception as ratio_error:
-                    logger.error(f"❌ Failed to get credit ratio for fallback: {ratio_error}", exc_info=True)
-                    credits_added = 0
-            else:
-                logger.error(f"⚠️ Credits fallback skipped: amount={amount} (amount must be > 0 for fallback)")
-        
-        # CRITICAL: Log final credits value before DB transaction
-        logger.error(f"🔍 FINAL CREDITS VALUE: credits_added={credits_added}, amount={amount}")
-        
-        # STEP 3: Get user details for customer info and mobile
+        # STEP 2: Get user details for customer info and mobile
         # CRITICAL: Query User to get name, email, and mobile for payment records
         from app.models import User
         user = db.query(User).filter(User.external_user_id == user_id).first()
         
-        # Initialize customer details
-        user_mobile = None
-        customer_name = None
-        customer_email = None
-        
+        # HARD FALLBACK: Customer details must NEVER be NULL if user exists
         if user:
-            # Get mobile
-            if user.phone:
-                user_mobile = user.phone
-                logger.info(f"User mobile found: {user_mobile}")
-            
-            # Get customer name (try multiple fields)
+            # Customer name with hard fallback
             if user.first_name or user.last_name:
                 customer_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
             elif hasattr(user, 'full_name') and user.full_name:
                 customer_name = user.full_name
-            elif hasattr(user, 'name') and user.name:
-                customer_name = user.name
             elif hasattr(user, 'username') and user.username:
                 customer_name = user.username
+            else:
+                customer_name = f"user_{user_id}"  # HARD FALLBACK
             
-            # Get customer email
-            if user.email:
-                customer_email = user.email
+            # Customer email with hard fallback
+            customer_email = user.email if hasattr(user, 'email') and user.email else ""
             
-            logger.info(f"User details extracted: name={customer_name}, email={customer_email}, mobile={user_mobile}")
+            # Customer mobile with hard fallback
+            customer_mobile = user.phone if hasattr(user, 'phone') and user.phone else ""
+            user_mobile = customer_mobile  # For credit_transactions
+            
+            logger.info(f"User details extracted: name={customer_name}, email={customer_email}, mobile={customer_mobile}")
         else:
             logger.warning(f"User not found for external_user_id={user_id}, customer details will be NULL")
-        
-        customer_mobile = user_mobile  # Use user_mobile (can be None)
+            customer_name = None
+            customer_email = None
+            customer_mobile = None
+            user_mobile = None
         
         # CRITICAL FIX 1: FINAL AMOUNT VALIDATION (STRICT) - BEFORE DB TRANSACTION
         # Prevent ₹0 payments from being committed
@@ -489,15 +439,39 @@ def process_payment_success(
                 "message": "Invalid payment amount. Payment cannot be processed."
             }
         
+        # ============================================================
+        # HARD CREDIT RULE (SINGLE SOURCE OF TRUTH) - BEFORE DB TRANSACTION
+        # ============================================================
+        # COMPULSORY: Credits derived ONLY from amount
+        # This MUST happen BEFORE any DB operations
+        credits_added = int(amount / 10)
+        
+        logger.error(
+            f"FINAL CREDIT CALC => amount={amount}, credits_added={credits_added}"
+        )
+        
+        # HARD BLOCK: If credits <= 0, abort payment and rollback
+        # DB writes happen ONLY if credits_added > 0
+        if credits_added <= 0:
+            logger.error(f"❌ CRITICAL: Credit calculation failed. amount={amount}, credits_added={credits_added}. Payment aborted.")
+            db.rollback()
+            return {
+                "success": False,
+                "user_id": user_id,
+                "credits_added": 0,
+                "message": "Credit calculation failed"
+            }
+        
         # HARD LOG - PROOF EXECUTION (MANDATORY)
         logger.error("🔥 PAYMENT DB UPDATE START")
         logger.error(f"user_id={user_id}, order_id={order_id}, payment_id={payment_id}, amount={amount}, credits_added={credits_added}, mobile={user_mobile}")
         
         # CRITICAL FIX 3: Wrap ALL DB operations in try/except for transaction safety
         # STRICT ORDER: payment_transactions → credit_transactions → user_credits → commit
+        # HARD RULE: credits_added > 0 is guaranteed (validated before DB transaction)
         try:
-            # STEP 4: Insert payment_transactions row (INVOICE RECORD) - MUST ALWAYS BE INSERTED
-            # Even if credits_added = 0, payment must be recorded
+            # STEP 4: Insert payment_transactions row (INVOICE RECORD)
+            # credits_added > 0 is guaranteed (hard validation before this point)
             payment_tx = PaymentTransaction(
                 user_id=user_id,
                 provider="razorpay",
