@@ -310,7 +310,7 @@ def get_strategy_runs(
         
         # Build raw SQL dynamically with named parameters (:user_id, :strategy_id)
         sql_base = "SELECT * FROM strategy_executions WHERE user_id = :user_id"
-        params = {"user_id": user.id}
+        params = {"user_id": user.external_user_id}
         
         if strategy_id:
             sql_base += " AND strategy_id = :strategy_id"
