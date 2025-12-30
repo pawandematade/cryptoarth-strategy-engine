@@ -429,30 +429,52 @@ def process_payment_success(
                 try:
                     ratio = get_rupee_to_credit_ratio()
                     credits_added = int(amount / ratio)
-                    logger.info(f"Credits calculated from amount fallback: amount={amount}, ratio={ratio}, credits={credits_added}")
+                    logger.error(f"🔍 CREDITS FALLBACK: amount={amount}, ratio={ratio}, credits_added={credits_added}")
+                    if credits_added <= 0:
+                        logger.error(f"⚠️ WARNING: Credits fallback resulted in 0 or negative: amount={amount}, ratio={ratio}")
                 except Exception as ratio_error:
-                    logger.error(f"Failed to get credit ratio for fallback: {ratio_error}")
+                    logger.error(f"❌ Failed to get credit ratio for fallback: {ratio_error}", exc_info=True)
                     credits_added = 0
             else:
-                logger.warning(f"Credits fallback skipped: amount={amount} (amount must be > 0 for fallback)")
+                logger.error(f"⚠️ Credits fallback skipped: amount={amount} (amount must be > 0 for fallback)")
         
-        # STEP 3: Get user mobile for credit_transactions (OPTIONAL - can be NULL)
-        # CRITICAL: Query User ONLY to get mobile, NOT for user_id (user_id comes from JWT)
+        # CRITICAL: Log final credits value before DB transaction
+        logger.error(f"🔍 FINAL CREDITS VALUE: credits_added={credits_added}, amount={amount}")
+        
+        # STEP 3: Get user details for customer info and mobile
+        # CRITICAL: Query User to get name, email, and mobile for payment records
         from app.models import User
         user = db.query(User).filter(User.external_user_id == user_id).first()
+        
+        # Initialize customer details
         user_mobile = None
-        
-        if user and user.phone:
-            user_mobile = user.phone
-            logger.info(f"User mobile found: {user_mobile}")
-        else:
-            # Mobile is OPTIONAL - set to NULL if not available
-            user_mobile = None
-            logger.info(f"User mobile not found for user_id={user_id}, will store NULL")
-        
-        # Payment transaction customer details (nullable fields)
         customer_name = None
         customer_email = None
+        
+        if user:
+            # Get mobile
+            if user.phone:
+                user_mobile = user.phone
+                logger.info(f"User mobile found: {user_mobile}")
+            
+            # Get customer name (try multiple fields)
+            if user.first_name or user.last_name:
+                customer_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            elif hasattr(user, 'full_name') and user.full_name:
+                customer_name = user.full_name
+            elif hasattr(user, 'name') and user.name:
+                customer_name = user.name
+            elif hasattr(user, 'username') and user.username:
+                customer_name = user.username
+            
+            # Get customer email
+            if user.email:
+                customer_email = user.email
+            
+            logger.info(f"User details extracted: name={customer_name}, email={customer_email}, mobile={user_mobile}")
+        else:
+            logger.warning(f"User not found for external_user_id={user_id}, customer details will be NULL")
+        
         customer_mobile = user_mobile  # Use user_mobile (can be None)
         
         # CRITICAL FIX 1: FINAL AMOUNT VALIDATION (STRICT) - BEFORE DB TRANSACTION
@@ -536,11 +558,16 @@ def process_payment_success(
             # STEP 7: Commit - ONLY ONCE (CRITICAL: All operations must succeed)
             # CRITICAL: Log user_id before commit to verify correct user
             print(f"VERIFY PAYMENT USER_ID: {user_id}")
+            logger.error(f"🔍 PRE-COMMIT CHECK: user_id={user_id}, credits_added={credits_added}, amount={amount}, customer_name={customer_name}, customer_email={customer_email}")
             logger.error(f"VERIFY PAYMENT USER_ID: {user_id}")
+            
             db.commit()
             db.refresh(user_credits)
-            logger.error(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits={credits_added} amount={amount}")
-            print(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits={credits_added} amount={amount}")
+            
+            # CRITICAL: Verify credits were actually added
+            final_credits = user_credits.total_credits if user_credits else 0
+            logger.error(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits_added={credits_added} amount={amount} final_total_credits={final_credits}")
+            print(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits_added={credits_added} amount={amount} final_total_credits={final_credits}")
             
         except Exception as db_error:
             # CRITICAL FIX 4: Rollback on ANY exception and return failure
