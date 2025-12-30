@@ -411,11 +411,6 @@ def process_payment_success(
             except Exception as razorpay_error:
                 logger.error(f"Failed to fetch payment amount from Razorpay: {razorpay_error}")
         
-        # ISSUE 1 FIX: DO NOT RETURN on amount validation - continue without blocking
-        if not amount or amount <= 0:
-            logger.error(f"⚠️ Amount missing or invalid for payment_id={payment_id}. Continuing without blocking DB update.")
-            amount = amount or total_amount or 0
-        
         # STEP 2: Calculate credits from plan metadata (NOT from amount)
         credits_added = 0
         
@@ -423,82 +418,133 @@ def process_payment_success(
             credits_added = int(order_data["credits"])
             logger.info(f"Credits derived from plan metadata: {credits_added}")
         else:
-            logger.error(
-                f"❌ Credits missing in order metadata for payment_id={payment_id}. "
-                f"No credits added to prevent inflation."
+            logger.warning(
+                f"Credits missing in order metadata for payment_id={payment_id}. "
+                f"Will calculate from amount using fallback ratio."
             )
         
-        # STEP 3: Use JWT-authenticated user_id directly (NO User table query)
-        # CRITICAL: JWT user_id is the ONLY source of truth - never re-query User table
-        # This prevents mismatch between user.id and user.external_user_id
+        # CRITICAL FIX 2: Credits fallback logic - calculate from amount if Redis metadata missing
+        if credits_added <= 0:
+            if amount and amount > 0:
+                try:
+                    ratio = get_rupee_to_credit_ratio(db)
+                    credits_added = int(amount / ratio)
+                    logger.info(f"Credits calculated from amount fallback: amount={amount}, ratio={ratio}, credits={credits_added}")
+                except Exception as ratio_error:
+                    logger.error(f"Failed to get credit ratio for fallback: {ratio_error}")
+                    credits_added = 0
+            else:
+                logger.warning(f"Credits fallback skipped: amount={amount} (amount must be > 0 for fallback)")
+        
+        # STEP 3: Get user mobile for credit_transactions (OPTIONAL - can be NULL)
+        # CRITICAL: Query User ONLY to get mobile, NOT for user_id (user_id comes from JWT)
+        from app.models import User
+        user = db.query(User).filter(User.external_user_id == user_id).first()
+        user_mobile = None
+        
+        if user and user.phone:
+            user_mobile = user.phone
+            logger.info(f"User mobile found: {user_mobile}")
+        else:
+            # Mobile is OPTIONAL - set to NULL if not available
+            user_mobile = None
+            logger.info(f"User mobile not found for user_id={user_id}, will store NULL")
+        
+        # Payment transaction customer details (nullable fields)
         customer_name = None
         customer_email = None
-        customer_mobile = None
+        customer_mobile = user_mobile  # Use user_mobile (can be None)
         
-        # HARD LOG - PROOF EXECUTION (MANDATORY)
-        logger.error("🔥 PAYMENT DB UPDATE START")
-        logger.error(f"user_id={user_id}, order_id={order_id}, payment_id={payment_id}, amount={amount}, credits_added={credits_added}")
-        
-        # STEP 4: Update user_credits table (BALANCE TABLE) - NO OVERRIDE
-        from app.models import UserCredits
-        
-        user_credits = (
-            db.query(UserCredits)
-            .filter(UserCredits.user_id == user_id)
-            .first()
-        )
-        
-        if not user_credits:
-            user_credits = UserCredits(
-                user_id=user_id,
-                total_credits=credits_added,
-                used_credits=0,
-                is_active=True,
-            )
-            db.add(user_credits)
-        else:
-            user_credits.total_credits += credits_added
-        
-        # STEP 5: Insert credit_transactions row (LEDGER)
-        from app.models import CreditTransaction
-        credit_tx = CreditTransaction(
-            user_id=user_id,
-            credits=credits_added,
-            type='credit',
-            reason=f"Payment {payment_id}",
-            reference_id=payment_id
-        )
-        db.add(credit_tx)
-        
-        # STEP 6: Insert payment_transactions row (INVOICE RECORD)
-        payment_tx = PaymentTransaction(
-            user_id=user_id,
-            provider="razorpay",
-            gateway_order_id=order_id,
-            gateway_payment_id=payment_id,
-            amount=float(amount),
-            status="success",
-            customer_name=customer_name,
-            customer_email=customer_email,
-            customer_mobile=customer_mobile,
-            credits_added=credits_added
-        )
-        db.add(payment_tx)
-        
-        # STEP 7: Commit - ONLY ONCE (ISSUE 2 FIX: Single commit, no flush)
-        # CRITICAL: Log user_id before commit to verify correct user
-        print(f"VERIFY PAYMENT USER_ID: {user_id}")
-        logger.error(f"VERIFY PAYMENT USER_ID: {user_id}")
-        try:
-            db.commit()
-            db.refresh(user_credits)
-            logger.error("✅ PAYMENT DB COMMIT SUCCESS")
-        except Exception as e:
+        # CRITICAL FIX 1: FINAL AMOUNT VALIDATION (STRICT) - BEFORE DB TRANSACTION
+        # Prevent ₹0 payments from being committed
+        if not amount or amount <= 0:
+            logger.error(f"❌ CRITICAL: Final amount validation failed for payment_id={payment_id}. amount={amount}. Payment cannot be processed.")
             db.rollback()
-            logger.error("❌ PAYMENT DB COMMIT FAILED", exc_info=True)
             return {
                 "success": False,
                 "user_id": user_id,
+                "credits_added": 0,
+                "message": "Invalid payment amount. Payment cannot be processed."
+            }
+        
+        # HARD LOG - PROOF EXECUTION (MANDATORY)
+        logger.error("🔥 PAYMENT DB UPDATE START")
+        logger.error(f"user_id={user_id}, order_id={order_id}, payment_id={payment_id}, amount={amount}, credits_added={credits_added}, mobile={user_mobile}")
+        
+        # CRITICAL FIX 3: Wrap ALL DB operations in try/except for transaction safety
+        # STRICT ORDER: payment_transactions → credit_transactions → user_credits → commit
+        try:
+            # STEP 4: Insert payment_transactions row (INVOICE RECORD) - MUST ALWAYS BE INSERTED
+            # Even if credits_added = 0, payment must be recorded
+            payment_tx = PaymentTransaction(
+                user_id=user_id,
+                provider="razorpay",
+                gateway_order_id=order_id,
+                gateway_payment_id=payment_id,
+                amount=float(amount) if amount else 0.0,
+                status="success",
+                customer_name=customer_name,
+                customer_email=customer_email,
+                customer_mobile=customer_mobile,
+                credits_added=credits_added
+            )
+            db.add(payment_tx)
+            logger.info(f"Added payment_transaction: user_id={user_id}, amount={amount}, credits={credits_added}")
+            
+            # STEP 5: Insert credit_transactions row (LEDGER)
+            # Mobile is OPTIONAL - can be NULL
+            from app.models import CreditTransaction
+            credit_tx = CreditTransaction(
+                user_id=user_id,
+                mobile=user_mobile,  # Mobile in 91XXXXXXXXXX format or NULL if not available
+                credits=credits_added,
+                type='credit',
+                reason=f"Payment {payment_id}",
+                reference_id=payment_id
+            )
+            db.add(credit_tx)
+            logger.info(f"Added credit_transaction: user_id={user_id}, credits={credits_added}, mobile={user_mobile}")
+            
+            # STEP 6: Update user_credits table (BALANCE TABLE) - NO OVERRIDE
+            from app.models import UserCredits
+            
+            user_credits = (
+                db.query(UserCredits)
+                .filter(UserCredits.user_id == user_id)
+                .first()
+            )
+            
+            if not user_credits:
+                user_credits = UserCredits(
+                    user_id=user_id,
+                    total_credits=credits_added,
+                    used_credits=0,
+                    is_active=True,
+                )
+                db.add(user_credits)
+                logger.info(f"Created new user_credits record for user_id={user_id}")
+            else:
+                user_credits.total_credits += credits_added
+                logger.info(f"Updated user_credits for user_id={user_id}, new total={user_credits.total_credits}")
+            
+            # STEP 7: Commit - ONLY ONCE (CRITICAL: All operations must succeed)
+            # CRITICAL: Log user_id before commit to verify correct user
+            print(f"VERIFY PAYMENT USER_ID: {user_id}")
+            logger.error(f"VERIFY PAYMENT USER_ID: {user_id}")
+            db.commit()
+            db.refresh(user_credits)
+            logger.error(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits={credits_added} amount={amount}")
+            print(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits={credits_added} amount={amount}")
+            
+        except Exception as db_error:
+            # CRITICAL FIX 4: Rollback on ANY exception and return failure
+            db.rollback()
+            logger.error(f"❌ PAYMENT DB TRANSACTION FAILED: user_id={user_id}, error={db_error}", exc_info=True)
+            print(f"❌ PAYMENT DB TRANSACTION FAILED: user_id={user_id}, error={db_error}")
+            return {
+                "success": False,
+                "user_id": user_id,
+                "credits_added": 0,
                 "message": "Payment DB update failed"
             }
         
