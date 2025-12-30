@@ -501,8 +501,17 @@ def process_payment_success(
             db.add(credit_tx)
             logger.info(f"Added credit_transaction: user_id={user_id}, credits={credits_added}, mobile={user_mobile}")
             
-            # STEP 6: Update user_credits table (BALANCE TABLE) - NO OVERRIDE
+            # STEP 6: Update user_credits table (BALANCE TABLE)
             from app.models import UserCredits
+            
+            # CRITICAL DB FIX: Mobile resolution for user_credits (mobile is NOT NULL)
+            # Resolution order: user.phone → customer_mobile → empty string ""
+            # MUST resolve BEFORE user_credits query
+            mobile_value = user_mobile or customer_mobile or ""
+            logger.info(
+                f"user_credits mobile resolved: {mobile_value} for user_id={user_id} "
+                f"(from user_mobile={user_mobile}, customer_mobile={customer_mobile})"
+            )
             
             user_credits = (
                 db.query(UserCredits)
@@ -510,12 +519,8 @@ def process_payment_success(
                 .first()
             )
             
-            # CRITICAL DB FIX: Mobile resolution for user_credits (mobile is NOT NULL)
-            # Resolution order: user.phone → customer_mobile → empty string ""
-            mobile_value = user_mobile or customer_mobile or ""
-            logger.info(f"user_credits mobile value: {mobile_value} (from user_mobile={user_mobile}, customer_mobile={customer_mobile})")
-            
             if not user_credits:
+                # CREATE: New user_credits record with mobile (REQUIRED)
                 user_credits = UserCredits(
                     user_id=user_id,
                     mobile=mobile_value,  # REQUIRED: mobile field (NOT NULL in DB)
@@ -524,10 +529,25 @@ def process_payment_success(
                     is_active=True,
                 )
                 db.add(user_credits)
-                logger.info(f"Created new user_credits record for user_id={user_id}, mobile={mobile_value}")
+                logger.info(
+                    f"Created new user_credits record for user_id={user_id}, mobile={mobile_value}"
+                )
             else:
+                # UPDATE: Existing user_credits
                 user_credits.total_credits += credits_added
-                logger.info(f"Updated user_credits for user_id={user_id}, new total={user_credits.total_credits}")
+                
+                # CRITICAL: Update mobile if missing (ensures DB consistency)
+                if not user_credits.mobile:
+                    user_credits.mobile = mobile_value
+                    logger.info(
+                        f"Updated user_credits.mobile to {mobile_value} for user_id={user_id} "
+                        f"(was missing/NULL)"
+                    )
+                
+                logger.info(
+                    f"Updated user_credits for user_id={user_id}, "
+                    f"new total={user_credits.total_credits}, mobile={user_credits.mobile}"
+                )
             
             # STEP 7: Commit - ONLY ONCE (CRITICAL: All operations must succeed)
             # CRITICAL: Log user_id before commit to verify correct user
