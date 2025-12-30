@@ -427,7 +427,7 @@ def process_payment_success(
         if credits_added <= 0:
             if amount and amount > 0:
                 try:
-                    ratio = get_rupee_to_credit_ratio(db)
+                    ratio = get_rupee_to_credit_ratio()
                     credits_added = int(amount / ratio)
                     logger.info(f"Credits calculated from amount fallback: amount={amount}, ratio={ratio}, credits={credits_added}")
                 except Exception as ratio_error:
