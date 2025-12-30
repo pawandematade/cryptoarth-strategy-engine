@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Header, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, text
 from datetime import datetime
 from collections import defaultdict
 import logging
@@ -308,19 +308,21 @@ def get_strategy_runs(
         # NO status filters, NO admin logic
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
-        # Get all executions for user - direct query (no join)
-        query = db.query(StrategyExecution).filter(
-            StrategyExecution.user_id == user.id
-        )
+        # Build raw SQL dynamically with named parameters (:user_id, :strategy_id)
+        sql_base = "SELECT * FROM strategy_executions WHERE user_id = :user_id"
+        params = {"user_id": user.id}
         
         if strategy_id:
-            query = query.filter(StrategyExecution.strategy_id == strategy_id)
+            sql_base += " AND strategy_id = :strategy_id"
+            params["strategy_id"] = strategy_id
         
-        # Debug: Log row count
-        row_count = query.count()
-        logger.error(f"ROW COUNT = {row_count}")
+        sql_query = sql_base + " ORDER BY created_at DESC"
         
-        executions = query.order_by(desc(StrategyExecution.created_at)).all()
+        # Execute raw SQL with named parameters and map to StrategyExecution
+        result = db.execute(text(sql_query), params)
+        executions = [StrategyExecution(**dict(row._mapping)) for row in result]
+        
+        logger.error(f"ROW COUNT = {len(executions)}")
         logger.info(f"[History] Found {len(executions)} executions for external_user_id={user.external_user_id}")
         
         # Group by strategy_code
