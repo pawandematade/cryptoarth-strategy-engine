@@ -302,15 +302,15 @@ def get_strategy_runs(
         StrategyRunsResponse with runs list
     """
     try:
-        # CRITICAL: Business tables store external_user_id in user_id column
-        # Use user.external_user_id (canonical ID) NOT user.id (local ID)
+        # CRITICAL: strategy_executions.user_id stores INTERNAL users.id (not external_user_id)
+        # Use user.id (local ID) NOT user.external_user_id
         # NO joins - direct filter by user_id
         # NO status filters, NO admin logic
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         # Get all executions for user - direct query (no join)
         query = db.query(StrategyExecution).filter(
-            StrategyExecution.user_id == user.external_user_id
+            StrategyExecution.user_id == user.id
         )
         
         if strategy_id:
