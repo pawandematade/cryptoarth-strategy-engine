@@ -164,6 +164,8 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         # CRITICAL: Create REAL Razorpay order - NO TEMP MODE, NO MOCK, NO FALLBACK
         # IMPORTANT: Razorpay order_id MUST always come from Razorpay API.
         # Never generate, mock, or fallback order_id.
+        # CRITICAL BUSINESS FIX: Store complete plan metadata in notes for credit calculation
+        # Credits MUST be based on base_price only, NOT total amount (base + GST)
         try:
             order = client.order.create({
                 "amount": amount_paise,
@@ -172,7 +174,10 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
                 "notes": {
                     "uid": str(user_id),
                     "pid": plan_id,
-                    "plan_name": plan['name']
+                    "plan_name": plan['name'],
+                    "base_price": str(plan['base_price']),  # Base price (without GST)
+                    "gst": str(plan['gst']),  # GST amount
+                    "credits": str(plan['credits'])  # Credits based on base_price only
                 }
             })
         except Exception as razorpay_error:
@@ -379,19 +384,30 @@ def process_payment_success(
                 "message": "Payment already processed"
             }
         
-        # STEP 1: Fetch amount from Razorpay API if not provided
-        # REMOVED: Redis/plan/ratio logic - amount is the ONLY source of truth
-        if not amount or amount <= 0:
-            try:
-                from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
-                import razorpay
-                client = razorpay.Client(auth=(RAZORPAY_KEY_ID.strip(), RAZORPAY_KEY_SECRET.strip()))
-                payment_data = client.payment.fetch(payment_id)
-                if payment_data and 'amount' in payment_data:
-                    amount = float(payment_data['amount']) / 100  # Convert from paise to INR
-                    logger.info(f"Fetched amount from Razorpay API: {amount} INR")
-            except Exception as razorpay_error:
-                logger.error(f"Failed to fetch payment amount from Razorpay: {razorpay_error}")
+        # STEP 1: Fetch payment and order data from Razorpay API
+        # CRITICAL: Get credits from Razorpay order notes (plan metadata)
+        # Credits MUST be based on base_price only, NOT total amount (base + GST)
+        razorpay_order = None
+        razorpay_order_notes = None
+        
+        try:
+            from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+            import razorpay
+            client = razorpay.Client(auth=(RAZORPAY_KEY_ID.strip(), RAZORPAY_KEY_SECRET.strip()))
+            
+            # Fetch payment data for amount
+            payment_data = client.payment.fetch(payment_id)
+            if payment_data and 'amount' in payment_data:
+                amount = float(payment_data['amount']) / 100  # Convert from paise to INR
+                logger.info(f"Fetched amount from Razorpay API: {amount} INR")
+            
+            # CRITICAL: Fetch order data to get plan metadata (credits, base_price, gst)
+            razorpay_order = client.order.fetch(order_id)
+            if razorpay_order and 'notes' in razorpay_order:
+                razorpay_order_notes = razorpay_order['notes']
+                logger.info(f"Fetched Razorpay order notes: {razorpay_order_notes}")
+        except Exception as razorpay_error:
+            logger.error(f"Failed to fetch Razorpay data: {razorpay_error}", exc_info=True)
         
         # STEP 2: Get user details for customer info and mobile
         # CRITICAL: Query User to get name, email, and mobile for payment records
@@ -438,27 +454,45 @@ def process_payment_success(
             }
         
         # ============================================================
-        # HARD CREDIT RULE (SINGLE SOURCE OF TRUTH) - BEFORE DB TRANSACTION
+        # CREDIT CALCULATION (FROM PLAN METADATA) - BEFORE DB TRANSACTION
         # ============================================================
-        # COMPULSORY: Credits derived ONLY from amount
-        # This MUST happen BEFORE any DB operations
-        credits_added = int(amount / 10)
+        # CRITICAL BUSINESS FIX: Credits MUST be based on base_price only, NOT total amount
+        # GST should NEVER generate credits
+        # Credits come from Razorpay order notes (plan metadata stored during order creation)
+        credits_added = 0
         
-        logger.error(
-            f"FINAL CREDIT CALC => amount={amount}, credits_added={credits_added}"
-        )
+        if razorpay_order_notes and 'credits' in razorpay_order_notes:
+            try:
+                credits_added = int(razorpay_order_notes['credits'])
+                logger.info(
+                    f"Credits from Razorpay order notes: {credits_added} "
+                    f"(base_price={razorpay_order_notes.get('base_price', 'N/A')}, "
+                    f"gst={razorpay_order_notes.get('gst', 'N/A')})"
+                )
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse credits from Razorpay notes: {e}")
+                credits_added = 0
         
-        # HARD BLOCK: If credits <= 0, abort payment and rollback
-        # DB writes happen ONLY if credits_added > 0
+        # HARD VALIDATION: Credits MUST exist in order notes
+        # Do NOT guess credits from amount (prevents GST-based credit inflation)
         if credits_added <= 0:
-            logger.error(f"❌ CRITICAL: Credit calculation failed. amount={amount}, credits_added={credits_added}. Payment aborted.")
+            logger.error(
+                f"❌ CRITICAL: Credits missing or invalid in Razorpay order notes. "
+                f"order_id={order_id}, notes={razorpay_order_notes}. "
+                f"Payment verification FAILED - credits must come from plan metadata."
+            )
             db.rollback()
             return {
                 "success": False,
                 "user_id": user_id,
                 "credits_added": 0,
-                "message": "Credit calculation failed"
+                "message": "Credit calculation failed: Credits not found in order metadata"
             }
+        
+        logger.error(
+            f"FINAL CREDIT CALC => amount={amount}, credits_added={credits_added} "
+            f"(from plan metadata, NOT from amount/10)"
+        )
         
         # HARD LOG - PROOF EXECUTION (MANDATORY)
         logger.error("🔥 PAYMENT DB UPDATE START")
