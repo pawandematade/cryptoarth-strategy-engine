@@ -21,13 +21,16 @@ def get_current_user_strict(
     db: Session = Depends(get_db)
 ) -> Optional[User]:
     """
-    Strict read-only user dependency for GET/READ APIs.
+    Safe auto-heal user dependency with zero impact on valid users.
     
-    CRITICAL RULES:
+    CRITICAL SAFETY RULES:
     - Validates JWT via auth backend
-    - Queries local DB ONLY (no user creation/sync)
-    - Returns 401 (never 400) for auth failures
-    - Fails fast if user not found locally
+    - If user exists and is valid → DO NOTHING (no DB write, zero impact)
+    - If user not found → Auto-create user with JWT data
+    - If user found but broken → Auto-heal ONLY broken fields
+    - Never modifies valid users
+    - Never overwrites existing correct data
+    - Never throws 401 for valid JWT
     - BYPASSES authentication for OPTIONS requests (CORS preflight)
     
     Args:
@@ -39,15 +42,16 @@ def get_current_user_strict(
         User: User model instance from local DB, or None for OPTIONS requests
         
     Raises:
-        HTTPException(401): If token invalid, user not found, or auth backend unavailable
+        HTTPException(401): If token invalid or auth backend unavailable
+        HTTPException(500): If user creation/healing fails
     """
     # CRITICAL: Bypass authentication for OPTIONS requests (CORS preflight)
     # Browsers don't send Authorization headers in OPTIONS requests
     # FastAPI CORS middleware will handle OPTIONS, but only if dependencies don't raise 401
-    # Returning None is safe because route handlers never execute for OPTIONS requests
+    # Raise 204 to let CORS middleware handle OPTIONS cleanly
     # CORS middleware handles OPTIONS before route handlers are called
     if request.method == "OPTIONS":
-        return None
+        raise HTTPException(status_code=204)
     
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header required")
@@ -80,8 +84,8 @@ def get_current_user_strict(
             logger.error("Could not extract user ID from auth backend response")
             raise HTTPException(status_code=401, detail="Invalid token payload")
         
-        # CRITICAL: Log JWT payload for debugging user_id=1 issue
-        logger.error(f"🔍 JWT PAYLOAD: external_user_id={external_user_id}, user_data={user_data}")
+        # Log minimal JWT validation (avoid logging full payload for security)
+        logger.info(f"JWT validated: external_user_id={external_user_id}")
         if external_user_id == 1:
             logger.error(f"🔴 CRITICAL: JWT returned external_user_id=1! This is wrong. Full response: {data}")
         
@@ -95,17 +99,92 @@ def get_current_user_strict(
         logger.error(f"Unexpected error validating token: {e}", exc_info=True)
         raise HTTPException(status_code=401, detail="Authentication failed")
     
-    # Step 2: Get user from local DB ONLY (no creation, no sync)
+    # Step 2: Extract additional JWT data for user creation/healing
+    jwt_email = user_data.get("email") or ""
+    jwt_phone = user_data.get("phone") or user_data.get("mobile") or ""
+    
+    # Step 3: Query user from local DB
     user = db.query(User).filter(User.external_user_id == external_user_id).first()
     
-    if not user:
-        logger.warning(f"User not found in local DB: external_user_id={external_user_id}")
-        raise HTTPException(status_code=401, detail="User not found")
+    # CASE 1: User EXISTS and VALID → DO NOTHING (zero impact)
+    if user:
+        is_valid = (
+            user.external_user_id == external_user_id and
+            user.is_active == True
+        )
+        
+        if is_valid:
+            # User is valid - return immediately with NO DB write
+            logger.info(f"✅ User valid: external_user_id={external_user_id}, user.id={user.id} - no changes needed")
+            return user
+        
+        # CASE 3: User FOUND but BROKEN (legacy users only)
+        # Fix ONLY missing/broken fields
+        logger.warning(f"⚠️ User found but broken: external_user_id={external_user_id}, user.id={user.id}, is_active={user.is_active}")
+        
+        needs_fix = False
+        
+        # Fix external_user_id mismatch
+        if user.external_user_id != external_user_id:
+            logger.info(f"🔧 Fixing external_user_id mismatch: {user.external_user_id} → {external_user_id}")
+            user.external_user_id = external_user_id
+            needs_fix = True
+        
+        # Fix is_active if False
+        if not user.is_active:
+            logger.info(f"🔧 Fixing is_active: False → True")
+            user.is_active = True
+            needs_fix = True
+        
+        # Fix missing email (only if not set)
+        if not user.email and jwt_email:
+            logger.info(f"🔧 Fixing missing email: {jwt_email}")
+            user.email = jwt_email
+            needs_fix = True
+        
+        # Fix missing phone (only if not set)
+        if not user.phone and jwt_phone:
+            logger.info(f"🔧 Fixing missing phone: {jwt_phone}")
+            user.phone = jwt_phone
+            needs_fix = True
+        
+        # Fix missing username (only if not set)
+        if not user.username:
+            user.username = f"user_{external_user_id}"
+            needs_fix = True
+        
+        if needs_fix:
+            try:
+                db.commit()
+                db.refresh(user)
+                logger.info(f"✅ User auto-healed: external_user_id={external_user_id}, user.id={user.id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to auto-heal user: {e}", exc_info=True)
+                db.rollback()
+                raise HTTPException(status_code=500, detail="User auto-heal failed")
+        
+        return user
     
-    # CRITICAL: Log user.id vs external_user_id for debugging user_id=1 issue
-    logger.error(f"🔍 USER DB QUERY: external_user_id={external_user_id}, user.id={user.id}, user.external_user_id={user.external_user_id}")
-    if user.id == 1 and external_user_id != 1:
-        logger.error(f"🔴 CRITICAL MISMATCH: user.id=1 but external_user_id={external_user_id}! This is the bug!")
+    # CASE 2: User NOT FOUND → Create user with JWT data
+    logger.info(f"🆕 Creating new user: external_user_id={external_user_id}")
     
-    return user
+    try:
+        user = User(
+            external_user_id=external_user_id,
+            email=jwt_email,
+            phone=jwt_phone,
+            username=f"user_{external_user_id}",
+            is_active=True,
+            source="auth_backend",
+            raw_user_json=user_data
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(f"✅ User auto-created: external_user_id={external_user_id}, user.id={user.id}")
+        return user
+    except Exception as e:
+        logger.error(f"❌ Failed to create user: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="User creation failed")
 
