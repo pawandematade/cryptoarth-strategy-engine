@@ -246,6 +246,7 @@ class UserCredits(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    mobile = Column(String(20), nullable=False, default="", comment="User mobile number")
     total_credits = Column(Integer, default=0, nullable=False, comment="Total credits available")
     used_credits = Column(Integer, default=0, nullable=False, comment="Total credits used")
     is_active = Column(Boolean, default=True, nullable=False, index=True)
