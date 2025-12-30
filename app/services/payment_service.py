@@ -31,29 +31,29 @@ print(f"🔧 PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded
 # GST: 18% of base price
 # Total payable = base_price + gst
 # NO 'amount' field - use total_amount only
-# TESTING MODE: All plans hard-coded to ₹5 for payment gateway testing
+# TESTING MODE: All plans hard-coded to ₹10 for payment gateway testing
 # TODO: Revert to original prices after testing
 CREDIT_PLANS = {
     'starter': {
         'name': 'Starter Pack',
         'credits': 50,
-        'base_price': 5,  # TESTING: Original 500
+        'base_price': 10,  # TESTING: Original 500
         'gst': 0,  # TESTING: Original 90
-        'total_amount': 5  # TESTING: Original 590
+        'total_amount': 10  # TESTING: Original 590
     },
     'professional': {
         'name': 'Professional Pack',
         'credits': 150,
-        'base_price': 5,  # TESTING: Original 1500
+        'base_price': 10,  # TESTING: Original 1500
         'gst': 0,  # TESTING: Original 270
-        'total_amount': 5  # TESTING: Original 1770
+        'total_amount': 10  # TESTING: Original 1770
     },
     'enterprise': {
         'name': 'Enterprise Pack',
         'credits': 300,
-        'base_price': 5,  # TESTING: Original 3000
+        'base_price': 10,  # TESTING: Original 3000
         'gst': 0,  # TESTING: Original 540
-        'total_amount': 5  # TESTING: Original 3540
+        'total_amount': 10  # TESTING: Original 3540
     }
 }
 
@@ -514,15 +514,21 @@ def process_payment_success(
                 .first()
             )
             
+            # CRITICAL DB FIX: Mobile resolution for user_credits (mobile is NOT NULL)
+            # Resolution order: user.phone → customer_mobile → empty string ""
+            mobile_value = user_mobile or customer_mobile or ""
+            logger.info(f"user_credits mobile value: {mobile_value} (from user_mobile={user_mobile}, customer_mobile={customer_mobile})")
+            
             if not user_credits:
                 user_credits = UserCredits(
                     user_id=user_id,
+                    mobile=mobile_value,  # REQUIRED: mobile field (NOT NULL in DB)
                     total_credits=credits_added,
                     used_credits=0,
                     is_active=True,
                 )
                 db.add(user_credits)
-                logger.info(f"Created new user_credits record for user_id={user_id}")
+                logger.info(f"Created new user_credits record for user_id={user_id}, mobile={mobile_value}")
             else:
                 user_credits.total_credits += credits_added
                 logger.info(f"Updated user_credits for user_id={user_id}, new total={user_credits.total_credits}")
