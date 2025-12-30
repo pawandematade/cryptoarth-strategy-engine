@@ -31,23 +31,35 @@ def fetch_user_from_django(request: Request) -> Optional[int]:
     try:
         token = request.headers.get("Authorization")
         if not token:
+            logger.error(f"🔍 DJANGO FALLBACK: No Authorization token")
             return None
 
+        logger.error(f"🔍 DJANGO FALLBACK: Calling Django API with token...")
         resp = requests.get(
             "https://trade-api.cryptoarth.in/auth/user/",
             headers={"Authorization": token},
             timeout=5,
         )
 
+        logger.error(f"🔍 DJANGO FALLBACK: Response status={resp.status_code}")
+        
         if resp.status_code != 200:
+            logger.error(f"🔍 DJANGO FALLBACK: Non-200 status, response={resp.text[:200]}")
             return None
 
         user_data = resp.json()
+        logger.error(f"🔍 DJANGO FALLBACK: Response data={user_data}")
+        
         user_id = user_data.get("id")
+        logger.error(f"🔍 DJANGO FALLBACK: Extracted user_id={user_id}")
+        
+        if user_id == 1:
+            logger.error(f"🔴 CRITICAL: Django returned user_id=1! This is wrong. Full response: {user_data}")
+        
         return user_id if user_id else None
         
     except Exception as e:
-        logger.warning(f"Failed to fetch user from Django: {e}")
+        logger.error(f"🔍 DJANGO FALLBACK: Exception: {e}", exc_info=True)
         return None
 
 
@@ -138,18 +150,45 @@ def verify_payment(
     try:
         # Try to resolve user_id from JWT first
         user = None
+        user_id = None
+        
+        # CRITICAL: Log Authorization header for debugging
+        auth_header = request.headers.get("Authorization")
+        logger.error(f"🔍 PAYMENT VERIFY DEBUG: Authorization header present: {bool(auth_header)}")
+        
         try:
-            user = get_current_user_strict(request, request.headers.get("Authorization"), db)
-        except Exception:
+            user = get_current_user_strict(request, auth_header, db)
+            if user:
+                logger.error(f"🔍 PAYMENT VERIFY DEBUG: JWT user resolved - user.id={user.id}, user.external_user_id={user.external_user_id}")
+                # CRITICAL FIX: user_credits.user_id stores external_user_id, NOT user.id (local DB ID)
+                # Use external_user_id for payment processing to match user_credits table structure
+                user_id = user.external_user_id
+                logger.error(f"🔍 PAYMENT VERIFY DEBUG: Using external_user_id={user_id} for payment (NOT local user.id={user.id})")
+            else:
+                logger.error(f"🔍 PAYMENT VERIFY DEBUG: JWT user is None")
+        except Exception as jwt_error:
+            logger.error(f"🔍 PAYMENT VERIFY DEBUG: JWT auth failed: {jwt_error}", exc_info=True)
             user = None
 
-        if not user:
-            user_id = fetch_user_from_django(request)
-        else:
-            user_id = user.id
-
+        # CRITICAL: If JWT failed, try Django fallback
         if not user_id:
+            logger.error(f"🔍 PAYMENT VERIFY DEBUG: Trying Django fallback...")
+            django_user_id = fetch_user_from_django(request)
+            if django_user_id:
+                logger.error(f"🔍 PAYMENT VERIFY DEBUG: Django fallback returned user_id={django_user_id}")
+                user_id = django_user_id
+            else:
+                logger.error(f"🔍 PAYMENT VERIFY DEBUG: Django fallback returned None")
+
+        # CRITICAL: Final validation
+        if not user_id:
+            logger.error(f"🔍 PAYMENT VERIFY DEBUG: Unable to resolve user_id - both JWT and Django failed")
             raise HTTPException(status_code=401, detail="Unable to resolve user")
+        
+        # CRITICAL: Log final user_id before processing
+        logger.error(f"🔍 PAYMENT VERIFY DEBUG: FINAL user_id={user_id} (external_user_id, MUST NOT be 1 unless admin)")
+        if user_id == 1:
+            logger.error(f"🔴 CRITICAL ERROR: user_id=1 detected! This should be the logged-in user_id (expected 4)")
         
         # CRITICAL: Call with positional arguments only (no keyword args)
         # Function signature: process_payment_success(db, order_id, payment_id, signature, user_id, amount)

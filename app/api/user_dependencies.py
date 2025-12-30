@@ -80,8 +80,10 @@ def get_current_user_strict(
             logger.error("Could not extract user ID from auth backend response")
             raise HTTPException(status_code=401, detail="Invalid token payload")
         
-        # DEBUG: Log JWT payload (as requested)
-        logger.info(f"JWT PAYLOAD: external_user_id={external_user_id}, user_data_keys={list(user_data.keys())}")
+        # CRITICAL: Log JWT payload for debugging user_id=1 issue
+        logger.error(f"🔍 JWT PAYLOAD: external_user_id={external_user_id}, user_data={user_data}")
+        if external_user_id == 1:
+            logger.error(f"🔴 CRITICAL: JWT returned external_user_id=1! This is wrong. Full response: {data}")
         
     except HTTPException:
         # Re-raise HTTPException as-is (401)
@@ -99,6 +101,11 @@ def get_current_user_strict(
     if not user:
         logger.warning(f"User not found in local DB: external_user_id={external_user_id}")
         raise HTTPException(status_code=401, detail="User not found")
+    
+    # CRITICAL: Log user.id vs external_user_id for debugging user_id=1 issue
+    logger.error(f"🔍 USER DB QUERY: external_user_id={external_user_id}, user.id={user.id}, user.external_user_id={user.external_user_id}")
+    if user.id == 1 and external_user_id != 1:
+        logger.error(f"🔴 CRITICAL MISMATCH: user.id=1 but external_user_id={external_user_id}! This is the bug!")
     
     return user
 
