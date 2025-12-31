@@ -283,8 +283,11 @@ class BacktestEngine:
                     current_trade['pnl'] = self._calculate_trade_pnl(current_trade)
                     
                     trades.append(current_trade.copy())
+                    # CRITICAL FIX: Reset position state after trade exit
                     current_trade = None
                     last_exit_candle_index = exit_candle_index  # Track exit candle
+                    # CRITICAL FIX: Reset last_processed_signal_index to allow new signals after exit
+                    last_processed_signal_index = exit_candle_index
                     
                     # Continue to next candle (don't check for new signals on exit candle)
                     continue
