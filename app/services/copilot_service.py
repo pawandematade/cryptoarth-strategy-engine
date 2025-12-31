@@ -171,16 +171,15 @@ You: "I understand you want to buy when the price breaks yesterday's high. To co
 3. What's your stop loss? (e.g., 200 points)"
 
 User: "Buy when EMA 9 crosses above EMA 21, sell when it crosses below, target 500 points, stop loss 900 points, max 4 trades per day"
-You: "I understand your strategy as:
-• EMA 9 / 21 crossover
+You: "Here's what I understood from your strategy:
+
+• Buy when EMA 9 crosses above EMA 21
+• Sell when EMA 9 crosses below EMA 21
 • Target: 500 points
 • Stop loss: 900 points
 • Max 4 trades per day
 
-Before we continue, please confirm:
-Do you want to proceed with these exact rules?
-
-When you're ready, type CONFIRM, BACKTEST, or PROCEED to continue."
+When you're ready, type CONFIRM or BACKTEST to continue."
 
 CRITICAL TONE RULES:
 - NO risk-reward lectures
@@ -190,15 +189,18 @@ CRITICAL TONE RULES:
 - NO judgement about strategy parameters
 - ONLY polite clarification and confirmation
 - Keep it calm, friendly, and non-judgmental
+- Be CONFIDENT when strategy is complete - don't hesitate or ask for unnecessary confirmation
 
 RESPONSE FORMAT:
 - Always be conversational and friendly
 - Use bullet points for clarity
 - Ask questions only when essential details are missing
-- When strategy seems complete, ask user to explicitly type CONFIRM, BACKTEST, or PROCEED
-- NEVER infer readiness or make decisions for the user
+- When strategy is complete (has buy, sell, target, stop loss), confidently summarize it
+- Use confident wording: "Here's what I understood from your strategy:" instead of "Please confirm if this is correct..."
+- When strategy seems complete, ask user to type CONFIRM or BACKTEST to continue
 - NO teaching, NO judging, NO execution pressure
-- User should feel safe to think and refine"""
+- User should feel safe to think and refine
+- Be confident and clear, not hesitant"""
         
         messages.append({"role": "system", "content": system_message})
         
@@ -221,20 +223,40 @@ RESPONSE FORMAT:
         response = client.chat.completions.create(**api_params)
         copilot_response = response.choices[0].message.content.strip()
         
-        # STRICT CONFIRM ONLY - No loose trigger detection
-        # Delta-style flow requires explicit intent
-        # Words like "yes", "ok", "ready" cause accidental flow jumps
+        # UX-level readiness detection based on clarity of user intent
+        # Copilot readiness is based on clarity of user intent,
+        # not on symbol, timeframe, or execution parameters.
+        full_text = " ".join([
+            m.get("content", "").lower()
+            for m in (conversation_history or [])
+        ] + [user_message.lower()])
+        
+        has_buy = "buy" in full_text or "entry" in full_text
+        has_sell = "sell" in full_text or "exit" in full_text
+        has_target = "target" in full_text or "take profit" in full_text or "tp" in full_text
+        has_sl = "stop loss" in full_text or "stop" in full_text or "sl" in full_text
+        
+        # Check for explicit confirmation
         user_message_stripped = user_message.strip().lower()
-        is_ready = user_message_stripped in ["confirm", "backtest", "proceed"]
+        explicit_confirm = user_message_stripped in ["confirm", "backtest", "proceed"]
         
-        # CRITICAL: Backend does NOT infer or extract strategy summary
-        # Summary must be generated conversationally by Copilot itself
-        # Backend must NOT interpret or decide strategy readiness
-        # User confirmation is the ONLY gate
+        # Strategy is ready if all components are present OR user explicitly confirmed
+        is_ready = (has_buy and has_sell and has_target and has_sl) or explicit_confirm
+        
+        # Extract summary when strategy is complete
         missing_details = []
-        summary = None  # Always None - summary is conversational, not extracted
+        summary = None
         
-        logger.info(f"✅ Copilot response generated for session {session_id}, is_ready={is_ready}")
+        if is_ready:
+            # Extract summary from full conversation
+            # CRITICAL: When is_ready == True, summary MUST NOT be None
+            full_conversation = (conversation_history or []) + [{"role": "user", "content": user_message}]
+            summary = _extract_strategy_summary(full_conversation)
+            # Ensure summary is never None when ready
+            if not summary:
+                summary = "Strategy complete - ready for backtest"
+        
+        logger.info(f"✅ Copilot response generated for session {session_id}, is_ready={is_ready}, summary={'present' if summary else 'none'}")
         
         return {
             "response": copilot_response,
@@ -253,11 +275,55 @@ RESPONSE FORMAT:
         }
 
 
-# REMOVED: _extract_strategy_summary function
-# CRITICAL: Backend must NOT infer or extract strategy summary
-# Summary must be generated conversationally by Copilot itself
-# Backend must NOT interpret or decide strategy readiness
-# User confirmation is the ONLY gate
+def _extract_strategy_summary(conversation: List[Dict[str, str]]) -> Optional[str]:
+    """
+    Extract a simple strategy summary from conversation history.
+    This is used ONLY when strategy is complete (is_ready=True) to provide
+    a summary for the next step (compiler/backtest).
+    
+    # Copilot readiness is based on clarity of user intent,
+    # not on symbol, timeframe, or execution parameters.
+    
+    Args:
+        conversation: List of conversation messages
+        
+    Returns:
+        Simple strategy summary string or None
+    """
+    try:
+        # Combine all messages into a single text
+        full_text = " ".join([
+            msg.get("content", "").lower()
+            for msg in conversation
+            if isinstance(msg, dict) and msg.get("role") == "user"
+        ])
+        
+        # Extract key components (simple pattern matching)
+        summary_parts = []
+        
+        # Entry rule
+        if "buy" in full_text or "entry" in full_text:
+            summary_parts.append("Buy rule specified")
+        
+        # Exit rule
+        if "sell" in full_text or "exit" in full_text:
+            summary_parts.append("Sell rule specified")
+        
+        # Target
+        if "target" in full_text or "take profit" in full_text or "tp" in full_text:
+            summary_parts.append("Target specified")
+        
+        # Stop loss
+        if "stop loss" in full_text or "stop" in full_text or "sl" in full_text:
+            summary_parts.append("Stop loss specified")
+        
+        if summary_parts:
+            return " | ".join(summary_parts)
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error extracting strategy summary: {e}")
+        return None
 
 
 def save_copilot_session(session_id: str, conversation: List[Dict[str, str]], expires_in: int = 3600) -> bool:
