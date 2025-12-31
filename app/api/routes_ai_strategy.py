@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from app.services.openai_service import generate_strategy
 from app.services.backtest_service import run_backtest
 from app.services.prompt_builder import build_prompt
+from app.services.input_validator import (
+    validate_input,
+    detect_contradictions,
+    sanitize_prompt
+)
 from app.store.redis_client import redis_client
 from app.services.credit_service import (
     check_credits_available,
@@ -26,6 +31,69 @@ from app.services.strategy_save_service import save_strategy
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _validate_strategy_output(
+    strategy: Dict[str, Any],
+    user_prompt: str,
+    detected_strategy_type: Optional[str]  # Unused - removed type restriction
+) -> Optional[str]:
+    """
+    STRICT OUTPUT VALIDATION: Ensure generated strategy is valid JSON structure.
+    NO INVENTION POLICY: Check that AI didn't add logic not in user input.
+    
+    Args:
+        strategy: Generated strategy JSON
+        user_prompt: Original user prompt (for reference only, not logged)
+        detected_strategy_type: Unused (removed type restriction for universal support)
+    
+    Returns:
+        Error message if validation fails, None if valid
+    """
+    if not strategy:
+        return "OUTPUT_ERROR: Strategy is empty"
+    
+    # Validate JSON schema structure (required fields)
+    required_sections = ['symbol', 'strategy_type']
+    for section in required_sections:
+        if section not in strategy:
+            return f"OUTPUT_ERROR: Missing required section: {section}"
+    
+    # Validate structure integrity (logic, risk, meta sections)
+    if 'logic' not in strategy:
+        return "OUTPUT_ERROR: Missing 'logic' section"
+    if 'risk' not in strategy:
+        return "OUTPUT_ERROR: Missing 'risk' section"
+    if 'meta' not in strategy:
+        return "OUTPUT_ERROR: Missing 'meta' section"
+    
+    # Validate risk parameters are present and valid
+    risk = strategy.get('risk', {})
+    has_tp = 'take_profit_points' in risk or 'take_profit_percent' in risk
+    has_sl = 'stop_loss_points' in risk or 'stop_loss_percent' in risk
+    
+    if not has_tp:
+        return "OUTPUT_ERROR: Missing take profit in risk section"
+    if not has_sl:
+        return "OUTPUT_ERROR: Missing stop loss in risk section"
+    
+    # Validate SL/TP values are positive numbers (if provided)
+    if 'take_profit_points' in risk:
+        tp = risk['take_profit_points']
+        if not isinstance(tp, (int, float)) or tp <= 0:
+            return f"OUTPUT_ERROR: Invalid take_profit_points: {tp} (must be positive number)"
+    
+    if 'stop_loss_points' in risk:
+        sl = risk['stop_loss_points']
+        if not isinstance(sl, (int, float)) or sl <= 0:
+            return f"OUTPUT_ERROR: Invalid stop_loss_points: {sl} (must be positive number)"
+    
+    # NO INVENTION CHECK: Validate that strategy_type is not generic/default
+    strategy_type = str(strategy.get('strategy_type', '')).lower()
+    if strategy_type in ['', 'generic', 'default', 'unknown']:
+        return "OUTPUT_ERROR: Strategy type is generic or missing - user input may be incomplete"
+    
+    return None  # Validation passed
 
 
 class AIStrategyRequest(BaseModel):
@@ -126,6 +194,32 @@ def generate_ai_strategy(
             raise HTTPException(
                 status_code=400, 
                 detail="Either 'prompt' or 'description' is required and cannot be empty. Please provide a non-empty strategy description."
+            )
+        
+        # CRITICAL ARCHITECTURAL FIX: Input validation and sanitization
+        # STEP 1: Sanitize prompt (preserves user intent, only cleans formatting)
+        prompt_value = sanitize_prompt(prompt_value)
+        request.prompt = prompt_value
+        
+        # STEP 2: Validate input (STRICT: strategy-only content)
+        # Rejects greetings, marketing, emotions, jokes, random chat, system prompts
+        is_valid, validation_error = validate_input(prompt_value)
+        if not is_valid:
+            logger.warning(f"Input validation failed: {validation_error}")
+            # Return structured error (no logging of raw strategy text for privacy)
+            raise HTTPException(
+                status_code=400,
+                detail=validation_error
+            )
+        
+        # STEP 3: Detect contradictions and ambiguous intent
+        # Do NOT fix - return error for user to clarify
+        has_contradiction, contradiction_error = detect_contradictions(prompt_value)
+        if has_contradiction:
+            logger.warning(f"Contradiction detected: {contradiction_error}")
+            raise HTTPException(
+                status_code=400,
+                detail=contradiction_error
             )
         
         # VALIDATION: Reject extra keys (guard against unauthorized fields)
@@ -279,13 +373,35 @@ def generate_ai_strategy(
             # No other fields (symbol, timeframe, chart_type, take_profit, stop_loss) are sent separately
             strategy = generate_strategy(user_prompt=final_prompt)
             
-            logger.info(f"✅ Strategy generated successfully")
-            logger.info(f"Strategy Type: {strategy.get('condition', {}).get('type') if strategy else 'None'}")
+            if not strategy:
+                logger.error("❌ OpenAI returned None - strategy generation failed")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Strategy generation failed. Please check your input and try again."
+                )
+            
+            # CRITICAL ARCHITECTURAL FIX: Output validation
+            # STEP 5: Validate generated strategy matches user input
+            # NO INVENTION POLICY: Reject if AI added logic not in user input
+            validation_error = _validate_strategy_output(strategy, prompt_value, None)
+            if validation_error:
+                logger.warning(f"Strategy output validation failed: {validation_error}")
+                # Return structured error (no logging of raw strategy text for privacy)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"VALIDATION_ERROR: {validation_error}"
+                )
+            
+            logger.info(f"✅ Strategy generated and validated successfully")
+            logger.info(f"Strategy Type: {strategy.get('strategy_type') if strategy else 'None'}")
             logger.info(f"Strategy Symbol: {strategy.get('symbol') if strategy else 'None'}")
             
-            # Log parameters to verify all conditions are captured
-            if strategy and strategy.get('parameters'):
-                logger.info(f"Strategy Parameters: {json.dumps(strategy.get('parameters'), indent=2)}")
+            # Log unified schema structure (no old schema fields)
+            if strategy:
+                has_logic = bool(strategy.get('logic'))
+                has_risk = bool(strategy.get('risk'))
+                has_meta = bool(strategy.get('meta'))
+                logger.info(f"Strategy Schema: logic={has_logic}, risk={has_risk}, meta={has_meta}")
         except ValueError as e:
             # Handle validation errors (like EMA validation for SuperTrend)
             error_msg = str(e)
@@ -347,13 +463,16 @@ def generate_ai_strategy(
                 del strategy['userParams']
                 logger.warning("⚠️ Removed userParams from strategy object (security violation)")
             
-            # CRITICAL: Remove old schema fields if present (condition, parameters, sell_condition)
-            # These should have been transformed to unified schema, but remove if still present
+            # CRITICAL: Reject old schema fields if present (should not exist - validated earlier)
+            # If old schema fields are present, this indicates a bug in OpenAI service
             old_schema_fields = ['condition', 'parameters', 'sell_condition']
-            for field in old_schema_fields:
-                if field in strategy:
-                    del strategy[field]
-                    logger.warning(f"⚠️ Removed old schema field '{field}' from strategy")
+            found_old_fields = [field for field in old_schema_fields if field in strategy]
+            if found_old_fields:
+                logger.error(f"❌ Old schema fields detected in OpenAI response: {found_old_fields}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"OUTPUT_ERROR: Generated strategy contains deprecated fields: {found_old_fields}. Please try again."
+                )
             
             # CRITICAL: Validate unified schema structure
             # REQUIRED sections: symbol, strategy_type, logic, risk, meta
@@ -386,7 +505,8 @@ def generate_ai_strategy(
                 raise ValueError("Strategy entry must contain both 'buy' and 'sell' sections")
             
             # CRITICAL: Remove ONLY forbidden fields from root level, NOT required sections
-            # Forbidden fields: userParams, prompt, chart_type (outside meta), timeframe (outside meta), condition, parameters, ema_fast, ema_slow
+            # Forbidden fields: userParams, prompt, chart_type (outside meta), timeframe (outside meta), ema_fast, ema_slow
+            # Old schema fields (condition, parameters, sell_condition) should not exist - validated earlier
             allowed_strategy_fields = {'symbol', 'strategy_type', 'logic', 'risk', 'meta'}
             strategy_keys = set(strategy.keys())
             forbidden_fields = strategy_keys - allowed_strategy_fields
@@ -401,7 +521,7 @@ def generate_ai_strategy(
             
             # CRITICAL: Remove forbidden fields from logic section (ema_fast, ema_slow, timeframe, chart_type)
             logic = strategy.get('logic', {})
-            forbidden_logic_fields = ['ema_fast', 'ema_slow', 'timeframe', 'chart_type', 'condition', 'sell_condition', 'parameters']
+            forbidden_logic_fields = ['ema_fast', 'ema_slow', 'timeframe', 'chart_type']
             for field in forbidden_logic_fields:
                 if field in logic:
                     del logic[field]
@@ -645,7 +765,7 @@ def run_strategy_backtest(
         
         logger.info(f"BACKTEST CALLED – credit deducted: user_id={user.id}, strategy_code={strategy_code}, credits={required_credits}, remaining={available_credits - required_credits}")
         
-        # Validate strategy structure
+        # Validate strategy structure (UNIFIED SCHEMA ONLY)
         strategy = request.strategy
         
         # Check for required fields
@@ -655,37 +775,40 @@ def run_strategy_backtest(
         if not strategy.get('symbol'):
             raise HTTPException(status_code=400, detail="Strategy must have a 'symbol' field")
         
-        if not strategy.get('condition'):
-            raise HTTPException(status_code=400, detail="Strategy must have a 'condition' field")
+        # Validate unified schema structure
+        if not strategy.get('strategy_type'):
+            raise HTTPException(status_code=400, detail="Strategy must have a 'strategy_type' field")
         
-        condition = strategy.get('condition')
-        if not isinstance(condition, dict):
-            raise HTTPException(status_code=400, detail="Strategy condition must be a dictionary/object")
+        if not strategy.get('logic'):
+            raise HTTPException(status_code=400, detail="Strategy must have a 'logic' field")
         
-        if not condition.get('type'):
-            raise HTTPException(status_code=400, detail="Strategy condition must have a 'type' field")
+        if not isinstance(strategy.get('logic'), dict):
+            raise HTTPException(status_code=400, detail="Strategy 'logic' must be a dictionary/object")
         
-        # Normalize strategy structure - ensure parameters are accessible
-        # Parameters can be at root level or in condition.parameters
-        if 'parameters' not in strategy and condition.get('parameters'):
-            strategy['parameters'] = condition.get('parameters')
-        elif 'parameters' in strategy and not condition.get('parameters'):
-            condition['parameters'] = strategy.get('parameters')
+        if not strategy.get('risk'):
+            raise HTTPException(status_code=400, detail="Strategy must have a 'risk' field")
         
-        # For indicator strategies, ensure parameters exist
-        condition_type = condition.get('type')
-        if condition_type in ['ema_crossover', 'supertrend', 'moving_average', 'rsi', 'macd', 'bollinger_bands']:
-            if not strategy.get('parameters') and not condition.get('parameters'):
-                # Add default parameters based on type
-                if condition_type == 'ema_crossover':
-                    strategy['parameters'] = {'ema_fast': 9, 'ema_slow': 21, 'tp_percent': 1, 'sl_percent': 1}
-                    condition['parameters'] = strategy['parameters']
-                elif condition_type == 'supertrend':
-                    strategy['parameters'] = {'period': 7, 'multiplier': 3}
-                    condition['parameters'] = strategy['parameters']
+        if not isinstance(strategy.get('risk'), dict):
+            raise HTTPException(status_code=400, detail="Strategy 'risk' must be a dictionary/object")
         
-        logger.info(f"Running backtest for strategy: {strategy.get('symbol', 'N/A')}, type: {condition_type}, period: {request.period}")
-        logger.debug(f"Strategy structure: symbol={strategy.get('symbol')}, condition.type={condition_type}, has_parameters={bool(strategy.get('parameters') or condition.get('parameters'))}")
+        if not strategy.get('meta'):
+            raise HTTPException(status_code=400, detail="Strategy must have a 'meta' field")
+        
+        if not isinstance(strategy.get('meta'), dict):
+            raise HTTPException(status_code=400, detail="Strategy 'meta' must be a dictionary/object")
+        
+        # Reject old schema fields if present
+        old_schema_fields = ['condition', 'parameters', 'sell_condition']
+        found_old_fields = [field for field in old_schema_fields if field in strategy]
+        if found_old_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Strategy contains deprecated schema fields: {found_old_fields}. Only unified schema (logic, risk, meta) is supported."
+            )
+        
+        strategy_type = strategy.get('strategy_type')
+        logger.info(f"Running backtest for strategy: {strategy.get('symbol', 'N/A')}, type: {strategy_type}, period: {request.period}")
+        logger.debug(f"Strategy structure: symbol={strategy.get('symbol')}, strategy_type={strategy_type}, has_logic={bool(strategy.get('logic'))}, has_risk={bool(strategy.get('risk'))}, has_meta={bool(strategy.get('meta'))}")
         
         # Run backtest
         backtest_results = run_backtest(strategy, request.period)
@@ -1269,11 +1392,11 @@ def auto_save_strategy(
         # Generate temp_strategy_id automatically
         temp_strategy_id = f"TEMP-{int(datetime.now().timestamp() * 1000)}"
         
-        # Generate strategy name from strategy data
+        # Generate strategy name from strategy data (UNIFIED SCHEMA ONLY)
         strategy = request.strategy
         symbol = strategy.get('symbol') or strategy.get('userParams', {}).get('symbol') or 'UNKNOWN'
-        timeframe = strategy.get('timeframe') or strategy.get('userParams', {}).get('timeframe') or ''
-        strategy_type = strategy.get('strategy_type') or strategy.get('condition', {}).get('type') or 'Strategy'
+        timeframe = strategy.get('meta', {}).get('timeframe') or strategy.get('userParams', {}).get('timeframe') or ''
+        strategy_type = strategy.get('strategy_type') or 'Strategy'
         
         # Create a descriptive name
         name = f"{symbol} {timeframe} {strategy_type}".strip()

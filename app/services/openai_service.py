@@ -91,62 +91,78 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
         # - Market Context
         # - Any future fields added from frontend
         
-        # Build user message with merged prompt and unified schema format instruction
-        # The merged prompt contains all user inputs, we need OpenAI to return the unified schema
-        user_message = f"""Convert this trading strategy description into the following unified JSON schema:
+        # CRITICAL ARCHITECTURAL FIX: Hard reset OpenAI context
+        # ZERO MEMORY GUARANTEE: Every request is 100% isolated
+        # NO INVENTION POLICY: Never adds anything not explicitly written by user
+        system_message = """You are a Trading Strategy JSON Compiler.
 
+ZERO MEMORY GUARANTEE:
+- IGNORE all previous strategies, prompts, conversations, and responses
+- This request is 100% isolated from all prior interactions
+- Do NOT reuse any logic, structure, or patterns from previous requests
+
+NO INVENTION POLICY:
+- Convert user input to JSON EXACTLY as written
+- Do NOT add indicators, confirmations, or logic not specified by user
+- Do NOT auto-complete missing rules or assume defaults
+- Do NOT modify, improve, or optimize user's strategy
+- If information is missing → return error, do NOT guess
+
+STRICT COMPILER ROLE:
+- Your ONLY job: Parse user's strategy text and convert to JSON schema
+- Accept ANY strategy type: simple, advanced, mathematical, level-based, grid, indicator-based, custom
+- Preserve user's exact logic, conditions, and rules
+- Do NOT suggest improvements or optimizations
+
+OUTPUT CONTRACT:
+- Return ONLY valid structured strategy JSON object
+- OR return structured validation error
+- NO explanations, NO comments, NO extra text"""
+
+        # Build user message with merged prompt and unified schema format instruction
+        # DIRECT TEXT & CODE ACCEPTANCE: Accept raw rules, pseudo-code, structured logic
+        # Formatting quality must NOT be a rejection reason
+        user_message = f"""Convert this trading strategy into JSON schema.
+Accept raw rules, pseudo-code, or structured logic as-is.
+
+User Strategy:
 {user_prompt}
 
-Return JSON with this EXACT structure:
+Required JSON Structure (example - extract actual values from user input):
 {{
-  "symbol": "BTCUSD",
-  "strategy_type": "ema_crossover",
+  "symbol": "<extract from user input - REQUIRED>",
+  "strategy_type": "<extract from user input - REQUIRED, do NOT default to 'ema_crossover'>",
   "logic": {{
-    "emas": [10, 20, 50],
-    "entry": {{
-      "buy": {{
-        "crossover": "ema_10_above_all",
-        "confirmation": {{
-          "type": "candle_high_break",
-          "reference": "second_candle",
-          "max_wait_candles": 3
-        }}
-      }},
-      "sell": {{
-        "crossover": "ema_10_below_all",
-        "confirmation": {{
-          "type": "candle_low_break",
-          "reference": "second_candle",
-          "max_wait_candles": 3
-        }}
-      }}
-    }}
+    "<structure depends on strategy type - extract from user input>"
   }},
   "risk": {{
-    "take_profit_points": 4000,
-    "stop_loss_points": 4000
+    "take_profit_points": <extract from user input - REQUIRED>,
+    "stop_loss_points": <extract from user input - REQUIRED>
   }},
   "meta": {{
-    "timeframe": "30MIN",
-    "chart_type": "candles"
+    "timeframe": "<extract from user input>",
+    "chart_type": "<extract from user input>"
   }}
 }}
 
-CRITICAL RULES:
-- Extract EMA periods from prompt (e.g. [10,20,50]) - do NOT use defaults
-- Use ONLY POINTS for take_profit_points and stop_loss_points (not percentage)
-- Extract timeframe and chart_type from prompt
-- Do NOT add ema_fast or ema_slow fields
-- Do NOT create condition + sell_condition - use unified entry.buy and entry.sell"""
+CRITICAL COMPILATION RULES (NO INVENTION POLICY):
+- Extract strategy_type from user input - if missing, return error (do NOT default to "ema_crossover")
+- Extract crossover values from user input - do NOT auto-generate "ema_X_above_all" or "ema_X_below_all"
+- Include confirmation block ONLY if user explicitly wrote it - do NOT add "candle_high_break", "candle_low_break", or "immediate"
+- Include entry.buy and entry.sell ONLY if user specified them - do NOT auto-create
+- Extract EMA periods from user input - do NOT use defaults or assumptions
+- If required fields (symbol, strategy_type, logic, risk) are missing → return error, do NOT guess
+- Preserve user's exact logic, conditions, and rules - do NOT modify or optimize"""
         
         # Build OpenAI API payload
-        # Send ONLY the merged prompt string in user message (with minimal format instruction)
+        # CRITICAL: Include system message to reset context and define compiler role
         api_params = {
             "model": OPENAI_MODEL,
             "messages": [
-                {"role": "user", "content": user_message}  # Merged prompt + minimal format instruction
+                {"role": "system", "content": system_message},  # Hard reset context + compiler role
+                {"role": "user", "content": user_message}  # Merged prompt + format instruction
             ],
-            "temperature": 0.8,
+            "temperature": 0.7,  # Reduced from 0.8 for more deterministic output
         }
         
         # Only add response_format for compatible models
@@ -180,27 +196,13 @@ CRITICAL RULES:
         try:
             strategy_data = json.loads(content)
         except json.JSONDecodeError:
-            # Try to find JSON object in the response using a more flexible regex
+            # KEEP ONLY SAFE JSON EXTRACTION (old schema is illegal)
             import re
-            # Look for JSON object that contains symbol and condition
-            json_match = re.search(r'\{[^{}]*(?:"symbol"[^{}]*"condition"|"condition"[^{}]*"symbol")[^{}]*\}', content, re.DOTALL)
-            if json_match:
-                try:
-                    strategy_data = json.loads(json_match.group(0))
-                except json.JSONDecodeError:
-                    # Try to extract JSON from code blocks
-                    json_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-                    if json_block:
-                        strategy_data = json.loads(json_block.group(1))
-                    else:
-                        raise json.JSONDecodeError("Could not find valid JSON in response", content, 0)
+            json_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+            if json_block:
+                strategy_data = json.loads(json_block.group(1))
             else:
-                # Try to extract JSON from code blocks
-                json_block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-                if json_block:
-                    strategy_data = json.loads(json_block.group(1))
-                else:
-                    raise json.JSONDecodeError("Could not find valid JSON in response", content, 0)
+                raise ValueError("OUTPUT_ERROR: OpenAI response is not valid JSON.")
         
         # Validate structure - check for new unified schema or old schema
         has_unified_schema = "logic" in strategy_data and "risk" in strategy_data and "meta" in strategy_data
@@ -210,26 +212,28 @@ CRITICAL RULES:
             logger.error("Invalid strategy structure from OpenAI - missing both unified and old schema")
             return None
         
-        # Extract symbol from OpenAI response or prompt
+        # Extract symbol from OpenAI response (STRICT NO-INVENTION)
+        # Backend must never infer anything, even via regex
         if "symbol" not in strategy_data or not strategy_data.get("symbol"):
-            # Try to extract from prompt (look for "Symbol: XXX" pattern)
-            symbol_match = re.search(r'Symbol:\s*([A-Z0-9]+)', user_prompt, re.IGNORECASE)
-            if symbol_match:
-                strategy_data["symbol"] = symbol_match.group(1).upper()
-                logger.info(f"✅ Extracted symbol from prompt: {strategy_data['symbol']}")
-            else:
-                strategy_data["symbol"] = "BTCUSD"  # Default fallback
-                logger.warning("⚠️ Could not extract symbol, using default: BTCUSD")
+            raise ValueError(
+                "OUTPUT_ERROR: Strategy missing required 'symbol'. "
+                "AI must explicitly return symbol in unified schema."
+            )
         else:
             # Ensure symbol is uppercase
             strategy_data["symbol"] = str(strategy_data["symbol"]).upper()
         
-        # If OpenAI returned old schema, transform to unified schema
-        if has_old_schema and not has_unified_schema:
-            strategy_data = _transform_to_unified_schema(strategy_data, user_prompt)
-        elif has_unified_schema:
-            # Validate and clean unified schema
+        # CRITICAL: Reject old schema - should not exist (OpenAI should return unified schema)
+        if has_old_schema:
+            logger.error("❌ OpenAI returned old schema - this should not happen")
+            raise ValueError("OUTPUT_ERROR: OpenAI returned deprecated schema format. Please try again.")
+        
+        # Validate unified schema (NO INVENTION - reject if missing required fields)
+        if has_unified_schema:
             strategy_data = _validate_unified_schema(strategy_data, user_prompt)
+        else:
+            logger.error("❌ OpenAI response missing unified schema structure")
+            raise ValueError("OUTPUT_ERROR: Strategy is missing required unified schema structure (logic, risk, meta).")
         
         logger.info(f"Successfully generated strategy with unified schema: {strategy_data}")
         return strategy_data
@@ -252,172 +256,41 @@ CRITICAL RULES:
         return None
 
 
-def _transform_to_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) -> Dict[str, Any]:
-    """
-    Transform old schema (condition.type, condition.parameters) to unified schema (logic, risk, meta).
+# REMOVED: _transform_to_unified_schema function
+# Old schema transformation is no longer supported.
+# OpenAI must return unified schema directly.
+# If old schema appears, it is rejected with error.
     
-    CRITICAL: Do NOT inject default EMA values. Use ONLY what's in the prompt.
-    """
-    unified = {
-        "symbol": strategy_data.get("symbol", "BTCUSD").upper(),
-        "strategy_type": None,
-        "logic": {},
-        "risk": {},
-        "meta": {}
-    }
-    
-    # Extract strategy type
-    condition = strategy_data.get("condition", {})
-    strategy_type = condition.get("type") or strategy_data.get("strategy_type")
-    if strategy_type == "moving_average":
-        strategy_type = "ema_crossover"
-    unified["strategy_type"] = strategy_type or "ema_crossover"
-    
-    # Extract parameters
-    params = condition.get("parameters", {}) or strategy_data.get("parameters", {})
-    
-    # Extract EMAs - CRITICAL: NO defaults, use ONLY what's in prompt
-    emas = []
-    if params.get("emas") and isinstance(params.get("emas"), list):
-        emas = params["emas"]
-    else:
-        # Try to extract from various field names, but NO defaults
-        if params.get("ema_fast"):
-            emas.append(params["ema_fast"])
-        if params.get("ema_slow"):
-            emas.append(params["ema_slow"])
-        if params.get("ema_medium"):
-            emas.append(params["ema_medium"])
-        # Extract from prompt if not in params
-        if not emas:
-            ema_matches = re.findall(r'EMA\s+(\d+)|(\d+)\s+EMA|ema[_\s]+(\d+)', user_prompt, re.IGNORECASE)
-            for match in ema_matches:
-                period = int(match[0] or match[1] or match[2])
-                if period not in emas:
-                    emas.append(period)
-            emas.sort()
-    
-    # Get strategy type to determine if EMA validation is needed
-    strategy_type = str(unified.get("strategy_type", "")).lower()
-    # Check if it's an EMA-based strategy
-    is_ema_strategy = (
-        "ema" in strategy_type or 
-        "moving_average" in strategy_type or 
-        "crossover" in strategy_type or
-        "moving average" in strategy_type
-    )
-    
-    # Check if it's a non-EMA strategy (SuperTrend, RSI, etc.)
-    is_non_ema_strategy = (
-        "supertrend" in strategy_type or
-        "super trend" in strategy_type or
-        "rsi" in strategy_type or
-        "macd" in strategy_type or
-        "bollinger" in strategy_type
-    )
-    
-    # CRITICAL: Only validate EMAs for EMA-based strategies (skip for SuperTrend and other non-EMA strategies)
-    if is_ema_strategy and not is_non_ema_strategy and not emas:
-        logger.error("❌ No EMA periods found in strategy - cannot generate unified schema")
-        raise ValueError("No EMA periods found in strategy. For EMA-based strategies, please specify EMA periods explicitly (e.g., EMA 10, 20, 50).")
-    
-    # Build logic section
-    # For non-EMA strategies (SuperTrend, etc.), preserve original logic structure from OpenAI
-    if is_non_ema_strategy:
-        # For SuperTrend and other non-EMA strategies, preserve the original logic from OpenAI
-        # Don't force EMA structure - use what OpenAI generated
-        if strategy_data.get("logic"):
-            unified["logic"] = strategy_data["logic"].copy()
-        else:
-            # If no logic from OpenAI, create minimal structure
-            unified["logic"] = {
-                "entry": {
-                    "buy": {},
-                    "sell": {}
-                }
-            }
-        # Ensure entry structure exists
-        if "entry" not in unified["logic"]:
-            unified["logic"]["entry"] = {"buy": {}, "sell": {}}
-    else:
-        # For EMA-based strategies, build EMA logic structure
-        if not emas:
-            # This should not happen due to validation above, but add safety check
-            raise ValueError("Cannot build EMA logic without EMA periods")
-        unified["logic"] = {
-            "emas": emas,
-            "entry": {
-                "buy": {
-                    "crossover": f"ema_{emas[0]}_above_all",
-                    "confirmation": {
-                        "type": "candle_high_break" if params.get("require_high_break") else "immediate",
-                        "reference": "second_candle",
-                        "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
-                    }
-                },
-                "sell": {
-                    "crossover": f"ema_{emas[0]}_below_all",
-                    "confirmation": {
-                        "type": "candle_low_break" if params.get("require_low_break") else "immediate",
-                        "reference": "second_candle",
-                        "max_wait_candles": params.get("break_condition", {}).get("wait_for_max_candles") or 4
-                    }
-                }
-            }
-        }
-    
-    # Build risk section - POINTS only (preferred), fallback to percent if needed
-    risk = {}
-    if params.get("tp_point") is not None:
-        risk["take_profit_points"] = params["tp_point"]
-    elif params.get("tp_percent") is not None:
-        # Convert percent to points (approximate - would need current price)
-        logger.warning("⚠️ TP provided as percentage, converting to points (approximate)")
-        risk["take_profit_points"] = None  # Will need to be calculated with price
-    
-    if params.get("sl_point") is not None:
-        risk["stop_loss_points"] = params["sl_point"]
-    elif params.get("sl_percent") is not None:
-        logger.warning("⚠️ SL provided as percentage, converting to points (approximate)")
-        risk["stop_loss_points"] = None  # Will need to be calculated with price
-    
-    unified["risk"] = risk
-    
-    # Build meta section - extract from prompt
-    meta = {}
-    timeframe_match = re.search(r'Timeframe:\s*([A-Z0-9]+)', user_prompt, re.IGNORECASE)
-    if timeframe_match:
-        meta["timeframe"] = timeframe_match.group(1).upper()
-    
-    chart_type_match = re.search(r'Chart Type:\s*([A-Za-z\s]+)', user_prompt, re.IGNORECASE)
-    if chart_type_match:
-        chart_type_str = chart_type_match.group(1).strip().lower()
-        meta["chart_type"] = "heikin_ashi" if "heikin" in chart_type_str else "candles"
-    
-    unified["meta"] = meta
-    
-    return unified
 
 
 def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) -> Dict[str, Any]:
     """
-    Validate and clean unified schema - ensure it matches exact requirements.
+    Validate unified schema - NO INVENTION POLICY.
+    Reject if required fields are missing (do NOT create defaults).
     """
-    # Ensure required sections exist
+    # NO INVENTION: Reject if required sections are missing
     if "logic" not in strategy_data:
-        strategy_data["logic"] = {}
+        raise ValueError("OUTPUT_ERROR: Strategy is missing required 'logic' section.")
     if "risk" not in strategy_data:
-        strategy_data["risk"] = {}
+        raise ValueError("OUTPUT_ERROR: Strategy is missing required 'risk' section.")
     if "meta" not in strategy_data:
-        strategy_data["meta"] = {}
+        raise ValueError("OUTPUT_ERROR: Strategy is missing required 'meta' section.")
     
-    # CRITICAL: Remove any ema_fast or ema_slow fields (forbidden)
+    # NO INVENTION: Reject if strategy_type is missing
+    if not strategy_data.get("strategy_type"):
+        raise ValueError("OUTPUT_ERROR: Strategy is missing required 'strategy_type' field. Do NOT default to 'ema_crossover'.")
+    
+    # CRITICAL: Reject forbidden fields (STRICT REJECTION, NO AUTO-CLEANUP)
     if "ema_fast" in strategy_data.get("logic", {}):
-        del strategy_data["logic"]["ema_fast"]
-        logger.warning("⚠️ Removed forbidden ema_fast field from logic")
+        raise ValueError(
+            "OUTPUT_ERROR: Forbidden field 'ema_fast' detected. "
+            "Strategy must follow unified schema strictly."
+        )
     if "ema_slow" in strategy_data.get("logic", {}):
-        del strategy_data["logic"]["ema_slow"]
-        logger.warning("⚠️ Removed forbidden ema_slow field from logic")
+        raise ValueError(
+            "OUTPUT_ERROR: Forbidden field 'ema_slow' detected. "
+            "Strategy must follow unified schema strictly."
+        )
     
     # Get strategy type to determine if EMA validation is needed
     strategy_type = str(strategy_data.get("strategy_type", "")).lower()
@@ -438,28 +311,26 @@ def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) ->
         "bollinger" in strategy_type
     )
     
-    # Only validate EMAs for EMA-based strategies (skip for SuperTrend and other non-EMA strategies)
+    # NO INVENTION: For EMA-based strategies, reject if EMAs are missing
+    # Do NOT extract from prompt or create defaults
     if is_ema_strategy and not is_non_ema_strategy:
-        # Ensure emas is an array
         if "emas" not in strategy_data.get("logic", {}):
-            # Try to extract from prompt
-            ema_matches = re.findall(r'EMA\s+(\d+)|(\d+)\s+EMA|ema[_\s]+(\d+)', user_prompt, re.IGNORECASE)
-            emas = []
-            for match in ema_matches:
-                period = int(match[0] or match[1] or match[2])
-                if period not in emas:
-                    emas.append(period)
-            emas.sort()
-            if emas:
-                strategy_data["logic"]["emas"] = emas
-            else:
-                raise ValueError("No EMA periods found in strategy or prompt. For EMA-based strategies, please specify EMA periods (e.g., EMA 10, 20, 50).")
+            raise ValueError("OUTPUT_ERROR: EMA-based strategy is missing 'emas' array in logic section. Do NOT auto-generate EMA periods.")
+        
+        emas = strategy_data["logic"]["emas"]
+        if not isinstance(emas, list) or len(emas) < 2:
+            raise ValueError("OUTPUT_ERROR: EMA-based strategy must have at least 2 EMA periods in logic.emas array.")
     
-    # Ensure entry structure exists
+    # NO INVENTION: Reject if entry structure is missing (do NOT create)
     if "entry" not in strategy_data.get("logic", {}):
-        strategy_data["logic"]["entry"] = {"buy": {}, "sell": {}}
+        raise ValueError("OUTPUT_ERROR: Strategy is missing 'entry' section in logic. Do NOT auto-create entry structure.")
     
-    # Ensure timeframe and chart_type are in meta, not logic
+    entry = strategy_data["logic"]["entry"]
+    if "buy" not in entry or "sell" not in entry:
+        raise ValueError("OUTPUT_ERROR: Strategy entry must contain both 'buy' and 'sell' sections. Do NOT auto-create.")
+    
+    # Move timeframe and chart_type from logic to meta (if present in wrong location)
+    # This is schema cleanup, not invention
     if "timeframe" in strategy_data.get("logic", {}):
         if "timeframe" not in strategy_data["meta"]:
             strategy_data["meta"]["timeframe"] = strategy_data["logic"]["timeframe"]
