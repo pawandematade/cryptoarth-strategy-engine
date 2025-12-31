@@ -183,9 +183,10 @@ def sync_user_to_local_db(
             logger.info(f"Created user snapshot: external_user_id={external_user_id}, local_id={new_user.id}")
             
             # Initialize credits for new user
+            # CRITICAL FIX: user_credits table stores credits against external_user_id, NOT user.id
             try:
-                initialize_user_credits(db, new_user.id)
-                logger.info(f"Initialized credits for new user: user_id={new_user.id}")
+                initialize_user_credits(db, new_user.external_user_id)
+                logger.info(f"Initialized credits for new user: external_user_id={new_user.external_user_id}, local_id={new_user.id}")
             except Exception as credit_error:
                 # Log error but don't fail user creation
                 logger.error(f"Failed to initialize credits for new user {new_user.id}: {credit_error}", exc_info=True)

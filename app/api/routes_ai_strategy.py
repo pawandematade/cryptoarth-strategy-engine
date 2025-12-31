@@ -173,16 +173,23 @@ def generate_ai_strategy(
                 detail="Failed to authenticate user"
             )
         
+        # CRITICAL: Log user IDs for debugging
+        logger.info(f"🔍 CREDIT CHECK DEBUG: user.id={user.id}, user.external_user_id={user.external_user_id}")
+        
         # CRITICAL: FIRST STEP - Check and deduct credits BEFORE any other processing
         # This ensures every API call results in credit deduction
+        # CRITICAL FIX: user_credits table stores credits against external_user_id, NOT user.id
         # Check if user has enough credits for AI generate (1 credit)
         is_available, available_credits, required_credits = check_credits_available(
-            db, user.id, 'ai_strategy_generate'
+            db, user.external_user_id, 'ai_strategy_generate'
         )
+        
+        # CRITICAL: Log credit query result
+        logger.info(f"🔍 CREDIT CHECK RESULT: is_available={is_available}, available_credits={available_credits}, required_credits={required_credits}")
         
         if not is_available:
             # Block generation if credits <= 0
-            logger.warning(f"AI GENERATE BLOCKED – insufficient credits: user_id={user.id}, available={available_credits}, required={required_credits}")
+            logger.warning(f"AI GENERATE BLOCKED – insufficient credits: external_user_id={user.external_user_id}, available={available_credits}, required={required_credits}")
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,  # 402 Payment Required
                 detail=f"Insufficient credits. Available: {available_credits}, Required: {required_credits}. Please purchase more credits to continue."
@@ -190,8 +197,9 @@ def generate_ai_strategy(
         
         # CRITICAL: Deduct credits FIRST (atomic operation) - BEFORE any generation logic
         # This is the SINGLE place where credits are deducted for AI Generate
+        # CRITICAL FIX: Use external_user_id instead of user.id
         success, error_msg = deduct_credits(
-            db, user.id, 'ai_strategy_generate',
+            db, user.external_user_id, 'ai_strategy_generate',
             reason="AI strategy generation",
             reference_id=None
         )
@@ -518,7 +526,7 @@ def list_strategies():
         raise HTTPException(status_code=500, detail=f"Failed to load strategies: {str(e)}")
 
 
-@router.get("/ai-strategy/{strategy_id}")
+@router.get("/ai-strategy/{strategy_id:int}")
 def get_strategy(strategy_id: int):
     """
     Get a specific strategy by ID.
@@ -597,10 +605,14 @@ def run_strategy_backtest(
         
         # CREDIT CHECK AND DEDUCTION (MANDATORY - NO FREE USAGE)
         # Every backtest run MUST deduct 1 credit
+        # CRITICAL FIX: user_credits table stores credits against external_user_id, NOT user.id
         # Check if user has enough credits for backtest (1 credit)
+        logger.info(f"🔍 BACKTEST CREDIT CHECK DEBUG: user.id={user.id}, user.external_user_id={user.external_user_id}")
         is_available, available_credits, required_credits = check_credits_available(
-            db, user.id, 'backtest'
+            db, user.external_user_id, 'backtest'
         )
+        
+        logger.info(f"🔍 BACKTEST CREDIT CHECK RESULT: is_available={is_available}, available_credits={available_credits}, required_credits={required_credits}")
         
         if not is_available:
             raise HTTPException(
@@ -618,8 +630,9 @@ def run_strategy_backtest(
         )
         
         # Deduct credits BEFORE running backtest (atomic operation)
+        # CRITICAL FIX: Use external_user_id instead of user.id
         success, error_msg = deduct_credits(
-            db, user.id, 'backtest',
+            db, user.external_user_id, 'backtest',
             reason="Backtest execution",
             reference_id=str(strategy_code)
         )

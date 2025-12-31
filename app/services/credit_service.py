@@ -121,14 +121,26 @@ def get_user_credits(db: Session, user_id: int) -> Optional[UserCredits]:
     🔒 FINAL LOGIC: Do NOT auto-initialize credits.
     Credits are initialized ONLY on signup (via initialize_user_credits endpoint).
     
+    CRITICAL: user_id parameter is actually external_user_id (business user ID).
+    The user_credits table stores credits against external_user_id, NOT local users.id.
+    
     Args:
         db: Database session
-        user_id: Local user ID
+        user_id: External user ID (business user ID from auth backend)
     
     Returns:
         UserCredits: User credits record (None if not exists)
     """
+    # CRITICAL: Log the exact query being executed
+    logger.info(f"🔍 CREDIT QUERY: SELECT * FROM user_credits WHERE user_id = {user_id}")
+    
     user_credits = db.query(UserCredits).filter(UserCredits.user_id == user_id).first()
+    
+    # CRITICAL: Log query result
+    if user_credits:
+        logger.info(f"🔍 CREDIT QUERY RESULT: Found user_credits - total_credits={user_credits.total_credits}, used_credits={user_credits.used_credits}, available={user_credits.available_credits}")
+    else:
+        logger.warning(f"🔍 CREDIT QUERY RESULT: No user_credits found for user_id={user_id}")
     
     # ❌ REMOVED: Auto-initialization logic
     # Credits are initialized ONLY on signup, not on every credit check
@@ -142,17 +154,21 @@ def check_credits_available(db: Session, user_id: int, action_key: str) -> Tuple
     """
     Check if user has enough credits for an action.
     
+    CRITICAL: user_id parameter is actually external_user_id (business user ID).
+    The user_credits table stores credits against external_user_id, NOT local users.id.
+    
     Args:
         db: Database session
-        user_id: Local user ID
+        user_id: External user ID (business user ID from auth backend)
         action_key: Action identifier (e.g., 'ai_strategy_generate')
     
     Returns:
         tuple: (is_available, available_credits, required_credits)
     """
-    # Get user credits
+    # Get user credits (user_id is external_user_id)
     user_credits = get_user_credits(db, user_id)
     if not user_credits:
+        logger.warning(f"Credit check failed: No user_credits found for external_user_id={user_id}")
         return False, 0, 0
     
     # Get credit cost for action
@@ -161,7 +177,7 @@ def check_credits_available(db: Session, user_id: int, action_key: str) -> Tuple
     
     is_available = available_credits >= required_credits
     
-    logger.info(f"Credit check for user_id={user_id}, action={action_key}: available={available_credits}, required={required_credits}, is_available={is_available}")
+    logger.info(f"Credit check for external_user_id={user_id}, action={action_key}: available={available_credits}, required={required_credits}, is_available={is_available}")
     
     return is_available, available_credits, required_credits
 
@@ -179,9 +195,12 @@ def deduct_credits(
     """
     Deduct credits from user wallet (atomic operation).
     
+    CRITICAL: user_id parameter is actually external_user_id (business user ID).
+    The user_credits table stores credits against external_user_id, NOT local users.id.
+    
     Args:
         db: Database session
-        user_id: Local user ID
+        user_id: External user ID (business user ID from auth backend)
         action_key: Action identifier (for automatic credit cost calculation)
         credits: Direct credit amount (if action_key not provided)
         reason: Optional reason for deduction
