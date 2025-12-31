@@ -25,6 +25,7 @@ from app.api.routes_health import router as health_router
 from app.api.routes_monitoring import router as monitoring_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_internal import router as internal_router
+from app.api.routes_copilot import router as copilot_router
 from app.middleware.api_observability import APIObservabilityMiddleware
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -202,6 +203,7 @@ app.include_router(reports_router, prefix="", tags=["Reports"])  # Trade reporti
 app.include_router(internal_router, prefix="", tags=["Internal"])  # Internal APIs (no auth) - /internal/*
 app.include_router(health_router, prefix="", tags=["Health"])  # Health check endpoints - /health, /health/db, /health/cron
 app.include_router(monitoring_router, prefix="/auth", tags=["Monitoring"])  # Monitoring endpoints - /auth/monitoring/*
+app.include_router(copilot_router, prefix="/auth", tags=["Copilot"])  # Copilot conversational strategy builder - /auth/copilot/*
 
 @app.get("/")
 def root():
