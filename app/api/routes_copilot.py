@@ -118,27 +118,56 @@ def copilot_message(
             conversation_history=conversation_history
         )
         
-        # Update conversation history
+        # Ensure result is valid - service should always return a dict
+        if not result or not isinstance(result, dict):
+            logger.error(f"Invalid result from process_copilot_message: {result}")
+            return CopilotMessageResponse(
+                success=False,
+                session_id=session_id,
+                response="Copilot is temporarily unavailable. Please try again.",
+                is_ready=False,
+                missing_details=[],
+                summary=None
+            )
+        
+        # Check if service returned success=False
+        if not result.get("success", True):
+            # Service already returned error response, pass it through
+            return CopilotMessageResponse(
+                success=False,
+                session_id=result.get("session_id", session_id),
+                response=result.get("response", "Copilot is temporarily unavailable. Please try again."),
+                is_ready=result.get("is_ready", False),
+                missing_details=result.get("missing_details", []),
+                summary=result.get("summary")
+            )
+        
+        # Update conversation history only on success
         conversation_history.append({"role": "user", "content": request.message})
-        conversation_history.append({"role": "assistant", "content": result["response"]})
+        conversation_history.append({"role": "assistant", "content": result.get("response", "")})
         
         # Save updated session
         save_copilot_session(session_id, conversation_history)
         
         return CopilotMessageResponse(
             success=True,
-            session_id=session_id,
-            response=result["response"],
-            is_ready=result["is_ready"],
-            missing_details=result["missing_details"],
-            summary=result["summary"]
+            session_id=result.get("session_id", session_id),
+            response=result.get("response", "I'm here. Please tell me more about your strategy."),
+            is_ready=result.get("is_ready", False),
+            missing_details=result.get("missing_details", []),
+            summary=result.get("summary")
         )
         
     except Exception as e:
         logger.error(f"Error in copilot_message: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Something went wrong while processing your message. Please try again."
+        # Always return valid JSON, never raise HTTPException
+        return CopilotMessageResponse(
+            success=False,
+            session_id=request.session_id or create_copilot_session(),
+            response="Something went wrong while processing your message. Please try again.",
+            is_ready=False,
+            missing_details=[],
+            summary=None
         )
 
 

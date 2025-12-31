@@ -117,12 +117,17 @@ def process_copilot_message(
         - missing_details: Always empty (Copilot asks in conversation, not in structure)
         - summary: Always None (summary is conversational, not extracted)
     """
+    # Copilot API must NEVER fail silently.
+    # Frontend expects a valid JSON response in all cases.
+    
     if not client:
         logger.warning("⚠️  OpenAI client not initialized. Attempting to reinitialize...")
         if not initialize_client():
             logger.error("❌ OpenAI client initialization failed.")
             return {
-                "response": "I'm having trouble connecting to the AI service. Please check your configuration and try again.",
+                "success": False,
+                "session_id": session_id,
+                "response": "Copilot is temporarily unavailable. Please try again.",
                 "is_ready": False,
                 "missing_details": [],
                 "summary": None
@@ -213,15 +218,30 @@ RESPONSE FORMAT:
         # Add current user message
         messages.append({"role": "user", "content": user_message})
         
-        # Call OpenAI
+        # Call OpenAI - wrapped safely to prevent silent failures
         api_params = {
             "model": OPENAI_MODEL,
             "messages": messages,
             "temperature": 0.7,  # Conversational tone
         }
         
-        response = client.chat.completions.create(**api_params)
-        copilot_response = response.choices[0].message.content.strip()
+        try:
+            response = client.chat.completions.create(**api_params)
+            copilot_response = response.choices[0].message.content.strip()
+            
+            # GUARANTEE response field always exists
+            if not copilot_response:
+                copilot_response = "I'm here. Please tell me more about your strategy."
+        except Exception as e:
+            logger.error(f"Copilot OpenAI error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "session_id": session_id,
+                "response": "Copilot is having trouble responding. Please try again.",
+                "is_ready": False,
+                "missing_details": [],
+                "summary": None
+            }
         
         # UX-level readiness detection based on clarity of user intent
         # Copilot readiness is based on clarity of user intent,
@@ -256,18 +276,36 @@ RESPONSE FORMAT:
             if not summary:
                 summary = "Strategy complete - ready for backtest"
         
+        # FRONTEND-SAFE GUARANTEE: Ensure response is always a string
+        assert isinstance(copilot_response, str), "copilot_response must be a string"
+        
         logger.info(f"✅ Copilot response generated for session {session_id}, is_ready={is_ready}, summary={'present' if summary else 'none'}")
         
+        # FINAL RETURN CONTRACT (STRICT): Every successful response MUST contain all keys
         return {
+            "success": True,
+            "session_id": session_id,
             "response": copilot_response,
             "is_ready": is_ready,
             "missing_details": missing_details,
             "summary": summary
         }
         
+    except AssertionError as e:
+        logger.error(f"Copilot response validation failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "session_id": session_id,
+            "response": "Copilot is temporarily unavailable. Please try again.",
+            "is_ready": False,
+            "missing_details": [],
+            "summary": None
+        }
     except Exception as e:
         logger.error(f"Error processing copilot message: {e}", exc_info=True)
         return {
+            "success": False,
+            "session_id": session_id,
             "response": "I encountered an error processing your message. Please try again or rephrase your strategy.",
             "is_ready": False,
             "missing_details": [],
