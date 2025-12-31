@@ -258,8 +258,7 @@ class BacktestEngine:
         # Track trades
         trades = []
         current_trade = None
-        last_processed_signal_index = -1  # Track last signal we processed
-        last_exit_candle_index = -1  # Track last exit candle (prevent re-entry on same candle)
+        last_exit_candle_index = -1  # Track last exit candle (prevent re-entry on same candle as exit)
         
         # Minimum required index for StrategyRunner
         min_required_index = max(self.runner.ema_periods)
@@ -285,9 +284,7 @@ class BacktestEngine:
                     trades.append(current_trade.copy())
                     # CRITICAL FIX: Reset position state after trade exit
                     current_trade = None
-                    last_exit_candle_index = exit_candle_index  # Track exit candle
-                    # CRITICAL FIX: Reset last_processed_signal_index to allow new signals after exit
-                    last_processed_signal_index = exit_candle_index
+                    last_exit_candle_index = exit_candle_index  # Track exit candle (prevent re-entry on same candle)
                     
                     # Continue to next candle (don't check for new signals on exit candle)
                     continue
@@ -297,28 +294,29 @@ class BacktestEngine:
             if i <= last_exit_candle_index:
                 continue
             
-            # Slice candles up to current index (inclusive) for StrategyRunner
+            # CRITICAL ARCHITECTURAL FIX: Use incremental on_candle() method
+            # This evaluates ONLY the current candle index, not full history
+            # This supports multiple trades, grid strategies, and live/backtest parity
+            # Contract: StrategyRunner.on_candle() is a PURE evaluator - it returns signal
+            # if conditions are met at THIS candle, None otherwise.
+            # BacktestEngine only blocks entries when: (1) trade is open, (2) on exit candle
             candle_slice = candles.iloc[:i + 1].copy()
-            
-            # Execute StrategyRunner (immutable - doesn't modify slice)
-            signal = self.runner.run(candle_slice)
+            signal = self.runner.on_candle(candle_slice, i)
             
             if signal is not None:
-                # Only process if this is a new signal (not already processed)
+                # Signal detected at current candle index by StrategyRunner
+                # In incremental mode, we trust StrategyRunner's evaluation
+                # Only blocking: no pyramiding (current_trade must be None)
+                # This is already guaranteed by the outer if condition
                 signal_index = signal['index']
-                if signal_index > last_processed_signal_index:
-                    # New signal - open new trade
-                    # Only open if we don't already have a trade (no pyramiding)
-                    if current_trade is None:
-                        current_trade = {
-                            'direction': signal['signal'],  # Strictly "BUY" or "SELL"
-                            'entry_price': signal['entry_price'],
-                            'stop_loss': signal['stop_loss'],
-                            'take_profit': signal['take_profit'],
-                            'entry_index': signal_index,
-                            'entry_reason': signal.get('reason', '')  # Preserve entry reason
-                        }
-                        last_processed_signal_index = signal_index
+                current_trade = {
+                    'direction': signal['signal'],  # Strictly "BUY" or "SELL"
+                    'entry_price': signal['entry_price'],
+                    'stop_loss': signal['stop_loss'],
+                    'take_profit': signal['take_profit'],
+                    'entry_index': signal_index,
+                    'entry_reason': signal.get('reason', '')  # Preserve entry reason
+                }
         
         # Close any remaining open trade at end of candles
         if current_trade is not None:

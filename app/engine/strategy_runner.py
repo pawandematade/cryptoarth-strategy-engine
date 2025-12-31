@@ -358,13 +358,107 @@ class StrategyRunner:
             'take_profit': take_profit
         }
     
-    def run(self, candles: pd.DataFrame) -> Optional[Dict[str, Any]]:
+    def on_candle(self, candles: pd.DataFrame, index: int) -> Optional[Dict[str, Any]]:
+        """
+        Evaluate strategy at a specific candle index (incremental mode).
+        
+        This is the CORRECT method for backtest and live trading.
+        It evaluates ONLY the given candle index, not the full history.
+        
+        Args:
+            candles: DataFrame with OHLCV data up to and including the index to evaluate.
+                    Must have columns: 'open', 'high', 'low', 'close', 'volume'
+            index: Specific candle index to evaluate (0-based)
+        
+        Returns:
+            Signal dict if conditions met at this index, None otherwise:
+            {
+                "signal": "BUY" | "SELL",
+                "entry_price": float,
+                "stop_loss": float,
+                "take_profit": float,
+                "index": int,
+                "reason": str
+            }
+        """
+        # Validate DataFrame
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        missing_columns = [col for col in required_columns if col not in candles.columns]
+        if missing_columns:
+            raise ValueError(f"DataFrame missing required columns: {missing_columns}")
+        
+        # Validate index
+        if index < 0 or index >= len(candles):
+            return None
+        
+        # Need enough candles for EMA calculation
+        min_required_index = max(self.ema_periods)
+        if index < min_required_index:
+            return None
+        
+        # Calculate EMAs (immutable - creates new Series, doesn't modify candles)
+        emas = self.calculate_emas(candles)
+        
+        # Evaluate ONLY the given index for signal conditions
+        # Check for BUY signal first (has priority)
+        if self.check_crossover_above(emas, index):
+            # Crossover detected at this index, check confirmation
+            confirmation = self.buy_entry.get('confirmation', {})
+            confirmed_index = self.check_candle_break_confirmation(
+                candles, index, 'BUY', confirmation
+            )
+            
+            if confirmed_index is not None:
+                # Signal confirmed - return signal for this specific index
+                entry_price = candles['close'].iloc[confirmed_index]
+                risk_levels = self.calculate_risk_levels(entry_price, 'BUY')
+                reason = self._generate_reason('BUY', confirmation)
+                
+                return {
+                    "signal": "BUY",
+                    "entry_price": float(entry_price),
+                    "stop_loss": float(risk_levels['stop_loss']),
+                    "take_profit": float(risk_levels['take_profit']),
+                    "index": int(confirmed_index),
+                    "reason": reason
+                }
+        
+        # Check for SELL signal (only if BUY didn't match/confirm)
+        if self.check_crossover_below(emas, index):
+            # Crossover detected at this index, check confirmation
+            confirmation = self.sell_entry.get('confirmation', {})
+            confirmed_index = self.check_candle_break_confirmation(
+                candles, index, 'SELL', confirmation
+            )
+            
+            if confirmed_index is not None:
+                # Signal confirmed
+                entry_price = candles['close'].iloc[confirmed_index]
+                risk_levels = self.calculate_risk_levels(entry_price, 'SELL')
+                reason = self._generate_reason('SELL', confirmation)
+                
+                return {
+                    "signal": "SELL",
+                    "entry_price": float(entry_price),
+                    "stop_loss": float(risk_levels['stop_loss']),
+                    "take_profit": float(risk_levels['take_profit']),
+                    "index": int(confirmed_index),
+                    "reason": reason
+                }
+        
+        # No signal at this index
+        return None
+    
+    def run(self, candles: pd.DataFrame, min_signal_index: int = -1) -> Optional[Dict[str, Any]]:
         """
         Run strategy on candles and return signal if conditions met.
         
         Args:
             candles: DataFrame with OHLCV data, sorted by time ascending.
                     Must have columns: 'open', 'high', 'low', 'close', 'volume'
+            min_signal_index: Only return signals with index > min_signal_index.
+                             Use -1 to return first signal found (default behavior).
+                             Used by BacktestEngine to find new signals after trade exits.
         
         Returns:
             Signal dict or None:
@@ -392,8 +486,10 @@ class StrategyRunner:
         
         # Check each candle for signals (start from index where all EMAs are valid)
         min_required_index = max(self.ema_periods)
+        # CRITICAL FIX: Start scanning from after min_signal_index to find NEW signals
+        start_index = max(min_required_index, min_signal_index + 1)
         
-        for i in range(min_required_index, len(candles)):
+        for i in range(start_index, len(candles)):
             # CRITICAL: Only ONE signal per candle index
             # BUY has priority if both conditions match on same crossover candle
             # Check BUY first, return immediately if confirmed (prevents double signal)
