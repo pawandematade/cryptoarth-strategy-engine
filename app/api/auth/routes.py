@@ -10,7 +10,8 @@ Endpoints:
 
 Request/Response formats match cryptoarth_backend exactly.
 """
-from fastapi import APIRouter, HTTPException, Header, Depends, status
+import fastapi
+from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
@@ -388,7 +389,7 @@ def otp_login(request: OTPLoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/user/", status_code=status.HTTP_200_OK)
 def get_current_user(
-    authorization: Optional[str] = Header(None),
+    authorization: Optional[str] = fastapi.Header(None),
     db: Session = Depends(get_db)
 ):
     """
