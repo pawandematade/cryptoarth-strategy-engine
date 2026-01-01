@@ -124,3 +124,9 @@ else:
 # Endpoint: GET https://trade-api.cryptoarth.in/auth/user/
 AUTH_BACKEND_URL = os.getenv("AUTH_BACKEND_URL", "https://trade-api.cryptoarth.in")
 
+# JWT Secret Key Configuration
+# SECRET_KEY is used for JWT token generation and validation
+# In production, this MUST be set via environment variable
+# Default value is for local development only
+SECRET_KEY = os.getenv("SECRET_KEY", "cryptoarth-secret-key")
+
