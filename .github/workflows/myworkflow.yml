@@ -1,4 +1,4 @@
-name: Strategy Engine CI/CD
+name: Deploy CryptoArth Backend
 
 on:
   push:
@@ -10,26 +10,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to CryptoArth Production Server
-        uses: appleboy/ssh-action@v1.0.0
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
+          username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: 22
-          timeout: 30s
-          command_timeout: 10m
-          script_stop: true
           script: |
             cd /var/www/cryptoarth
             git pull origin main
-            source venv/bin/activate
-
-            sudo pkill -9 -f "uvicorn app.main:app" || true
-
-            nohup python -m uvicorn app.main:app \
-              --host 0.0.0.0 \
-              --port 8000 \
-              > uvicorn.log 2>&1 &
-
-            exit 0
+            /usr/local/bin/restart_cryptoarth.sh
