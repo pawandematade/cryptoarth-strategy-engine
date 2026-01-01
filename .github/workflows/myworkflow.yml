@@ -19,18 +19,17 @@ jobs:
           port: 22
           timeout: 30s
           command_timeout: 10m
+          script_stop: true
           script: |
             cd /var/www/cryptoarth
             git pull origin main
             source venv/bin/activate
 
-            # Stop existing uvicorn safely
             sudo pkill -9 -f "uvicorn app.main:app" || true
 
-            # Start uvicorn in background (CI/CD SAFE)
             nohup python -m uvicorn app.main:app \
               --host 0.0.0.0 \
               --port 8000 \
               > uvicorn.log 2>&1 &
 
-            disown
+            exit 0
