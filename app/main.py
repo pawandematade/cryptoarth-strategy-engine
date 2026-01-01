@@ -26,6 +26,10 @@ from app.api.routes_monitoring import router as monitoring_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_internal import router as internal_router
 from app.api.routes_copilot import router as copilot_router
+from app.api.auth.routes import router as auth_router
+from app.api.routes_set_signal import router as set_signal_router
+from app.api.routes_readonly import router as readonly_router
+from app.api.routes_strategy_management import router as strategy_management_router
 from app.middleware.api_observability import APIObservabilityMiddleware
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -204,6 +208,10 @@ app.include_router(internal_router, prefix="", tags=["Internal"])  # Internal AP
 app.include_router(health_router, prefix="", tags=["Health"])  # Health check endpoints - /health, /health/db, /health/cron
 app.include_router(monitoring_router, prefix="/auth", tags=["Monitoring"])  # Monitoring endpoints - /auth/monitoring/*
 app.include_router(copilot_router, prefix="/auth", tags=["Copilot"])  # Copilot conversational strategy builder - /auth/copilot/*
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])  # Authentication endpoints - /auth/send-otp/, /auth/signup/, /auth/login/, /auth/user/
+app.include_router(set_signal_router, prefix="/auth", tags=["Trading"])  # Place order endpoint - /auth/setSignal/
+app.include_router(readonly_router, prefix="/auth", tags=["Read-Only APIs"])  # Read-only APIs migrated from cryptoarth_backend
+app.include_router(strategy_management_router, prefix="/auth", tags=["Strategy Management"])  # Strategy management APIs migrated from cryptoarth_backend
 
 @app.get("/")
 def root():
