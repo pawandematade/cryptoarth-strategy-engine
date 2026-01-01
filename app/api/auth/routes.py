@@ -10,7 +10,7 @@ Endpoints:
 
 Request/Response formats match cryptoarth_backend exactly.
 """
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, Header, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
