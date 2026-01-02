@@ -18,11 +18,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            echo "📁 Moving to project directory"
             cd /var/www/cryptoarth
-            echo "📥 Pulling latest code..."
             git pull origin main
-            echo "🔐 Ensuring restart script is executable"
             chmod +x scripts/restart_cryptoarth.sh
-            echo "🚀 Restarting backend..."
             bash scripts/restart_cryptoarth.sh
