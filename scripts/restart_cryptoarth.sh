@@ -16,10 +16,10 @@ echo "🐍 Activating virtual environment"
 source "$VENV_DIR/bin/activate"
 
 echo "🛑 Stopping existing server (if running)"
-pkill -f "uvicorn main:app" || true
+pkill -f "uvicorn app.main:app" || true
 
 echo "🚀 Starting backend"
-nohup "$VENV_DIR/bin/uvicorn" main:app \
+nohup "$VENV_DIR/bin/uvicorn" app.main:app \
   --host 0.0.0.0 \
   --port 8000 \
   > uvicorn.log 2>&1 &

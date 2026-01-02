@@ -45,7 +45,6 @@ class SymbolMaster(Base):
     contract_value = Column(DECIMAL(20, 10), nullable=True)
 
     # Relationships
-    watchlists = relationship("Watchlist", back_populates="symbol")
 
     def __repr__(self):
         return f"<SymbolMaster(id={self.id}, symbol={self.symbol}, symbolid={self.symbolid})>"

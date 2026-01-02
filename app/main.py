@@ -45,7 +45,7 @@ from app.api.routes_set_signal import router as set_signal_router
 from app.api.routes_readonly import router as readonly_router
 from app.api.routes_strategy_management import router as strategy_management_router
 from app.api.proxy.django_fallback import django_fallback
-from app.middleware.api_observability import APIObservabilityMiddleware
+# OBSERVABILITY DISABLED
 from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
@@ -144,7 +144,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(APIObservabilityMiddleware)  # API observability - tracks metrics
 
 # Configure CORS - CRITICAL: Single unified list for all environments
 # CRITICAL: When allow_credentials=True, browsers BLOCK allow_origins=["*"]

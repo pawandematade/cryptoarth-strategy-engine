@@ -1,3 +1,11 @@
+from rest_framework import serializers
+
+from django.core.cache import cache
+
+import random
+
+from app.utils.otp_service import OTPService
+
 from django.core.cache import cache  # ✅ This is correct
 
 from rest_framework import serializers
@@ -133,58 +141,44 @@ class UserSignupSerializer(serializers.ModelSerializer):
             # Ensure database connection is closed after operation
             connection.close()
 
+
 class SendOTPSerializer(serializers.Serializer):
-    """
-    Serializer for sending OTP to a phone number.
-    Creates or retrieves user, generates OTP, and sends it via multiple providers.
-    """
-    
+
     phone = serializers.CharField(max_length=15)
 
+
+
     def validate(self, data):
-        """
-        Validate phone number and send OTP.
-        Creates user if not exists, generates OTP, and sends via configured providers.
-        """
+
         phone = data.get("phone")
-        
-        # Basic phone number validation
+
         if not phone:
-            raise serializers.ValidationError("Phone number is required.")
 
-        try:
-            # Start atomic transaction
-            with transaction.atomic():
-                
-                
-                # Generate 6-digit random OTP
-                otp = str(random.randint(100000, 999999))
-                
-                created_at = timezone.now()
-
-                # Store OTP and timestamp in cache for 5 minutes
-                cache.set(f"otp_{phone}", {"otp": otp, "created_at": str(created_at)}, timeout=300)
-                
-                # Send OTP via both providers for redundancy
-                try:
-                    OTPService(phone, otp).send_otp(provider="msg91")
-                except Exception as e:
-                    print(str(e))
-                try:
-                    print(phone)
-                    OTPService(phone, otp).send_otp(provider="aisensy")
-                except Exception as e:
-                    print(str(e))
-
-                return {"message": "OTP sent successfully."}
-        except Exception as e:
-            # Handle any errors during OTP sending process
-            raise serializers.ValidationError(f"Failed to send OTP. Error: {str(e)}")
-        finally:
-            # Ensure database connection is closed after operation
-            connection.close()
+            raise serializers.ValidationError("Phone is required")
 
 
+
+        otp = str(random.randint(100000, 999999))
+
+
+
+        cache.set(f"otp_{phone}", {"otp": otp}, timeout=300)
+
+
+
+        # Send via SMS
+
+        OTPService(phone, otp).send_otp("msg91")
+
+
+
+        # Send via WhatsApp
+
+        OTPService(phone, otp).send_otp("aisensy")
+
+
+
+        return {"message": "OTP sent successfully"}
 
 
 class OTPLoginSerializer(serializers.Serializer):

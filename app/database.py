@@ -6,13 +6,45 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 import logging
-import os
-
 logger = logging.getLogger(__name__)
-
-# Construct database URL
-# CRITICAL: SQLAlchemy ONLY reads DATABASE_URL from environment
-# DATABASE_URL is the single source of truth - hard fail if missing
+import os
+import importlib
+import importlib.util
+from django.conf import settings
+import django
+if not settings.configured:
+    settings.configure(
+        INSTALLED_APPS=["django.contrib.auth", "django.contrib.contenttypes"],
+        DATABASES={"default": {"ENGINE": "django.db.backends.dummy"}},
+        USE_TZ=True,
+        SECRET_KEY="legacy-dummy-secret-key",
+    )
+    django.setup()
+# --- DJANGO MODEL APP_LABEL PATCH (PRE-CREATION) ---
+from django.db.models.base import ModelBase
+_original_new = ModelBase.__new__
+def _patched_new(cls, name, bases, attrs, **kwargs):
+    meta = attrs.get("Meta")
+    if meta is None:
+        class Meta:
+            app_label = "legacy_models"
+        attrs["Meta"] = Meta
+    elif not hasattr(meta, "app_label"):
+        meta.app_label = "legacy_models"
+    return _original_new(cls, name, bases, attrs, **kwargs)
+ModelBase.__new__ = staticmethod(_patched_new)
+# --- END PATCH ---
+_spec = importlib.util.spec_from_file_location("legacy_models", os.path.join(os.path.dirname(__file__), "models/legacy_models.py"))
+_legacy = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_legacy)
+# --- FORCE app_label FOR legacy django models ---
+from django.db import models as _dj_models
+for _obj in _legacy.__dict__.values():
+    try:
+        if isinstance(_obj, type) and issubclass(_obj, _dj_models.Model):
+            _obj._meta.app_label = "legacy_models"
+    except Exception:
+        pass
 # NO fallback logic, NO postgres, NO localhost defaults
 DATABASE_URL = os.environ["DATABASE_URL"]  # Hard fail if missing
 
