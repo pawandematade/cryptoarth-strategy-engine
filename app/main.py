@@ -1,4 +1,4 @@
-# ================== MIGRATION SAFETY LOCK ==================
+﻿# ================== MIGRATION SAFETY LOCK ==================
 # 1. Django is SOURCE OF TRUTH for legacy /auth/* APIs
 # 2. FastAPI handles ONLY:
 #    - Strategy Engine
@@ -37,16 +37,20 @@ from app.api.routes_reports import router as reports_router
 from app.api.routes_internal import router as internal_router
 from app.api.routes_copilot import router as copilot_router
 from app.api.auth.routes import router as auth_router
+from app.api.broker.routes import router as broker_router
+from app.api.orders.routes import router as orders_router
+from app.api.positions.routes import router as positions_router
+from app.api.copy_trading.routes import router as copy_trading_router
 from app.api.routes_set_signal import router as set_signal_router
 from app.api.routes_readonly import router as readonly_router
 from app.api.routes_strategy_management import router as strategy_management_router
 from app.api.proxy.django_fallback import django_fallback
 from app.middleware.api_observability import APIObservabilityMiddleware
-from app.store.redis_client import redis_client
+from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
 from app.execution.execution_manager import ExecutionManager
-from app.database import init_db, test_db_connection
+from common.db import init_db, test_db_connection
 import logging
 
 logger = logging.getLogger(__name__)
@@ -82,15 +86,20 @@ async def lifespan(app: FastAPI):
             StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades,
             StrategyTrade
         )
-        logger.info("✅ All models imported and registered with Base.metadata")
+        # Import legacy trading models (Phase-2)
+        from app.models_legacy_trading import (  # noqa: F401
+            SymbolMaster, BrokerModels, highLowstratergy, userStratergyPortfolio,
+            Position, OrderDetails, copysignal, tradeDetails, SignalMaster
+        )
+        logger.info("âœ… All models imported and registered with Base.metadata")
         
         # Initialize database tables (safe - returns False on error, doesn't raise)
         db_initialized = init_db()
         if not db_initialized:
-            logger.warning("⚠️  Database initialization failed, but continuing startup...")
+            logger.warning("âš ï¸  Database initialization failed, but continuing startup...")
             logger.warning("   Some features may not work until database is available")
     else:
-        logger.warning("⚠️  Database connection failed, but continuing startup...")
+        logger.warning("âš ï¸  Database connection failed, but continuing startup...")
         logger.warning("   Some features may not work until database is available")
         logger.warning("   Make sure MySQL/MariaDB is running and database exists")
     
@@ -168,7 +177,7 @@ allowed_origins = list(set(filter(None, allowed_origins)))
 
 # CRITICAL: Ensure we never have an empty list (would cause issues)
 if not allowed_origins:
-    logger.warning("⚠️  No allowed origins configured for CORS - using defaults")
+    logger.warning("âš ï¸  No allowed origins configured for CORS - using defaults")
     allowed_origins = [
         # Production domains
         "https://cryptoarth.in",
@@ -179,7 +188,7 @@ if not allowed_origins:
     ]
 
 # CRITICAL: Log configured origins for debugging
-logger.info(f"🌐 CORS configured with {len(allowed_origins)} allowed origin(s): {allowed_origins}")
+logger.info(f"ðŸŒ CORS configured with {len(allowed_origins)} allowed origin(s): {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -197,7 +206,7 @@ app.include_router(secure_ai_router, prefix="/auth")  # Secure AI strategy gener
 app.include_router(strategy_router, prefix="/auth")  # Strategy performance metrics
 app.include_router(strategy_performance_router, prefix="/auth")  # Strategy performance API
 # CRITICAL: All protected Strategy Engine APIs MUST use /auth prefix
-app.include_router(strategy_save_router, prefix="/auth", tags=["Strategy Save"])  # Strategy save (TEMP → SAVED) - /auth/strategies/save
+app.include_router(strategy_save_router, prefix="/auth", tags=["Strategy Save"])  # Strategy save (TEMP â†’ SAVED) - /auth/strategies/save
 app.include_router(strategy_edit_router, prefix="", tags=["Strategy Edit"])  # Strategy edit (create new version)
 app.include_router(strategy_execution_router, prefix="", tags=["Strategy Execution"])  # Strategy execution activation
 app.include_router(strategy_list_router, prefix="/auth", tags=["Strategy List"])  # Strategy list (Template & History tabs) - /auth/strategies, /auth/strategy-runs
@@ -218,6 +227,10 @@ app.include_router(health_router, prefix="", tags=["Health"])  # Health check en
 app.include_router(monitoring_router, prefix="/auth", tags=["Monitoring"])  # Monitoring endpoints - /auth/monitoring/*
 app.include_router(copilot_router, prefix="/auth", tags=["Copilot"])  # Copilot conversational strategy builder - /auth/copilot/*
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])  # Authentication endpoints - /auth/send-otp/, /auth/signup/, /auth/login/, /auth/user/
+app.include_router(broker_router, prefix="/auth/broker", tags=["Broker"])  # Broker connection endpoints - /auth/broker/connect/delta, /auth/broker/connect/coindcx, /auth/broker/balance
+app.include_router(orders_router, prefix="/auth/order", tags=["Orders"])  # Order placement endpoints - /auth/order/place, /auth/order/exit, /auth/order/squareoff
+app.include_router(positions_router, prefix="/auth/positions", tags=["Positions"])  # Position management endpoints - /auth/positions/open, /auth/positions/close, /auth/positions/admin-close
+app.include_router(copy_trading_router, prefix="/auth/copy", tags=["Copy Trading"])  # Copy trading endpoints - /auth/copy/setSignal, /auth/copy/closeSignal
 app.include_router(set_signal_router, prefix="/auth", tags=["Trading"])  # Place order endpoint - /auth/setSignal/
 # app.include_router(readonly_router, prefix="/auth", tags=["Read-Only APIs"])  # Read-only APIs migrated from cryptoarth_backend
 # app.include_router(strategy_management_router, prefix="/auth", tags=["Strategy Management"])  # Strategy management APIs migrated from cryptoarth_backend
@@ -243,7 +256,7 @@ def test_redis():
 @app.get("/test-db")
 def test_db():
     """Test database connection and return status"""
-    from app.database import test_db_connection, DATABASE_URL
+    from common.db import test_db_connection, DATABASE_URL
     from app.config import APP_ENV
     import os
     

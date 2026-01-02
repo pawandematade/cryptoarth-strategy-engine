@@ -1,4 +1,4 @@
-"""
+﻿"""
 Secure Strategy Generation Service
 - Controlled OpenAI prompts
 - Schema validation
@@ -12,7 +12,7 @@ import uuid
 from typing import Dict, Optional, List, Any
 from datetime import datetime
 from openai import OpenAI
-from app.config import OPENAI_API_KEY, OPENAI_MODEL
+from common.config import OPENAI_API_KEY, OPENAI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -565,25 +565,25 @@ def generate_strategy_suggestions(strategy: Dict[str, Any]) -> List[str]:
     if sl > 0 and tp > 0:
         risk_reward = tp / sl
         if risk_reward < 1.5:
-            suggestions.append("⚠️ Improve risk-reward ratio (aim for at least 1.5:1 for crypto markets)")
+            suggestions.append("âš ï¸ Improve risk-reward ratio (aim for at least 1.5:1 for crypto markets)")
         elif risk_reward < 2.0:
-            suggestions.append("💡 Consider increasing take-profit to 2:1 or higher for better risk-adjusted returns")
+            suggestions.append("ðŸ’¡ Consider increasing take-profit to 2:1 or higher for better risk-adjusted returns")
         elif risk_reward > 5:
-            suggestions.append("⚠️ Risk-reward ratio is very high - ensure realistic profit targets based on market volatility")
+            suggestions.append("âš ï¸ Risk-reward ratio is very high - ensure realistic profit targets based on market volatility")
     
     # Check stop loss appropriateness for crypto
     if sl > 0:
         if sl < 0.5:
-            suggestions.append("⚠️ Stop loss is very tight (<0.5%) - crypto volatility may cause premature exits")
+            suggestions.append("âš ï¸ Stop loss is very tight (<0.5%) - crypto volatility may cause premature exits")
         elif sl > 5:
-            suggestions.append("⚠️ Stop loss is wide (>5%) - consider tighter risk management for crypto")
+            suggestions.append("âš ï¸ Stop loss is wide (>5%) - consider tighter risk management for crypto")
     
     # Check for timeframe filter
     logic = strategy.get('logic', {})
     conditions = logic.get('entry', {}).get('conditions', [])
     has_timeframe_filter = any('timeframe' in str(c).lower() for c in conditions)
     if not has_timeframe_filter:
-        suggestions.append("💡 Add higher timeframe trend filter to avoid false signals in ranging markets")
+        suggestions.append("ðŸ’¡ Add higher timeframe trend filter to avoid false signals in ranging markets")
     
     # Check complexity and overtrading risk
     meta = strategy.get('meta', {})
@@ -592,50 +592,50 @@ def generate_strategy_suggestions(strategy: Dict[str, Any]) -> List[str]:
     exit_conditions = len(logic.get('exit', {}).get('conditions', []))
     
     if entry_conditions > 4:
-        suggestions.append("⚠️ Too many entry conditions may reduce trade frequency - consider simplifying")
+        suggestions.append("âš ï¸ Too many entry conditions may reduce trade frequency - consider simplifying")
     elif entry_conditions == 1 and complexity == 'simple':
-        suggestions.append("💡 Consider adding a confirmation filter to improve signal quality")
+        suggestions.append("ðŸ’¡ Consider adding a confirmation filter to improve signal quality")
     
     # Check for sideways market protection
     indicators_used = [cond.get('indicator', '').lower() for cond in conditions]
     has_trend_filter = any(ind in ['supertrend', 'adx', 'dmi', 'ichimoku'] for ind in indicators_used)
     if not has_trend_filter:
-        suggestions.append("💡 Add trend indicator (SuperTrend, ADX, or Ichimoku) to avoid trading in sideways markets")
+        suggestions.append("ðŸ’¡ Add trend indicator (SuperTrend, ADX, or Ichimoku) to avoid trading in sideways markets")
     
     # Check for volume confirmation
     has_volume_filter = any('volume' in ind or 'obv' in ind for ind in indicators_used)
     if not has_volume_filter:
-        suggestions.append("💡 Consider adding volume confirmation to validate price movements")
+        suggestions.append("ðŸ’¡ Consider adding volume confirmation to validate price movements")
     
     # Check timeframe appropriateness
     timeframe = strategy.get('timeframe', '1h')
     if timeframe in ['1m', '3m', '5m']:
-        suggestions.append("⚠️ Very short timeframes may have high noise - consider 15m or higher for better signal quality")
+        suggestions.append("âš ï¸ Very short timeframes may have high noise - consider 15m or higher for better signal quality")
     
     # Check strategy type specific suggestions
     strategy_type = strategy.get('type', '')
     if strategy_type == 'grid_based':
-        suggestions.append("💡 Grid strategies work best in ranging markets - add trend filter to disable in strong trends")
+        suggestions.append("ðŸ’¡ Grid strategies work best in ranging markets - add trend filter to disable in strong trends")
     elif strategy_type == 'indicator_based':
         if not any(ind in ['rsi', 'stoch', 'williams'] for ind in indicators_used):
-            suggestions.append("💡 Consider adding momentum oscillator (RSI, Stochastic) for better entry timing")
+            suggestions.append("ðŸ’¡ Consider adding momentum oscillator (RSI, Stochastic) for better entry timing")
     
     # Check position sizing
     position_size = risk.get('position_size', {}).get('value', 1.0)
     if position_size > 5:
-        suggestions.append("⚠️ Position size is high (>5%) - consider risk-based position sizing for better capital preservation")
+        suggestions.append("âš ï¸ Position size is high (>5%) - consider risk-based position sizing for better capital preservation")
     
     # Default suggestions if none generated
     if not suggestions:
-        suggestions.append("✅ Strategy structure looks solid! Consider backtesting on historical data")
-        suggestions.append("💡 Monitor performance metrics and adjust parameters based on market regime changes")
-        suggestions.append("💡 Consider paper trading first to validate strategy behavior in live market conditions")
+        suggestions.append("âœ… Strategy structure looks solid! Consider backtesting on historical data")
+        suggestions.append("ðŸ’¡ Monitor performance metrics and adjust parameters based on market regime changes")
+        suggestions.append("ðŸ’¡ Consider paper trading first to validate strategy behavior in live market conditions")
     
     # Prioritize and return top 3-4 most important suggestions
     priority_suggestions = []
-    warning_suggestions = [s for s in suggestions if s.startswith('⚠️')]
-    tip_suggestions = [s for s in suggestions if s.startswith('💡')]
-    success_suggestions = [s for s in suggestions if s.startswith('✅')]
+    warning_suggestions = [s for s in suggestions if s.startswith('âš ï¸')]
+    tip_suggestions = [s for s in suggestions if s.startswith('ðŸ’¡')]
+    success_suggestions = [s for s in suggestions if s.startswith('âœ…')]
     
     # Prioritize warnings, then tips, then success messages
     priority_suggestions.extend(warning_suggestions[:2])

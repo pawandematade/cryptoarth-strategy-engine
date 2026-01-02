@@ -1,4 +1,4 @@
-"""
+﻿"""
 Payment Service
 Handles Razorpay payment gateway integration for credit purchases
 """
@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 from typing import Dict, Optional, Any
 from fastapi import HTTPException
-from app.store.redis_client import redis_client
+from common.redis import redis_client
 from app.models import PaymentTransaction
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 # CRITICAL: Startup diagnostic log to confirm which code is running
 _PAYMENT_SERVICE_FILE = __file__
 _PAYMENT_SERVICE_LOADED_AT = datetime.now().isoformat()
-logger.error(f"🔧 PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded_at={_PAYMENT_SERVICE_LOADED_AT}")
-print(f"🔧 PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded_at={_PAYMENT_SERVICE_LOADED_AT}")
+logger.error(f"ðŸ”§ PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded_at={_PAYMENT_SERVICE_LOADED_AT}")
+print(f"ðŸ”§ PAYMENT SERVICE MODULE LOADED: file={_PAYMENT_SERVICE_FILE}, loaded_at={_PAYMENT_SERVICE_LOADED_AT}")
 
 # Credit packages/plans
 # CRITICAL: Single source of truth for backend pricing
-# Base price: ₹10 = 1 Credit
+# Base price: â‚¹10 = 1 Credit
 # GST: 18% of base price
 # Total payable = base_price + gst
 # NO 'amount' field - use total_amount only
@@ -78,12 +78,12 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
     """
     try:
         # CRITICAL: Create fresh Razorpay client for each request (no global client reuse)
-        from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+        from common.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
         import razorpay
         
         # Validate Razorpay keys are configured
         if not RAZORPAY_KEY_ID:
-            logger.error("❌ Razorpay KEY_ID not configured. Set RAZORPAY_KEY_ID environment variable.")
+            logger.error("âŒ Razorpay KEY_ID not configured. Set RAZORPAY_KEY_ID environment variable.")
             return {
                 'success': False,
                 'order_id': None,
@@ -95,7 +95,7 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
             }
         
         if not RAZORPAY_KEY_SECRET:
-            logger.error("❌ Razorpay KEY_SECRET not configured. Set RAZORPAY_KEY_SECRET environment variable.")
+            logger.error("âŒ Razorpay KEY_SECRET not configured. Set RAZORPAY_KEY_SECRET environment variable.")
             return {
                 'success': False,
                 'order_id': None,
@@ -108,7 +108,7 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         
         # Validate key is LIVE
         if not RAZORPAY_KEY_ID.startswith('rzp_live_'):
-            logger.error(f"❌ Razorpay key must be LIVE key (starting with rzp_live_). Current key starts with: {RAZORPAY_KEY_ID[:10]}...")
+            logger.error(f"âŒ Razorpay key must be LIVE key (starting with rzp_live_). Current key starts with: {RAZORPAY_KEY_ID[:10]}...")
             return {
                 'success': False,
                 'order_id': None,
@@ -183,24 +183,24 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         except Exception as razorpay_error:
             # Razorpay SDK raised exception - do NOT return fake success
             error_msg = f"Razorpay API error: {str(razorpay_error)}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"âŒ {error_msg}")
             raise RuntimeError(error_msg) from razorpay_error
         
         # HARD VALIDATION: Ensure Razorpay returned a valid order
         if not order:
             error_msg = "Razorpay order creation returned None"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"âŒ {error_msg}")
             raise ValueError(error_msg)
         
         # Check for Razorpay error response (SDK may return error dict instead of raising)
         if isinstance(order, dict) and 'error' in order:
             error_msg = f"Razorpay API error: {order.get('error', {}).get('description', 'Unknown error')}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"âŒ {error_msg}")
             raise RuntimeError(error_msg)
         
         if 'id' not in order:
             error_msg = f"Razorpay order missing 'id' field: {order}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"âŒ {error_msg}")
             raise ValueError(error_msg)
         
         order_id = order['id']
@@ -209,10 +209,10 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         # This prevents ANY fake/mock/temp order_id from being returned
         if not isinstance(order_id, str) or not order_id.startswith('order_'):
             error_msg = f"Invalid Razorpay order_id format: {order_id}. Must start with 'order_'"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"âŒ {error_msg}")
             raise ValueError(error_msg)
         
-        logger.info(f"✅ Razorpay order created successfully: {order_id}")
+        logger.info(f"âœ… Razorpay order created successfully: {order_id}")
         
         # Store order details in Redis (for webhook verification)
         order_key = f"PAYMENT_ORDER:{order_id}"
@@ -236,7 +236,7 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         )
         
         # Get Razorpay key ID from config
-        from app.config import RAZORPAY_KEY_ID
+        from common.config import RAZORPAY_KEY_ID
         
         logger.info(f"Created Razorpay order {order_id} for user {user_id}, plan {plan_id}")
         
@@ -253,12 +253,12 @@ def create_razorpay_order(plan_id: str, user_id: int) -> Dict[str, Any]:
         
     except ValueError as e:
         # Validation errors - re-raise as ValueError (do NOT return fake success)
-        logger.error(f"❌ Razorpay order validation failed: {e}", exc_info=True)
+        logger.error(f"âŒ Razorpay order validation failed: {e}", exc_info=True)
         raise  # Re-raise to let caller handle
     except Exception as e:
         # CRITICAL: On ANY exception, DO NOT return fake success or temp_order_1
         # ALWAYS raise exception - let the API route handle error response
-        logger.error(f"❌ Error creating Razorpay order: {e}", exc_info=True)
+        logger.error(f"âŒ Error creating Razorpay order: {e}", exc_info=True)
         raise RuntimeError(f"Failed to create Razorpay order: {str(e)}") from e
 
 
@@ -275,7 +275,7 @@ def verify_razorpay_signature(order_id: str, payment_id: str, signature: str) ->
         bool: True if signature is valid
     """
     try:
-        from app.config import RAZORPAY_KEY_SECRET
+        from common.config import RAZORPAY_KEY_SECRET
         
         if not RAZORPAY_KEY_SECRET:
             logger.error("Razorpay key secret not configured")
@@ -359,13 +359,13 @@ def process_payment_success(
     
     # CRITICAL: Warn if user_id = 1 (admin user) - this should only happen if admin is actually paying
     if user_id == 1:
-        logger.warning(f"⚠️ WARNING: user_id=1 (admin user) detected. Verify this is intentional admin payment.")
-        print(f"⚠️ WARNING: user_id=1 (admin user) detected. Verify this is intentional admin payment.")
+        logger.warning(f"âš ï¸ WARNING: user_id=1 (admin user) detected. Verify this is intentional admin payment.")
+        print(f"âš ï¸ WARNING: user_id=1 (admin user) detected. Verify this is intentional admin payment.")
     
     # CRITICAL: Log the user_id being used for payment processing
-    logger.info(f"🚀 PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
-    logger.info(f"🚀 AUTHENTICATED USER_ID: {user_id} (MUST NOT be 1 unless admin is paying)")
-    print(f"🚀 PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
+    logger.info(f"ðŸš€ PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
+    logger.info(f"ðŸš€ AUTHENTICATED USER_ID: {user_id} (MUST NOT be 1 unless admin is paying)")
+    print(f"ðŸš€ PAYMENT PROCESS START: user_id={user_id}, order_id={order_id}, payment_id={payment_id}")
     
     try:
         # PRODUCTION FIX: BYPASS signature validation (frontend doesn't send signature)
@@ -391,7 +391,7 @@ def process_payment_success(
         razorpay_order_notes = None
         
         try:
-            from app.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+            from common.config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
             import razorpay
             client = razorpay.Client(auth=(RAZORPAY_KEY_ID.strip(), RAZORPAY_KEY_SECRET.strip()))
             
@@ -442,9 +442,9 @@ def process_payment_success(
             user_mobile = None
         
         # CRITICAL FIX 1: FINAL AMOUNT VALIDATION (STRICT) - BEFORE DB TRANSACTION
-        # Prevent ₹0 payments from being committed
+        # Prevent â‚¹0 payments from being committed
         if not amount or amount <= 0:
-            logger.error(f"❌ CRITICAL: Final amount validation failed for payment_id={payment_id}. amount={amount}. Payment cannot be processed.")
+            logger.error(f"âŒ CRITICAL: Final amount validation failed for payment_id={payment_id}. amount={amount}. Payment cannot be processed.")
             db.rollback()
             return {
                 "success": False,
@@ -477,7 +477,7 @@ def process_payment_success(
         # Do NOT guess credits from amount (prevents GST-based credit inflation)
         if credits_added <= 0:
             logger.error(
-                f"❌ CRITICAL: Credits missing or invalid in Razorpay order notes. "
+                f"âŒ CRITICAL: Credits missing or invalid in Razorpay order notes. "
                 f"order_id={order_id}, notes={razorpay_order_notes}. "
                 f"Payment verification FAILED - credits must come from plan metadata."
             )
@@ -495,11 +495,11 @@ def process_payment_success(
         )
         
         # HARD LOG - PROOF EXECUTION (MANDATORY)
-        logger.error("🔥 PAYMENT DB UPDATE START")
+        logger.error("ðŸ”¥ PAYMENT DB UPDATE START")
         logger.error(f"user_id={user_id}, order_id={order_id}, payment_id={payment_id}, amount={amount}, credits_added={credits_added}, mobile={user_mobile}")
         
         # CRITICAL FIX 3: Wrap ALL DB operations in try/except for transaction safety
-        # STRICT ORDER: payment_transactions → credit_transactions → user_credits → commit
+        # STRICT ORDER: payment_transactions â†’ credit_transactions â†’ user_credits â†’ commit
         # HARD RULE: credits_added > 0 is guaranteed (validated before DB transaction)
         try:
             # STEP 4: Insert payment_transactions row (INVOICE RECORD)
@@ -537,7 +537,7 @@ def process_payment_success(
             from app.models import UserCredits
             
             # CRITICAL DB FIX: Mobile resolution for user_credits (mobile is NOT NULL)
-            # Resolution order: user.phone → customer_mobile → empty string ""
+            # Resolution order: user.phone â†’ customer_mobile â†’ empty string ""
             # MUST resolve BEFORE user_credits query
             mobile_value = user_mobile or customer_mobile or ""
             logger.info(
@@ -584,7 +584,7 @@ def process_payment_success(
             # STEP 7: Commit - ONLY ONCE (CRITICAL: All operations must succeed)
             # CRITICAL: Log user_id before commit to verify correct user
             print(f"VERIFY PAYMENT USER_ID: {user_id}")
-            logger.error(f"🔍 PRE-COMMIT CHECK: user_id={user_id}, credits_added={credits_added}, amount={amount}, customer_name={customer_name}, customer_email={customer_email}")
+            logger.error(f"ðŸ” PRE-COMMIT CHECK: user_id={user_id}, credits_added={credits_added}, amount={amount}, customer_name={customer_name}, customer_email={customer_email}")
             logger.error(f"VERIFY PAYMENT USER_ID: {user_id}")
             
             db.commit()
@@ -592,14 +592,14 @@ def process_payment_success(
             
             # CRITICAL: Verify credits were actually added
             final_credits = user_credits.total_credits if user_credits else 0
-            logger.error(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits_added={credits_added} amount={amount} final_total_credits={final_credits}")
-            print(f"✅ PAYMENT COMMIT SUCCESS user_id={user_id} credits_added={credits_added} amount={amount} final_total_credits={final_credits}")
+            logger.error(f"âœ… PAYMENT COMMIT SUCCESS user_id={user_id} credits_added={credits_added} amount={amount} final_total_credits={final_credits}")
+            print(f"âœ… PAYMENT COMMIT SUCCESS user_id={user_id} credits_added={credits_added} amount={amount} final_total_credits={final_credits}")
             
         except Exception as db_error:
             # CRITICAL FIX 4: Rollback on ANY exception and return failure
             db.rollback()
-            logger.error(f"❌ PAYMENT DB TRANSACTION FAILED: user_id={user_id}, error={db_error}", exc_info=True)
-            print(f"❌ PAYMENT DB TRANSACTION FAILED: user_id={user_id}, error={db_error}")
+            logger.error(f"âŒ PAYMENT DB TRANSACTION FAILED: user_id={user_id}, error={db_error}", exc_info=True)
+            print(f"âŒ PAYMENT DB TRANSACTION FAILED: user_id={user_id}, error={db_error}")
             return {
                 "success": False,
                 "user_id": user_id,
@@ -624,7 +624,7 @@ def process_payment_success(
 
     except Exception as e:
         logger.error(
-            f"❌ EXCEPTION IN PAYMENT PROCESS: user_id={user_id}, error={e}",
+            f"âŒ EXCEPTION IN PAYMENT PROCESS: user_id={user_id}, error={e}",
             exc_info=True
         )
         db.rollback()

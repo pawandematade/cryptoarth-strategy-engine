@@ -1,11 +1,11 @@
-"""
+﻿"""
 Cron Alerting Service
 Read-only inspection of cron status and generates alerts
 Does NOT modify cron execution logic
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from app.database import SessionLocal
+from common.db import SessionLocal
 from datetime import datetime, timedelta
 import logging
 
@@ -243,11 +243,11 @@ def send_alert(alert: dict, channel: str = "log") -> bool:
         if channel == "log":
             # Log alert
             if alert["severity"] == "CRITICAL":
-                logger.critical(f"🚨 CRITICAL ALERT: {alert['message']}")
+                logger.critical(f"ðŸš¨ CRITICAL ALERT: {alert['message']}")
             elif alert["severity"] == "WARNING":
-                logger.warning(f"⚠️ WARNING: {alert['message']}")
+                logger.warning(f"âš ï¸ WARNING: {alert['message']}")
             else:
-                logger.info(f"ℹ️ INFO: {alert['message']}")
+                logger.info(f"â„¹ï¸ INFO: {alert['message']}")
             return True
         
         # Future: Email alert

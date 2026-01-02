@@ -69,6 +69,15 @@ class User(Base):
     credit_transactions = relationship("CreditTransaction", back_populates="user", cascade="all, delete-orphan")
     strategy_usage = relationship("StrategyUsage", back_populates="user", cascade="all, delete-orphan")
     payment_transactions = relationship("PaymentTransaction", back_populates="user", cascade="all, delete-orphan")
+    # Legacy trading relationships (Phase-2) - forward references
+    brokers = relationship("BrokerModels", back_populates="user", cascade="all, delete-orphan")
+    positions = relationship("Position", back_populates="owner", cascade="all, delete-orphan")
+    orders = relationship("OrderDetails", back_populates="owner", cascade="all, delete-orphan")
+    trades = relationship("tradeDetails", back_populates="owner", cascade="all, delete-orphan")
+    strategy_portfolios = relationship("userStratergyPortfolio", back_populates="owner", cascade="all, delete-orphan")
+    copysignals = relationship("copysignal", back_populates="owner", cascade="all, delete-orphan")
+    failure_orders = relationship("customer_failorder", back_populates="owner", cascade="all, delete-orphan")
+    allowed_strategies = relationship("highLowstratergy", secondary="authenticate_highlowstratergy_allowed_users", back_populates="allowed_users")
 
     def __repr__(self):
         return f"<User(id={self.id}, external_user_id={self.external_user_id}, email={self.email})>"
@@ -577,3 +586,17 @@ class StrategyTrade(Base):
     
     def __repr__(self):
         return f"<StrategyTrade(id={self.id}, strategy_id={self.strategy_id}, symbol={self.symbol}, direction={self.direction}, net_pnl={self.net_pnl})>"
+
+
+# Import legacy trading models (Phase-2) at end to avoid circular imports
+from app.models_legacy_trading import (  # noqa: F401, E402
+    SymbolMaster,
+    BrokerModels,
+    highLowstratergy,
+    userStratergyPortfolio,
+    Position,
+    OrderDetails,
+    copysignal,
+    tradeDetails,
+    SignalMaster
+)

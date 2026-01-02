@@ -1,4 +1,4 @@
-"""
+﻿"""
 User Sync Service
 Syncs user data from auth backend and maintains local snapshot.
 """
@@ -7,7 +7,7 @@ import requests
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from app.models import User
-from app.config import AUTH_BACKEND_URL
+from common.config import AUTH_BACKEND_URL
 from app.services.credit_service import initialize_user_credits
 from datetime import datetime, timezone
 
@@ -41,8 +41,8 @@ def fetch_user_from_auth_backend(authorization: Optional[str] = None) -> Dict[st
         headers["Authorization"] = authorization
     
     # DEBUG: Log auth API call (remove in production if needed)
-    print(f"AUTH API HIT → {url}")
-    logger.info(f"AUTH API HIT → {url}")
+    print(f"AUTH API HIT â†’ {url}")
+    logger.info(f"AUTH API HIT â†’ {url}")
     
     # Call auth backend user API
     try:

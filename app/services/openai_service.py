@@ -1,10 +1,10 @@
-import json
+﻿import json
 import logging
 import uuid
 import re
 from typing import Dict, Optional, Any
 from openai import OpenAI
-from app.config import OPENAI_API_KEY, OPENAI_MODEL
+from common.config import OPENAI_API_KEY, OPENAI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +18,19 @@ def initialize_client():
     import importlib
     import app.config
     importlib.reload(app.config)
-    from app.config import OPENAI_API_KEY
+    from common.config import OPENAI_API_KEY
     
     if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here" and len(OPENAI_API_KEY) > 10:
         try:
             client = OpenAI(api_key=OPENAI_API_KEY)
-            logger.info("✅ OpenAI client initialized successfully")
+            logger.info("âœ… OpenAI client initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"❌ Failed to initialize OpenAI client: {e}")
+            logger.error(f"âŒ Failed to initialize OpenAI client: {e}")
             client = None
             return False
     else:
-        logger.warning("⚠️  OPENAI_API_KEY not set or invalid. AI strategy builder will not work.")
+        logger.warning("âš ï¸  OPENAI_API_KEY not set or invalid. AI strategy builder will not work.")
         logger.warning(f"   API Key present: {bool(OPENAI_API_KEY)}")
         logger.warning(f"   API Key length: {len(OPENAI_API_KEY) if OPENAI_API_KEY else 0}")
         client = None
@@ -63,9 +63,9 @@ def generate_strategy(user_prompt: str) -> Optional[Dict]:
     """
     # Reinitialize client if needed (in case .env was updated)
     if not client:
-        logger.warning("⚠️  OpenAI client not initialized. Attempting to reinitialize...")
+        logger.warning("âš ï¸  OpenAI client not initialized. Attempting to reinitialize...")
         if not initialize_client():
-            logger.error("❌ OpenAI client initialization failed. Please check OPENAI_API_KEY in .env file and restart the server.")
+            logger.error("âŒ OpenAI client initialization failed. Please check OPENAI_API_KEY in .env file and restart the server.")
             return None
     
     try:
@@ -106,7 +106,7 @@ NO INVENTION POLICY:
 - Do NOT add indicators, confirmations, or logic not specified by user
 - Do NOT auto-complete missing rules or assume defaults
 - Do NOT modify, improve, or optimize user's strategy
-- If information is missing → return error, do NOT guess
+- If information is missing â†’ return error, do NOT guess
 
 STRICT COMPILER ROLE:
 - Your ONLY job: Parse user's strategy text and convert to JSON schema
@@ -151,7 +151,7 @@ CRITICAL COMPILATION RULES (NO INVENTION POLICY):
 - Include confirmation block ONLY if user explicitly wrote it - do NOT add "candle_high_break", "candle_low_break", or "immediate"
 - Include entry.buy and entry.sell ONLY if user specified them - do NOT auto-create
 - Extract EMA periods from user input - do NOT use defaults or assumptions
-- If required fields (symbol, strategy_type, logic, risk) are missing → return error, do NOT guess
+- If required fields (symbol, strategy_type, logic, risk) are missing â†’ return error, do NOT guess
 - Preserve user's exact logic, conditions, and rules - do NOT modify or optimize"""
         
         # Build OpenAI API payload
@@ -189,7 +189,7 @@ CRITICAL COMPILATION RULES (NO INVENTION POLICY):
         
         # Extract and parse the response
         content = response.choices[0].message.content.strip()
-        logger.info("✅ OpenAI response received")
+        logger.info("âœ… OpenAI response received")
         
         # Try to extract JSON from the response (in case there's extra text)
         # First, try direct parsing
@@ -225,14 +225,14 @@ CRITICAL COMPILATION RULES (NO INVENTION POLICY):
         
         # CRITICAL: Reject old schema - should not exist (OpenAI should return unified schema)
         if has_old_schema:
-            logger.error("❌ OpenAI returned old schema - this should not happen")
+            logger.error("âŒ OpenAI returned old schema - this should not happen")
             raise ValueError("OUTPUT_ERROR: OpenAI returned deprecated schema format. Please try again.")
         
         # Validate unified schema (NO INVENTION - reject if missing required fields)
         if has_unified_schema:
             strategy_data = _validate_unified_schema(strategy_data, user_prompt)
         else:
-            logger.error("❌ OpenAI response missing unified schema structure")
+            logger.error("âŒ OpenAI response missing unified schema structure")
             raise ValueError("OUTPUT_ERROR: Strategy is missing required unified schema structure (logic, risk, meta).")
         
         logger.info(f"Successfully generated strategy with unified schema: {strategy_data}")
@@ -344,7 +344,7 @@ def _validate_unified_schema(strategy_data: Dict[str, Any], user_prompt: str) ->
     for field in ["condition", "parameters", "sell_condition"]:
         if field in strategy_data:
             del strategy_data[field]
-            logger.warning(f"⚠️ Removed old schema field '{field}' from strategy")
+            logger.warning(f"âš ï¸ Removed old schema field '{field}' from strategy")
     
     return strategy_data
 

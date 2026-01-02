@@ -1,4 +1,4 @@
-"""
+﻿"""
 Strategy Execution Scheduler
 Auto scheduler worker that processes running executions.
 
@@ -6,10 +6,10 @@ CRITICAL RULES:
 - Runs every 1 minute
 - One execution processed at a time
 - Lock by execution_id
-- Same candle → only one signal
+- Same candle â†’ only one signal
 - No nested loops
 - No recursive calls
-- Exception isolation (one strategy fail ≠ system fail)
+- Exception isolation (one strategy fail â‰  system fail)
 """
 import logging
 import time
@@ -17,7 +17,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from app.database import SessionLocal
+from common.db import SessionLocal
 from app.models import StrategyExecution, ExecutionStatus, ExecutionMode
 from app.services.signal_service import process_strategy_signal
 
@@ -100,7 +100,7 @@ def process_execution(execution: StrategyExecution) -> bool:
             db.close()
             
     except Exception as e:
-        # CRITICAL: Exception isolation - one strategy fail ≠ system fail
+        # CRITICAL: Exception isolation - one strategy fail â‰  system fail
         logger.error(f"Error processing execution {execution.id}: {e}", exc_info=True)
         return False
         

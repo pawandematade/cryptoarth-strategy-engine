@@ -1,6 +1,6 @@
-"""
+﻿"""
 Strategy Save Service
-Handles TEMP → SAVED strategy transition.
+Handles TEMP â†’ SAVED strategy transition.
 
 IMPORTANT: TEMP strategies (TEMP-xxx) are NOT stored in database.
 Only explicitly saved strategies are persisted.
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.models import Strategy, StrategyVersion, StrategyStatus, User
 from app.services.user_sync_service import get_or_sync_user
-from app.config import AUTH_BACKEND_URL
+from common.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +76,8 @@ def save_strategy_to_auth_backend(
         }
         
         # DEBUG: Log auth API call
-        print(f"AUTH API HIT → {url}")
-        logger.info(f"AUTH API HIT → {url}")
+        print(f"AUTH API HIT â†’ {url}")
+        logger.info(f"AUTH API HIT â†’ {url}")
         
         # Call auth backend to save strategy
         response = requests.post(
@@ -207,7 +207,7 @@ def save_strategy(
     
     try:
         # STEP 1: CONFIRM ACTIVE DATABASE (CRITICAL)
-        from app.database import DATABASE_URL
+        from common.db import DATABASE_URL
         # Extract DB info from DATABASE_URL for logging
         db_info = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "configured"
         logger.info(f"Active DB: {db_info}")
@@ -235,18 +235,18 @@ def save_strategy(
         if not strategy.created_by:
             raise ValueError("CRITICAL: strategy.created_by must be explicitly set (got None)")
         
-        print(f"🔥 Strategy object created (before add): created_by={strategy.created_by}")
-        logger.info(f"🔥 Strategy object created (before add): created_by={strategy.created_by}")
-        print(f"🔥 Strategy status value: {strategy.status} (type: {type(strategy.status)})")
-        logger.info(f"🔥 Strategy status value: {strategy.status} (type: {type(strategy.status)})")
+        print(f"ðŸ”¥ Strategy object created (before add): created_by={strategy.created_by}")
+        logger.info(f"ðŸ”¥ Strategy object created (before add): created_by={strategy.created_by}")
+        print(f"ðŸ”¥ Strategy status value: {strategy.status} (type: {type(strategy.status)})")
+        logger.info(f"ðŸ”¥ Strategy status value: {strategy.status} (type: {type(strategy.status)})")
         
         db.add(strategy)
-        print(f"🔥 Strategy added to session")
-        logger.info(f"🔥 Strategy added to session")
+        print(f"ðŸ”¥ Strategy added to session")
+        logger.info(f"ðŸ”¥ Strategy added to session")
         
         db.flush()  # Get strategy.id without committing
-        print(f"✅ Strategy object created: id={strategy.id}, code={strategy_code}, created_by={strategy.created_by}")
-        logger.info(f"✅ Strategy object created: id={strategy.id}, code={strategy_code}, created_by={strategy.created_by}")
+        print(f"âœ… Strategy object created: id={strategy.id}, code={strategy_code}, created_by={strategy.created_by}")
+        logger.info(f"âœ… Strategy object created: id={strategy.id}, code={strategy_code}, created_by={strategy.created_by}")
         
         # STEP 4: STRATEGY_VERSION INSERT CHECK
         # Create first version (AI-generated, same as strategy)
@@ -263,27 +263,27 @@ def save_strategy(
         if not strategy_version.created_by:
             raise ValueError("CRITICAL: strategy_version.created_by must be explicitly set (got None)")
         
-        print(f"🔥 StrategyVersion created_by={strategy_version.created_by}")
-        logger.info(f"🔥 StrategyVersion created_by={strategy_version.created_by}")
+        print(f"ðŸ”¥ StrategyVersion created_by={strategy_version.created_by}")
+        logger.info(f"ðŸ”¥ StrategyVersion created_by={strategy_version.created_by}")
         
         db.add(strategy_version)
         
-        print(f"✅ StrategyVersion object created: strategy_id={strategy.id}, version=1")
-        logger.info(f"✅ StrategyVersion object created: strategy_id={strategy.id}, version=1")
+        print(f"âœ… StrategyVersion object created: strategy_id={strategy.id}, version=1")
+        logger.info(f"âœ… StrategyVersion object created: strategy_id={strategy.id}, version=1")
         
         # Commit transaction
-        print("🔥 Attempting db.commit()...")
-        logger.info("🔥 Attempting db.commit()...")
+        print("ðŸ”¥ Attempting db.commit()...")
+        logger.info("ðŸ”¥ Attempting db.commit()...")
         
         # STEP 3: TRANSACTION ROLLBACK CHECK
         # Ensure commit actually happens and is not rolled back
         try:
             db.commit()
-            print("✅ db.commit() completed successfully")
-            logger.info("✅ db.commit() completed successfully")
+            print("âœ… db.commit() completed successfully")
+            logger.info("âœ… db.commit() completed successfully")
         except Exception as commit_error:
-            print(f"❌ db.commit() FAILED: {commit_error}")
-            logger.error(f"❌ db.commit() FAILED: {commit_error}", exc_info=True)
+            print(f"âŒ db.commit() FAILED: {commit_error}")
+            logger.error(f"âŒ db.commit() FAILED: {commit_error}", exc_info=True)
             db.rollback()
             raise ValueError(f"Database commit failed: {str(commit_error)}")
         
@@ -296,35 +296,35 @@ def save_strategy(
         db.commit()
         db.refresh(strategy)
         
-        logger.info(f"✅ Strategy status set to 'active': strategy_id={strategy.id}")
-        print(f"✅ Strategy status set to 'active': strategy_id={strategy.id}")
+        logger.info(f"âœ… Strategy status set to 'active': strategy_id={strategy.id}")
+        print(f"âœ… Strategy status set to 'active': strategy_id={strategy.id}")
         
         # STEP 4: VERIFY ACTUAL SAVE - Query DB to confirm insert
         try:
             verified_strategy = db.query(Strategy).filter(Strategy.id == strategy.id).first()
             if not verified_strategy:
-                print(f"❌ CRITICAL: Strategy {strategy.id} NOT FOUND in DB after commit!")
-                logger.error(f"❌ CRITICAL: Strategy {strategy.id} NOT FOUND in DB after commit!")
+                print(f"âŒ CRITICAL: Strategy {strategy.id} NOT FOUND in DB after commit!")
+                logger.error(f"âŒ CRITICAL: Strategy {strategy.id} NOT FOUND in DB after commit!")
                 raise ValueError(f"Strategy {strategy.id} not found in database after commit")
             else:
-                print(f"✅ VERIFIED: Strategy {strategy.id} EXISTS in DB: code={verified_strategy.strategy_code}")
-                logger.info(f"✅ VERIFIED: Strategy {strategy.id} EXISTS in DB: code={verified_strategy.strategy_code}")
+                print(f"âœ… VERIFIED: Strategy {strategy.id} EXISTS in DB: code={verified_strategy.strategy_code}")
+                logger.info(f"âœ… VERIFIED: Strategy {strategy.id} EXISTS in DB: code={verified_strategy.strategy_code}")
         except Exception as verify_error:
-            print(f"❌ Verification query failed: {verify_error}")
-            logger.error(f"❌ Verification query failed: {verify_error}", exc_info=True)
+            print(f"âŒ Verification query failed: {verify_error}")
+            logger.error(f"âŒ Verification query failed: {verify_error}", exc_info=True)
             # Don't fail the request, but log the issue
         
-        print(f"✅ Strategy saved successfully: temp_strategy_id={temp_strategy_id}, strategy_id={strategy.id}, strategy_code={strategy_code}")
+        print(f"âœ… Strategy saved successfully: temp_strategy_id={temp_strategy_id}, strategy_id={strategy.id}, strategy_code={strategy_code}")
         logger.info(f"Strategy saved successfully: temp_strategy_id={temp_strategy_id}, strategy_id={strategy.id}, strategy_code={strategy_code}")
         
         # STEP 6: RESPONSE MUST USE REAL DB ID
         # Verify strategy_id is from actual DB commit, not temporary
         if not strategy.id or strategy.id <= 0:
-            logger.error(f"❌ Invalid strategy.id after commit: {strategy.id}")
+            logger.error(f"âŒ Invalid strategy.id after commit: {strategy.id}")
             raise ValueError(f"Invalid strategy_id after commit: {strategy.id}")
         
-        print(f"✅ Strategy ID verified: {strategy.id} (type: {type(strategy.id)})")
-        logger.info(f"✅ Strategy ID verified: {strategy.id}")
+        print(f"âœ… Strategy ID verified: {strategy.id} (type: {type(strategy.id)})")
+        logger.info(f"âœ… Strategy ID verified: {strategy.id}")
         
         # 7. Return strategy_id, strategy_code, version BEFORE auth backend call
         # This ensures response is returned even if auth backend call fails
@@ -334,8 +334,8 @@ def save_strategy(
             "version": 1
         }
         
-        print(f"✅ Preparing to return result: {result}")
-        logger.info(f"✅ Preparing to return result: {result}")
+        print(f"âœ… Preparing to return result: {result}")
+        logger.info(f"âœ… Preparing to return result: {result}")
         
         # CRITICAL: Also save to auth backend database (NON-BLOCKING)
         # This happens AFTER local DB commit and response preparation
@@ -367,17 +367,17 @@ def save_strategy(
             logger.warning(f"Auth backend save failed (non-blocking): {auth_error}")
         
         # Return result (local DB save is complete)
-        print(f"✅ Returning result: strategy_id={result['strategy_id']}")
-        logger.info(f"✅ Returning result: strategy_id={result['strategy_id']}")
+        print(f"âœ… Returning result: strategy_id={result['strategy_id']}")
+        logger.info(f"âœ… Returning result: strategy_id={result['strategy_id']}")
         return result
         
     except IntegrityError as e:
         db.rollback()
         # CRITICAL: Log exact DB error message for debugging NOT NULL constraint violations
         error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-        logger.error(f"❌ Database integrity error saving strategy: {error_msg}", exc_info=True)
-        print(f"❌ IntegrityError: {error_msg}")
-        print(f"❌ Full error details: {e}")
+        logger.error(f"âŒ Database integrity error saving strategy: {error_msg}", exc_info=True)
+        print(f"âŒ IntegrityError: {error_msg}")
+        print(f"âŒ Full error details: {e}")
         
         # Check if it's a NOT NULL constraint violation
         if 'NOT NULL' in error_msg or 'cannot be null' in error_msg.lower():
@@ -388,8 +388,8 @@ def save_strategy(
         db.rollback()
         # CRITICAL: Log exact error message
         error_msg = str(e)
-        logger.error(f"❌ Unexpected error saving strategy: {error_msg}", exc_info=True)
-        print(f"❌ Unexpected error: {error_msg}")
+        logger.error(f"âŒ Unexpected error saving strategy: {error_msg}", exc_info=True)
+        print(f"âŒ Unexpected error: {error_msg}")
         import traceback
         traceback.print_exc()
         raise ValueError(f"Failed to save strategy: {error_msg}")

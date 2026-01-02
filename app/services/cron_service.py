@@ -1,10 +1,10 @@
-"""
+﻿"""
 Cron Service - Central Cron Execution Manager
 
 CRITICAL: Every cron execution MUST follow the lifecycle contract:
-1. Before start → status = RUNNING, last_run_at = now()
-2. On success → status = SUCCESS, last_success_at = now(), error_message = null
-3. On failure → status = FAILED, error_message = full error string
+1. Before start â†’ status = RUNNING, last_run_at = now()
+2. On success â†’ status = SUCCESS, last_success_at = now(), error_message = null
+3. On failure â†’ status = FAILED, error_message = full error string
 
 No cron may run without visibility.
 No silent failures allowed.
@@ -14,7 +14,7 @@ from typing import Callable, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from app.database import SessionLocal
+from common.db import SessionLocal
 from app.models import CronMaster, CronStatus, CronTriggeredBy, CronExecutionLog
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def get_or_create_cron_record(
         )
         db.add(cron)
         db.flush()
-        logger.info(f"✅ Created cron_master record: {cron_name}")
+        logger.info(f"âœ… Created cron_master record: {cron_name}")
     
     return cron
 
@@ -90,17 +90,17 @@ def check_cron_running(db: Session, cron_name: str) -> bool:
         if runtime_seconds > MAX_RUNTIME_SECONDS:
             # Auto-recover stale cron
             logger.warning(
-                f"⚠️ Stale RUNNING cron detected: {cron_name} "
+                f"âš ï¸ Stale RUNNING cron detected: {cron_name} "
                 f"(running for {runtime_seconds:.0f} seconds, threshold: {MAX_RUNTIME_SECONDS}s)"
             )
             
             cron.status = CronStatus.FAILED
-            cron.error_message = "Cron stuck — auto recovered"
+            cron.error_message = "Cron stuck â€” auto recovered"
             
             db.commit()
             db.refresh(cron)
             
-            logger.info(f"✅ Auto-recovered stale cron {cron_name} (marked as FAILED)")
+            logger.info(f"âœ… Auto-recovered stale cron {cron_name} (marked as FAILED)")
             return False  # No longer running after recovery
     
     return True  # Cron is running and not stale
@@ -147,7 +147,7 @@ def mark_cron_running(
     db.commit()
     db.refresh(cron)
     
-    logger.info(f"🔄 Cron {cron_name} marked as RUNNING (triggered_by={triggered_by.value})")
+    logger.info(f"ðŸ”„ Cron {cron_name} marked as RUNNING (triggered_by={triggered_by.value})")
     return cron
 
 
@@ -172,7 +172,7 @@ def mark_cron_success(
     cron = db.query(CronMaster).filter(CronMaster.cron_name == cron_name).first()
     
     if not cron:
-        logger.error(f"❌ Cannot mark success - cron {cron_name} not found")
+        logger.error(f"âŒ Cannot mark success - cron {cron_name} not found")
         return None
     
     cron.status = CronStatus.SUCCESS
@@ -182,7 +182,7 @@ def mark_cron_success(
     db.commit()
     db.refresh(cron)
     
-    logger.info(f"✅ Cron {cron_name} marked as SUCCESS")
+    logger.info(f"âœ… Cron {cron_name} marked as SUCCESS")
     return cron
 
 
@@ -208,7 +208,7 @@ def mark_cron_failed(
     cron = db.query(CronMaster).filter(CronMaster.cron_name == cron_name).first()
     
     if not cron:
-        logger.error(f"❌ Cannot mark failed - cron {cron_name} not found")
+        logger.error(f"âŒ Cannot mark failed - cron {cron_name} not found")
         return None
     
     cron.status = CronStatus.FAILED
@@ -217,7 +217,7 @@ def mark_cron_failed(
     db.commit()
     db.refresh(cron)
     
-    logger.error(f"❌ Cron {cron_name} marked as FAILED: {error_message}")
+    logger.error(f"âŒ Cron {cron_name} marked as FAILED: {error_message}")
     return cron
 
 
@@ -260,7 +260,7 @@ def log_execution(
     db.add(execution_log)
     db.flush()
     
-    logger.debug(f"📝 Logged execution: {cron_name} - {status.value}")
+    logger.debug(f"ðŸ“ Logged execution: {cron_name} - {status.value}")
     return execution_log
 
 
@@ -275,9 +275,9 @@ def execute_cron(
     Execute a cron job following the lifecycle contract.
     
     CRITICAL CONTRACT:
-    1. Before start → status = RUNNING, last_run_at = now()
-    2. On success → status = SUCCESS, last_success_at = now(), error_message = null
-    3. On failure → status = FAILED, error_message = full error string
+    1. Before start â†’ status = RUNNING, last_run_at = now()
+    2. On success â†’ status = SUCCESS, last_success_at = now(), error_message = null
+    3. On failure â†’ status = FAILED, error_message = full error string
     
     CRITICAL: Every execution is logged to cron_execution_log for history.
     
@@ -301,7 +301,7 @@ def execute_cron(
             mark_cron_running(db, cron_name, cron_type, symbol, triggered_by)
         except ValueError as e:
             # Cron is already running
-            logger.warning(f"⚠️ {str(e)}")
+            logger.warning(f"âš ï¸ {str(e)}")
             
             # Log execution attempt (failed due to already running)
             log_execution(
@@ -376,7 +376,7 @@ def execute_cron(
     except Exception as e:
         # Critical error in cron service itself
         finished_at = datetime.now(timezone.utc)
-        logger.error(f"❌ Critical error in cron service for {cron_name}: {e}", exc_info=True)
+        logger.error(f"âŒ Critical error in cron service for {cron_name}: {e}", exc_info=True)
         
         # Try to mark as failed
         try:

@@ -1,11 +1,11 @@
-"""
+﻿"""
 Copilot Service - Conversational Strategy Builder
 
 This service handles the Copilot mode (Step 1) where users can freely describe
 and refine strategies before JSON generation. It's designed to be conversational,
 never confusing, and only asks for missing details politely.
 
-🔒 COPILOT ROLE (NON-NEGOTIABLE):
+ðŸ”’ COPILOT ROLE (NON-NEGOTIABLE):
 Copilot is NOT a generator and NOT a validator.
 
 Copilot must:
@@ -19,7 +19,7 @@ Copilot must:
 
 Copilot moves forward ONLY on explicit user intent.
 
-🔒 FINAL COPILOT BOUNDARY:
+ðŸ”’ FINAL COPILOT BOUNDARY:
 Copilot can:
 - Reflect
 - Ask
@@ -33,12 +33,12 @@ Copilot can NEVER:
 
 Compiler & Backtest always happen after Copilot, never inside it.
 
-🧷 FINAL GUIDING PRINCIPLE:
+ðŸ§· FINAL GUIDING PRINCIPLE:
 Copilot is a conversation layer, not a generator.
 UI must encourage dialogue, not execution.
 Execution happens only after explicit user intent.
 
-🧷 FINAL UI GUIDING LINE:
+ðŸ§· FINAL UI GUIDING LINE:
 Copilot UI is a chat experience, not a configuration form.
 Users should feel safe to think, refine, and confirm before any execution.
 """
@@ -47,8 +47,8 @@ import logging
 import uuid
 from typing import Dict, Optional, Any, List
 from openai import OpenAI
-from app.config import OPENAI_API_KEY, OPENAI_MODEL
-from app.store.redis_client import redis_client
+from common.config import OPENAI_API_KEY, OPENAI_MODEL
+from common.redis import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -61,19 +61,19 @@ def initialize_client():
     import importlib
     import app.config
     importlib.reload(app.config)
-    from app.config import OPENAI_API_KEY
+    from common.config import OPENAI_API_KEY
     
     if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here" and len(OPENAI_API_KEY) > 10:
         try:
             client = OpenAI(api_key=OPENAI_API_KEY)
-            logger.info("✅ Copilot OpenAI client initialized successfully")
+            logger.info("âœ… Copilot OpenAI client initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Copilot OpenAI client: {e}")
+            logger.error(f"âŒ Failed to initialize Copilot OpenAI client: {e}")
             client = None
             return False
     else:
-        logger.warning("⚠️  OPENAI_API_KEY not set or invalid. Copilot will not work.")
+        logger.warning("âš ï¸  OPENAI_API_KEY not set or invalid. Copilot will not work.")
         client = None
         return False
 
@@ -121,9 +121,9 @@ def process_copilot_message(
     # Frontend expects a valid JSON response in all cases.
     
     if not client:
-        logger.warning("⚠️  OpenAI client not initialized. Attempting to reinitialize...")
+        logger.warning("âš ï¸  OpenAI client not initialized. Attempting to reinitialize...")
         if not initialize_client():
-            logger.error("❌ OpenAI client initialization failed.")
+            logger.error("âŒ OpenAI client initialization failed.")
             return {
                 "success": False,
                 "session_id": session_id,
@@ -141,7 +141,7 @@ def process_copilot_message(
         # CRITICAL: Copilot is a conversation layer, not a generator
         system_message = """You are a friendly Trading Strategy Copilot. Your role is to help users describe and refine their trading strategies through natural conversation.
 
-🔒 CRITICAL BOUNDARIES (NON-NEGOTIABLE):
+ðŸ”’ CRITICAL BOUNDARIES (NON-NEGOTIABLE):
 1. NEVER generate JSON or structured data
 2. NEVER validate indicators or technical parameters
 3. NEVER ask for symbol or timeframe (these come later)
@@ -178,17 +178,17 @@ You: "I understand you want to buy when the price breaks yesterday's high. To co
 User: "Buy when EMA 9 crosses above EMA 21, sell when it crosses below, target 500 points, stop loss 900 points, max 4 trades per day"
 You: "Here's what I understood from your strategy:
 
-• Buy when EMA 9 crosses above EMA 21
-• Sell when EMA 9 crosses below EMA 21
-• Target: 500 points
-• Stop loss: 900 points
-• Max 4 trades per day
+â€¢ Buy when EMA 9 crosses above EMA 21
+â€¢ Sell when EMA 9 crosses below EMA 21
+â€¢ Target: 500 points
+â€¢ Stop loss: 900 points
+â€¢ Max 4 trades per day
 
 When you're ready, type CONFIRM or BACKTEST to continue."
 
 CRITICAL TONE RULES:
 - NO risk-reward lectures
-- NO warning emojis (⚠️, 🚨, etc.)
+- NO warning emojis (âš ï¸, ðŸš¨, etc.)
 - NO suggestive corrections (e.g., "Your stop loss is higher than target - is this correct?")
 - NO finance education or teaching
 - NO judgement about strategy parameters
@@ -279,7 +279,7 @@ RESPONSE FORMAT:
         # FRONTEND-SAFE GUARANTEE: Ensure response is always a string
         assert isinstance(copilot_response, str), "copilot_response must be a string"
         
-        logger.info(f"✅ Copilot response generated for session {session_id}, is_ready={is_ready}, summary={'present' if summary else 'none'}")
+        logger.info(f"âœ… Copilot response generated for session {session_id}, is_ready={is_ready}, summary={'present' if summary else 'none'}")
         
         # FINAL RETURN CONTRACT (STRICT): Every successful response MUST contain all keys
         return {
@@ -380,7 +380,7 @@ def save_copilot_session(session_id: str, conversation: List[Dict[str, str]], ex
         session_key = f"COPILOT_SESSION:{session_id}"
         conversation_json = json.dumps(conversation)
         redis_client.setex(session_key, expires_in, conversation_json)
-        logger.info(f"✅ Copilot session saved: {session_id}")
+        logger.info(f"âœ… Copilot session saved: {session_id}")
         return True
     except Exception as e:
         logger.error(f"Error saving copilot session: {e}")
@@ -402,7 +402,7 @@ def load_copilot_session(session_id: str) -> Optional[List[Dict[str, str]]]:
         conversation_json = redis_client.get(session_key)
         if conversation_json:
             conversation = json.loads(conversation_json)
-            logger.info(f"✅ Copilot session loaded: {session_id}")
+            logger.info(f"âœ… Copilot session loaded: {session_id}")
             return conversation
         return None
     except Exception as e:
@@ -423,7 +423,7 @@ def delete_copilot_session(session_id: str) -> bool:
     try:
         session_key = f"COPILOT_SESSION:{session_id}"
         redis_client.delete(session_key)
-        logger.info(f"✅ Copilot session deleted: {session_id}")
+        logger.info(f"âœ… Copilot session deleted: {session_id}")
         return True
     except Exception as e:
         logger.error(f"Error deleting copilot session: {e}")
@@ -438,6 +438,6 @@ def create_copilot_session() -> str:
         str: Unique session identifier
     """
     session_id = f"COPILOT-{uuid.uuid4().hex[:16]}"
-    logger.info(f"✅ New Copilot session created: {session_id}")
+    logger.info(f"âœ… New Copilot session created: {session_id}")
     return session_id
 

@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 import string
 import json
 
-from app.database import get_db
+from common.db import get_db
 from app.models import User
 from app.api.auth.models import (
     SendOTPRequest, SendOTPResponse,
@@ -31,7 +31,7 @@ from app.api.auth.models import (
 from app.utils.jwt_helper import decode_token, generate_tokens
 from app.utils.otp_service import OTPService
 import jwt  # PyJWT library (imported as jwt)
-from app.store.redis_client import redis_client
+from common.redis import redis_client
 from app.config import AUTH_BACKEND_URL
 import requests
 

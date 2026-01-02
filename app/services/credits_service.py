@@ -1,10 +1,10 @@
-"""
+﻿"""
 Credits Service
 Manages user credits for AI and backtesting operations
 """
 import logging
 from typing import Optional, Dict, Any
-from app.store.redis_client import redis_client
+from common.redis import redis_client
 
 
 def get_user_id_from_header(authorization: Optional[str]) -> str:

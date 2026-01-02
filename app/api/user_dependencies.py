@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import logging
 import requests
-from app.database import get_db
+from common.db import get_db
 from app.models import User
-from app.config import AUTH_BACKEND_URL
+from common.config import AUTH_BACKEND_URL
 from app.utils.jwt_helper import decode_token
 import jwt
 

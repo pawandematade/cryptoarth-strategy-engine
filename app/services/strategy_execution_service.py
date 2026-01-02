@@ -1,4 +1,4 @@
-"""
+﻿"""
 Strategy Execution Service
 Handles activation, pausing, and resuming of strategy executions.
 
@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 from app.models import Strategy, StrategyVersion, StrategyExecution, ExecutionStatus, User
 from app.services.user_sync_service import get_or_sync_user
-from app.config import AUTH_BACKEND_URL
+from common.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +62,8 @@ def deploy_strategy_to_auth_backend(
         }
         
         # DEBUG: Log auth API call
-        print(f"AUTH API HIT → {url}")
-        logger.info(f"AUTH API HIT → {url} (strategy: {strategy_code}, active: {is_active})")
+        print(f"AUTH API HIT â†’ {url}")
+        logger.info(f"AUTH API HIT â†’ {url} (strategy: {strategy_code}, active: {is_active})")
         
         # Call auth backend to deploy/activate strategy
         response = requests.post(

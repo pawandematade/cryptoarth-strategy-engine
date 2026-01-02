@@ -1,4 +1,4 @@
-"""
+﻿"""
 Trade Storage Service
 Saves individual trades to strategy_trades table for reporting.
 """
@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from app.models import StrategyTrade
-from app.database import get_db
+from common.db import get_db
 import logging
 
 logger = logging.getLogger(__name__)

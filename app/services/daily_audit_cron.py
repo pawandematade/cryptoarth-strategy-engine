@@ -1,11 +1,11 @@
-"""
+﻿"""
 Daily Audit Cron Job
 Read-only validation job that runs daily to check data integrity
 Does NOT execute backtests or modify data
 """
 from app.services.backtest_integrity_monitor import run_integrity_audit
 from app.services.cron_alerting import generate_all_alerts, send_alert
-from app.database import SessionLocal
+from common.db import SessionLocal
 from app.models import CronMaster, CronExecutionLog, CronStatus, CronTriggeredBy
 from datetime import datetime
 from sqlalchemy.orm import Session

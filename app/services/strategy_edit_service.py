@@ -1,4 +1,4 @@
-"""
+﻿"""
 Strategy Edit Service
 Handles editing saved strategies by creating new versions.
 
@@ -17,7 +17,7 @@ from sqlalchemy import func
 from app.models import Strategy, StrategyVersion, User, StrategyStatus
 from app.services.user_sync_service import get_or_sync_user
 from app.services.strategy_save_service import validate_strategy_payload
-from app.config import AUTH_BACKEND_URL
+from common.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,8 @@ def update_strategy_in_auth_backend(
         strategy_data["strategy_code"] = strategy_code
         
         # DEBUG: Log auth API call
-        print(f"AUTH API HIT → {url}")
-        logger.info(f"AUTH API HIT → {url} (update strategy: {strategy_code})")
+        print(f"AUTH API HIT â†’ {url}")
+        logger.info(f"AUTH API HIT â†’ {url} (update strategy: {strategy_code})")
         
         # Call auth backend to update strategy
         response = requests.post(
