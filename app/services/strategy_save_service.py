@@ -173,11 +173,8 @@ def save_strategy(
         ValueError: If validation fails
         requests.exceptions.RequestException: If auth backend unavailable
     """
-    # CRITICAL DEBUG: Verify function is being called
-    print("🔥🔥🔥 ENTERED save_strategy() function 🔥🔥🔥")
-    logger.info("🔥🔥🔥 ENTERED save_strategy() function 🔥🔥🔥")
-    print(f"🔥 Function params: temp_strategy_id={temp_strategy_id}, name={name}")
-    logger.info(f"🔥 Function params: temp_strategy_id={temp_strategy_id}, name={name}")
+    logger.info("Entered save_strategy() function")
+    logger.info(f"Function params: temp_strategy_id={temp_strategy_id}, name={name}")
     
     # 1 & 2. Extract user ID and sync user from auth backend (FAIL FAST if unavailable)
     # get_or_sync_user will call auth backend API and sync user to local DB
@@ -210,21 +207,17 @@ def save_strategy(
     
     try:
         # STEP 1: CONFIRM ACTIVE DATABASE (CRITICAL)
-        from app.config import DB_HOST, DB_NAME
-        print(f"🔥 ACTIVE DB: HOST={DB_HOST}, NAME={DB_NAME}")
-        logger.info(f"🔥 ACTIVE DB: HOST={DB_HOST}, NAME={DB_NAME}")
+        from app.database import DATABASE_URL
+        # Extract DB info from DATABASE_URL for logging
+        db_info = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "configured"
+        logger.info(f"Active DB: {db_info}")
         
         # 6. Create strategy and first version in transaction
         # CRITICAL: Verify model mapping before creating objects
-        print(f"🔥 Strategy.__table__: {Strategy.__table__}")
-        print(f"🔥 Strategy.__tablename__: {Strategy.__tablename__}")
-        print(f"🔥 Strategy.__table__.name: {Strategy.__table__.name}")
-        logger.info(f"🔥 Strategy table mapping: {Strategy.__table__}")
+        logger.info(f"Strategy table mapping: {Strategy.__table__}")
         
         # Verify db session is bound to engine
-        print(f"🔥 DB Session bind: {db.bind}")
-        print(f"🔥 DB Session is_active: {db.is_active}")
-        logger.info(f"🔥 DB Session bind: {db.bind}, is_active: {db.is_active}")
+        logger.info(f"DB Session bind: {db.bind}, is_active: {db.is_active}")
         
         # CRITICAL: All strategies saved via this endpoint are AI-generated
         # (they come from TEMP strategies created by AI generate endpoint)

@@ -145,7 +145,6 @@ allowed_origins = [
     # Production domains
     "https://cryptoarth.in",
     "https://trade-panel.cryptoarth.in",
-    "https://aistrategy.cryptoarth.in",
     "https://www.trade-panel.cryptoarth.in",  # With www subdomain
     "https://panel.cryptoarth.in",
     # Local development
@@ -174,7 +173,6 @@ if not allowed_origins:
         # Production domains
         "https://cryptoarth.in",
         "https://trade-panel.cryptoarth.in",
-        "https://aistrategy.cryptoarth.in",
         # Local development
         "http://localhost:3000",
         "http://localhost:5173",
@@ -245,15 +243,24 @@ def test_redis():
 @app.get("/test-db")
 def test_db():
     """Test database connection and return status"""
-    from app.database import test_db_connection
-    from app.config import DB_HOST, DB_PORT, DB_NAME, APP_ENV
+    from app.database import test_db_connection, DATABASE_URL
+    from app.config import APP_ENV
+    import os
     
     is_connected = test_db_connection()
+    # Extract database info from DATABASE_URL if available
+    db_info = "N/A"
+    if DATABASE_URL:
+        # Format: mysql+pymysql://user:pass@host:port/dbname
+        try:
+            db_info = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
+        except:
+            db_info = "configured"
+    
     return {
         "database_test": is_connected,
         "environment": APP_ENV,
-        "database": DB_NAME,
-        "host": f"{DB_HOST}:{DB_PORT}",
+        "database_url": db_info,
         "status": "connected" if is_connected else "disconnected"
     }
 

@@ -75,28 +75,23 @@ def save_strategy_endpoint(
     Raises:
         HTTPException: If validation fails or save fails
     """
-    # CRITICAL DEBUG: Verify endpoint is being called
-    print("🔥🔥🔥 ENTERED save_strategy API ENDPOINT 🔥🔥🔥")
-    logger.info("🔥🔥🔥 ENTERED save_strategy API ENDPOINT 🔥🔥🔥")
-    print(f"🔥 Request data: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
-    logger.info(f"🔥 Request data: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
+    logger.info("Entered save_strategy API endpoint")
+    logger.info(f"Request data: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
     
     try:
         # STEP 1: CONFIRM ACTIVE DATABASE (CRITICAL)
-        from app.config import DB_HOST, DB_NAME
-        print(f"🔥 [ENDPOINT] ACTIVE DB: HOST={DB_HOST}, NAME={DB_NAME}")
-        logger.info(f"🔥 [ENDPOINT] ACTIVE DB: HOST={DB_HOST}, NAME={DB_NAME}")
+        from app.database import DATABASE_URL
+        # Extract DB info from DATABASE_URL for logging
+        db_info = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "configured"
+        logger.info(f"Active DB: {db_info}")
         
         # Validate authorization header
         if not authorization:
-            print("❌ [ENDPOINT] Authorization header missing")
-            logger.warning("❌ [ENDPOINT] Authorization header missing")
+            logger.warning("Authorization header missing")
             raise HTTPException(status_code=401, detail="Authorization header required")
         
-        print("🔥🔥🔥 CALLING save_strategy() now 🔥🔥🔥")
-        logger.info("🔥🔥🔥 CALLING save_strategy() now 🔥🔥🔥")
-        print(f"🔥 [ENDPOINT] Request params: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
-        logger.info(f"🔥 [ENDPOINT] Request params: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
+        logger.info("Calling save_strategy()")
+        logger.info(f"Request params: temp_strategy_id={request.temp_strategy_id}, name={request.name}")
         
         # Save strategy (includes user sync, validation, and DB save)
         result = save_strategy(
@@ -109,7 +104,6 @@ def save_strategy_endpoint(
             backtest_snapshot=request.backtest_snapshot
         )
         
-        print(f"✅ [ENDPOINT] save_strategy() returned: strategy_id={result.get('strategy_id')}, strategy_code={result.get('strategy_code')}")
         logger.info(f"Strategy saved successfully: strategy_id={result['strategy_id']}, strategy_code={result['strategy_code']}")
         
         # STEP 6: RESPONSE MUST USE REAL DB ID
