@@ -19,9 +19,6 @@ jobs:
           script: |
             set -e
             cd /var/www/cryptoarth
-
-            echo "📥 Pulling latest code..."
             git pull origin main
-
-            echo "🚀 Restarting backend..."
-            ./restart_cryptoarth.sh
+            chmod +x scripts/restart_cryptoarth.sh
+            bash scripts/restart_cryptoarth.sh
