@@ -28,7 +28,7 @@ from app.api.auth.models import (
     UserSignupRequest, UserSignupResponse, UserSignupErrorResponse,
     OTPLoginRequest, OTPLoginResponse, OTPLoginErrorResponse
 )
-from app.utils.jwt_helper import decode_token
+from app.utils.jwt_helper import decode_token, generate_tokens
 from app.utils.otp_service import OTPService
 import jwt  # PyJWT library (imported as jwt)
 from app.store.redis_client import redis_client
@@ -297,7 +297,7 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
                 db.refresh(user)
         
         # Generate JWT tokens for the new user
-        tokens = user.get_tokens()
+        tokens = generate_tokens(user.external_user_id, user.username)
         
         # Delete OTP from cache after successful verification
         redis_client.delete(otp_key)
@@ -344,7 +344,7 @@ def otp_login(request: OTPLoginRequest, db: Session = Depends(get_db)):
                     detail="User not found."
                 )
             
-            tokens = user.get_tokens()
+            tokens = generate_tokens(user.external_user_id, user.username)
             
             return OTPLoginResponse(
                 message="Login successful.",
@@ -385,7 +385,7 @@ def otp_login(request: OTPLoginRequest, db: Session = Depends(get_db)):
             )
         
         # Generate JWT tokens for the authenticated user
-        tokens = user.get_tokens()
+        tokens = generate_tokens(user.external_user_id, user.username)
         
         return OTPLoginResponse(
             message="Login successful.",
