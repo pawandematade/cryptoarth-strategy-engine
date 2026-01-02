@@ -7,7 +7,6 @@ VENV_DIR="$PROJECT_DIR/venv"
 echo "📁 Moving to project directory"
 cd "$PROJECT_DIR"
 
-# Check virtual environment
 if [ ! -d "$VENV_DIR" ]; then
   echo "❌ Error: Virtual environment not found at $VENV_DIR"
   exit 1
