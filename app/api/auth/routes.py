@@ -76,12 +76,14 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
         aisensy_success = False
         
         try:
-            msg91_success = OTPService(phone, otp).send_otp(provider="msg91")
+            OTPService(phone, otp).send_otp(provider="msg91")
+            msg91_success = True
         except Exception as e:
             logger.error(f"Msg91 OTP send failed: {e}")
         
         try:
-            aisensy_success = OTPService(phone, otp).send_otp(provider="aisensy")
+            OTPService(phone, otp).send_otp(provider="aisensy")
+            aisensy_success = True
         except Exception as e:
             logger.error(f"AiSensy OTP send failed: {e}")
         
