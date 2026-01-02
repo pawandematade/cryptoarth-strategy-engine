@@ -1,27 +1,28 @@
-#!/bin/bash
-set -e
+name: Deploy CryptoArth Backend
 
-PROJECT_DIR="/var/www/cryptoarth"
-VENV_DIR="$PROJECT_DIR/venv"
+on:
+  push:
+    branches:
+      - main
 
-echo "📁 Moving to project directory"
-cd "$PROJECT_DIR"
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-if [ ! -d "$VENV_DIR" ]; then
-  echo "❌ Error: Virtual environment not found at $VENV_DIR"
-  exit 1
-fi
-
-echo "🐍 Activating virtual environment"
-source "$VENV_DIR/bin/activate"
-
-echo "🛑 Stopping existing server (if running)"
-pkill -f "uvicorn main:app" || true
-
-echo "🚀 Starting backend"
-nohup "$VENV_DIR/bin/uvicorn" main:app \
-  --host 0.0.0.0 \
-  --port 8000 \
-  > uvicorn.log 2>&1 &
-
-echo "✅ Backend started successfully"
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            echo "📁 Moving to project directory"
+            cd /var/www/cryptoarth
+            echo "📥 Pulling latest code..."
+            git pull origin main
+            echo "🔐 Ensuring restart script is executable"
+            chmod +x scripts/restart_cryptoarth.sh
+            echo "🚀 Restarting backend..."
+            bash scripts/restart_cryptoarth.sh
