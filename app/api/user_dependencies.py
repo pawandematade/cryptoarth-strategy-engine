@@ -1,9 +1,8 @@
 """
-Strict Read-Only User Dependencies
-For GET/READ APIs that should NOT create or sync users.
-Returns 401 (not 400) for authentication failures.
+User Dependencies for FastAPI Authentication
+Provides reusable auth dependencies for all authenticated routes.
 """
-from fastapi import HTTPException, Depends, Header, Request
+from fastapi import HTTPException, Depends, Header, Request, status
 from sqlalchemy.orm import Session
 from typing import Optional
 import logging
@@ -11,8 +10,100 @@ import requests
 from app.database import get_db
 from app.models import User
 from app.config import AUTH_BACKEND_URL
+from app.utils.jwt_helper import decode_token
+import jwt
 
 logger = logging.getLogger(__name__)
+
+
+def get_current_user(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Standard auth dependency for authenticated routes.
+    
+    - Decodes JWT token directly (no external API call)
+    - Loads user from DB using external_user_id
+    - Returns User object with guaranteed external_user_id
+    - Raises 401 for invalid/missing tokens
+    
+    CRITICAL: Always use user.external_user_id (NOT user.id) for queries.
+    
+    Args:
+        request: FastAPI Request (for OPTIONS bypass)
+        authorization: Authorization header (Bearer token)
+        db: Database session
+        
+    Returns:
+        User: Authenticated user with external_user_id set
+        
+    Raises:
+        HTTPException(401): Invalid/missing token
+        HTTPException(404): User not found in DB
+        HTTPException(403): User inactive
+    """
+    # Bypass OPTIONS requests (CORS preflight)
+    if request.method == "OPTIONS":
+        raise HTTPException(status_code=status.HTTP_204_NO_CONTENT)
+    
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required"
+        )
+    
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format"
+        )
+    
+    token = authorization.replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is required"
+        )
+    
+    # Decode JWT token
+    try:
+        payload = decode_token(token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}"
+        )
+    
+    # Extract user_id from token (this is external_user_id)
+    external_user_id = payload.get("user_id")
+    if not external_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload: user_id not found"
+        )
+    
+    # Load user from DB using external_user_id
+    user = db.query(User).filter(User.external_user_id == external_user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+    
+    return user
 
 
 def get_current_user_strict(
@@ -187,4 +278,3 @@ def get_current_user_strict(
         logger.error(f"❌ Failed to create user: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail="User creation failed")
-

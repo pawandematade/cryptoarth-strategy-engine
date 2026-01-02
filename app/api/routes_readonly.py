@@ -21,7 +21,7 @@ import logging
 from datetime import datetime
 
 from app.database import get_db
-from app.api.user_dependencies import get_current_user_strict
+from app.api.user_dependencies import get_current_user, get_current_user_strict
 from app.models import User
 from app.utils.date_utils import get_todays_dates, convert_date_range_to_utc
 
@@ -362,15 +362,19 @@ def user_order_details(
 
 @router.get("/get_user_positions/")
 def get_user_positions(
-    user: User = Depends(get_current_user_strict),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     GET /auth/get_user_positions/
     Get user positions
     Matches: cryptoarth_backend/authenticate/views.py get_user_positions
+    
+    Returns:
+        List of position objects (empty list if no positions)
     """
     try:
+        # Use external_user_id for query (CRITICAL: NOT user.id)
         positions_query = text(f"""
             SELECT 
                 id, order_id, symbol, owner_id, side, price, quantity, unique,
@@ -385,6 +389,7 @@ def get_user_positions(
             {"user_id": user.external_user_id}
         )
         
+        # Always return a list (empty if no results)
         positions = []
         for row in positions_result:
             positions.append({
@@ -403,8 +408,11 @@ def get_user_positions(
                 "broker": row[12] if row[12] else None
             })
         
+        # Always return list (never None)
         return positions
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_user_positions: {e}", exc_info=True)
         raise HTTPException(
