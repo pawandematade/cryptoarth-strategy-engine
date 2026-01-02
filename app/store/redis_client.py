@@ -1,38 +1,12 @@
 import redis
-from redis.exceptions import RedisError
-from app.config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
+import os
 
-# Redis client connection using environment variables
-# Include password if provided
-redis_kwargs = {
-    'host': REDIS_HOST,
-    'port': REDIS_PORT,
-    'db': 0,
-    'decode_responses': True
-}
-if REDIS_PASSWORD:
-    redis_kwargs['password'] = REDIS_PASSWORD
+def get_redis_client():
+    return redis.Redis(
+        host=os.environ["REDIS_HOST"],
+        port=int(os.environ.get("REDIS_PORT", 6379)),
+        db=int(os.environ.get("REDIS_DB", 0)),
+        decode_responses=True,
+    )
 
-redis_client = redis.Redis(**redis_kwargs)
-
-
-def test_connection():
-    """
-    Test Redis connection by pinging the server.
-    
-    Returns:
-        bool: True if Redis is reachable, False if any exception occurs
-    """
-    try:
-        redis_client.ping()
-        return True
-    except RedisError:
-        return False
-
-
-# To test this module in Python shell:
-# python
-# >>> from app.store.redis_client import redis_client, test_connection
-# >>> test_connection()
-# True  # or False if Redis is not running
-
+redis_client = get_redis_client()
