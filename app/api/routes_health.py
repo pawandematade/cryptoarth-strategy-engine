@@ -72,7 +72,7 @@ async def health_db():
             )
         
         # Test query
-        db = get_db_session()
+        db = SessionLocal()
         try:
             result = db.execute(text("SELECT 1 as test"))
             result.fetchone()
@@ -118,7 +118,7 @@ async def health_cron():
     Checks cron execution status and detects issues
     """
     try:
-        db = get_db_session()
+        db = SessionLocal()
         issues = []
         warnings = []
         
@@ -234,6 +234,19 @@ async def health_redis():
     Redis health check
     Tests Redis connectivity
     """
+    if redis_client is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "UNHEALTHY",
+                "timestamp": datetime.utcnow().isoformat(),
+                "service": "Redis",
+                "details": {
+                    "connected": False,
+                    "error": "Redis not configured (REDIS_HOST missing)"
+                }
+            }
+        )
     try:
         result = redis_client.ping()
         return JSONResponse(

@@ -1,29 +1,28 @@
-import redis
 import os
-from redis.exceptions import RedisError
+import logging
+from redis import Redis
+from redis.exceptions import ConnectionError
 
-# Build Redis connection kwargs strictly from environment
-redis_kwargs = {
-    "host": os.environ["REDIS_HOST"],   # REQUIRED
-    "port": int(os.environ.get("REDIS_PORT", 6379)),
-    "db": int(os.environ.get("REDIS_DB", 0)),
-    "decode_responses": True,
-}
+logger = logging.getLogger(__name__)
 
-# Optional password (ElastiCache usually doesn't need it)
-if os.environ.get("REDIS_PASSWORD"):
-    redis_kwargs["password"] = os.environ.get("REDIS_PASSWORD")
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
-# Single Redis client (ONLY ONE SOURCE OF TRUTH)
-redis_client = redis.Redis(**redis_kwargs)
-
-
-def test_connection() -> bool:
-    """
-    Test Redis connection by pinging the server.
-    """
+if not REDIS_HOST:
+    logger.error("REDIS_HOST not set. Redis features will be DISABLED.")
+    redis_client = None
+else:
     try:
+        redis_client = Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            db=REDIS_DB,
+            decode_responses=True,
+            socket_connect_timeout=3,
+        )
         redis_client.ping()
-        return True
-    except RedisError:
-        return False
+        logger.info("Redis connected successfully")
+    except Exception as e:
+        logger.error(f"Redis connection failed: {e}")
+        redis_client = None

@@ -69,6 +69,11 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
             "otp": otp,
             "created_at": str(created_at)
         }
+        if redis_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Redis not configured. OTP service unavailable."
+            )
         redis_client.setex(otp_key, 300, json.dumps(otp_data))  # 5 minutes TTL
         
         # Send OTP via both providers for redundancy
@@ -174,6 +179,11 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
             )
         
         # Check OTP from Redis cache
+        if redis_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Redis not configured. OTP service unavailable."
+            )
         otp_key = f"otp_{phone}"
         cached_otp_data_str = redis_client.get(otp_key)
         if not cached_otp_data_str:
@@ -300,7 +310,8 @@ def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
         tokens = generate_tokens(user.external_user_id, user.username)
         
         # Delete OTP from cache after successful verification
-        redis_client.delete(otp_key)
+        if redis_client is not None:
+            redis_client.delete(otp_key)
         
         return UserSignupResponse(
             message="User registered successfully.",
@@ -354,6 +365,11 @@ def otp_login(request: OTPLoginRequest, db: Session = Depends(get_db)):
             )
         
         # Normal OTP validation
+        if redis_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Redis not configured. OTP service unavailable."
+            )
         otp_key = f"otp_{phone}"
         cached_otp_data_str = redis_client.get(otp_key)
         

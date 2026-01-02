@@ -1,3 +1,13 @@
+# ================== MIGRATION SAFETY LOCK ==================
+# 1. Django is SOURCE OF TRUTH for legacy /auth/* APIs
+# 2. FastAPI handles ONLY:
+#    - Strategy Engine
+#    - Backtest
+#    - AI Strategy
+# 3. Any unverified /auth/* route MUST go via Django fallback
+# 4. No FastAPI override without live production validation
+# ==========================================================
+
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -30,6 +40,7 @@ from app.api.auth.routes import router as auth_router
 from app.api.routes_set_signal import router as set_signal_router
 from app.api.routes_readonly import router as readonly_router
 from app.api.routes_strategy_management import router as strategy_management_router
+from app.api.proxy.django_fallback import django_fallback
 from app.middleware.api_observability import APIObservabilityMiddleware
 from app.store.redis_client import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -210,8 +221,8 @@ app.include_router(monitoring_router, prefix="/auth", tags=["Monitoring"])  # Mo
 app.include_router(copilot_router, prefix="/auth", tags=["Copilot"])  # Copilot conversational strategy builder - /auth/copilot/*
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])  # Authentication endpoints - /auth/send-otp/, /auth/signup/, /auth/login/, /auth/user/
 app.include_router(set_signal_router, prefix="/auth", tags=["Trading"])  # Place order endpoint - /auth/setSignal/
-app.include_router(readonly_router, prefix="/auth", tags=["Read-Only APIs"])  # Read-only APIs migrated from cryptoarth_backend
-app.include_router(strategy_management_router, prefix="/auth", tags=["Strategy Management"])  # Strategy management APIs migrated from cryptoarth_backend
+# app.include_router(readonly_router, prefix="/auth", tags=["Read-Only APIs"])  # Read-only APIs migrated from cryptoarth_backend
+# app.include_router(strategy_management_router, prefix="/auth", tags=["Strategy Management"])  # Strategy management APIs migrated from cryptoarth_backend
 
 @app.get("/")
 def root():
@@ -220,11 +231,15 @@ def root():
 @app.get("/test-redis")
 def test_redis():
     """Test Redis connection and return True if successful"""
+    if redis_client is None:
+        return {"Redis test output": False, "error": "Redis not configured (REDIS_HOST missing)"}
     try:
         result = redis_client.ping()
         return {"Redis test output": result}
     except RedisConnectionError:
         return {"Redis test output": False, "error": "Could not connect to Redis"}
+    except Exception as e:
+        return {"Redis test output": False, "error": str(e)}
 
 
 @app.get("/test-db")
@@ -241,3 +256,12 @@ def test_db():
         "host": f"{DB_HOST}:{DB_PORT}",
         "status": "connected" if is_connected else "disconnected"
     }
+
+
+@app.api_route("/auth/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def django_fallback_route(request: Request):
+    """
+    GLOBAL FALLBACK:
+    Any unknown /auth/* route is forwarded to Django backend.
+    """
+    return await django_fallback(request)
