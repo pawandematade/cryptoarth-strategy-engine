@@ -76,19 +76,24 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
         aisensy_success = False
         
         try:
-            OTPService(phone, otp).send_otp(provider="msg91")
-            msg91_success = True
+            result = OTPService(phone, otp).send_otp(provider="msg91")
+            msg91_success = result is True
+            if not msg91_success:
+                logger.warning(f"Msg91 OTP send returned False - check provider response")
         except Exception as e:
             logger.error(f"Msg91 OTP send failed: {e}")
         
         try:
-            OTPService(phone, otp).send_otp(provider="aisensy")
-            aisensy_success = True
+            result = OTPService(phone, otp).send_otp(provider="aisensy")
+            aisensy_success = result is True
+            if not aisensy_success:
+                logger.warning(f"AiSensy OTP send returned False - check provider response")
         except Exception as e:
             logger.error(f"AiSensy OTP send failed: {e}")
         
         # Return success only if at least one provider succeeded
         if not msg91_success and not aisensy_success:
+            logger.error(f"Both OTP providers failed for phone {phone}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send OTP via all providers."

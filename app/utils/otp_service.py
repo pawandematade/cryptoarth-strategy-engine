@@ -8,6 +8,9 @@ import logging
 import os
 from typing import Optional
 
+# Ensure environment variables are loaded
+from app.config import IS_PRODUCTION  # This triggers .env file loading
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,12 +40,20 @@ class OTPService:
 
     def _send_via_aisensy(self) -> bool:
         try:
+            api_key = os.getenv("aisensy_api_key")
+            campaign_name = os.getenv("aisensy_campaign_name")
+            user_name = os.getenv("aisensy_user_name")
+            
+            if not api_key or not campaign_name or not user_name:
+                logger.error(f"AiSensy config missing: api_key={bool(api_key)}, campaign_name={bool(campaign_name)}, user_name={bool(user_name)}")
+                return False
+            
             url = "https://backend.aisensy.com/campaign/t1/api/v2"
             payload = {
-                "apiKey": os.getenv("aisensy_api_key"),
-                "campaignName": os.getenv("aisensy_campaign_name"),
+                "apiKey": api_key,
+                "campaignName": campaign_name,
                 "destination": self.phone,
-                "userName": os.getenv("aisensy_user_name"),
+                "userName": user_name,
                 "templateParams": [self.otp],
                 "source": "new-landing-page form",
                 "media": {},
@@ -68,30 +79,47 @@ class OTPService:
             }
             headers = {"Content-Type": "application/json"}
 
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
             logger.info(f"AiSensy OTP response: {response.status_code} {response.text}")
-            return response.status_code == 200
+            
+            if response.status_code != 200:
+                logger.error(f"AiSensy API returned {response.status_code}: {response.text}")
+                return False
+            
+            return True
         except Exception as e:
-            logger.error(f"AiSensy OTP error: {str(e)}")
+            logger.error(f"AiSensy OTP error: {str(e)}", exc_info=True)
             return False
 
     def _send_via_msg91(self) -> bool:
         try:
+            flow_id = os.getenv("msg91_flow_id")
+            auth_key = os.getenv("msg91_auth_key")
+            
+            if not flow_id or not auth_key:
+                logger.error(f"Msg91 config missing: flow_id={bool(flow_id)}, auth_key={bool(auth_key)}")
+                return False
+            
             url = "https://api.msg91.com/api/v5/flow"
             payload = {
-                "flow_id": os.getenv("msg91_flow_id"),
+                "flow_id": flow_id,
                 "mobiles": self.phone,
                 "otp": self.otp,
                 "name": "User",
                 "time": "120"
             }
             
-            headers = {"authkey": os.getenv("msg91_auth_key")}
+            headers = {"authkey": auth_key}
 
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
             logger.info(f"Msg91 OTP response: {response.status_code} {response.text}")
-            return response.status_code == 200
+            
+            if response.status_code != 200:
+                logger.error(f"Msg91 API returned {response.status_code}: {response.text}")
+                return False
+            
+            return True
         except Exception as e:
-            logger.error(f"Msg91 OTP error: {str(e)}")
+            logger.error(f"Msg91 OTP error: {str(e)}", exc_info=True)
             return False
 
