@@ -72,15 +72,25 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
         redis_client.setex(otp_key, 300, json.dumps(otp_data))  # 5 minutes TTL
         
         # Send OTP via both providers for redundancy
+        msg91_success = False
+        aisensy_success = False
+        
         try:
-            OTPService(phone, otp).send_otp(provider="msg91")
+            msg91_success = OTPService(phone, otp).send_otp(provider="msg91")
         except Exception as e:
             logger.error(f"Msg91 OTP send failed: {e}")
         
         try:
-            OTPService(phone, otp).send_otp(provider="aisensy")
+            aisensy_success = OTPService(phone, otp).send_otp(provider="aisensy")
         except Exception as e:
             logger.error(f"AiSensy OTP send failed: {e}")
+        
+        # Return success only if at least one provider succeeded
+        if not msg91_success and not aisensy_success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send OTP via all providers."
+            )
         
         return SendOTPResponse(message="OTP sent successfully.")
         
