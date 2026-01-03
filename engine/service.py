@@ -1,1 +1,1 @@
-﻿# Strategy services consolidated
+# Strategy services consolidated

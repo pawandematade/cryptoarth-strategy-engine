@@ -1,1 +1,1 @@
-﻿# Pydantic schemas for strategy engine
+# Pydantic schemas for strategy engine
