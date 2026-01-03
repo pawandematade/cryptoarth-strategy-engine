@@ -86,49 +86,22 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
                 # Continue even if Redis fails - OTP can still be sent
                 redis_stored = False
         
-        # Send OTP via both providers for redundancy
+        # Send OTP via MSG91 only (AiSensy disabled)
         msg91_success = False
-        aisensy_success = False
-        msg91_error = None
-        aisensy_error = None
         
-        # Try Msg91 first
-        try:
-            logger.info(f"Attempting to send OTP via Msg91 for phone: {phone}")
-            result = OTPService(phone, otp).send_otp(provider="msg91")
-            msg91_success = result is True
-            if msg91_success:
-                logger.info(f"Msg91 OTP sent successfully for phone: {phone}")
-            else:
-                logger.warning(f"Msg91 OTP send returned False for phone: {phone}")
-        except Exception as e:
-            msg91_error = str(e)
-            logger.error(f"Msg91 OTP send exception for phone {phone}: {msg91_error}", exc_info=True)
+        # Try Msg91 - non-fatal, returns True/False only
+        logger.info(f"Sending OTP via Msg91 for phone: {phone}")
+        result = OTPService(phone, otp).send_otp(provider="msg91")
+        msg91_success = result is True
         
-        # Try AiSensy
-        try:
-            logger.info(f"Attempting to send OTP via AiSensy for phone: {phone}")
-            result = OTPService(phone, otp).send_otp(provider="aisensy")
-            aisensy_success = result is True
-            if aisensy_success:
-                logger.info(f"AiSensy OTP sent successfully for phone: {phone}")
-            else:
-                logger.warning(f"AiSensy OTP send returned False for phone: {phone}")
-        except Exception as e:
-            aisensy_error = str(e)
-            logger.error(f"AiSensy OTP send exception for phone {phone}: {aisensy_error}", exc_info=True)
-        
-        # Return success only if at least one provider succeeded
-        if not msg91_success and not aisensy_success:
-            error_msg = f"Both OTP providers failed. Msg91: {msg91_error or 'returned False'}, AiSensy: {aisensy_error or 'returned False'}"
-            logger.error(f"OTP sending failed for phone {phone}: {error_msg}")
+        if not msg91_success:
+            logger.warning(f"Msg91 OTP send failed for phone: {phone}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send OTP via all providers."
+                detail="Failed to send OTP. Please try again."
             )
         
-        # At least one provider succeeded
-        logger.info(f"OTP sent successfully for phone: {phone} (Msg91: {msg91_success}, AiSensy: {aisensy_success})")
+        logger.info(f"OTP sent successfully for phone: {phone}")
         return SendOTPResponse(message="OTP sent successfully.")
         
     except HTTPException as http_ex:

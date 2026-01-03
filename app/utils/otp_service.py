@@ -36,16 +36,19 @@ class OTPService:
     def send_otp(self, provider: str = "msg91") -> bool:
         """
         Dispatch OTP based on provider
+        Returns True/False only - never raises exceptions
         """
         try:
-            if provider == "aisensy":
-                return self._send_via_aisensy()
-            elif provider == "msg91":
+            if provider == "msg91":
                 return self._send_via_msg91()
+            # AiSensy disabled - MSG91 only
+            # elif provider == "aisensy":
+            #     return self._send_via_aisensy()
             else:
-                raise ValueError(f"Unsupported provider: {provider}")
+                logger.warning(f"Unsupported provider: {provider}, using msg91")
+                return self._send_via_msg91()
         except Exception as e:
-            logger.exception(f"OTP sending failed: {str(e)}")
+            logger.warning(f"OTP sending failed: {str(e)}")
             return False
 
     def _send_via_aisensy(self) -> bool:
@@ -103,13 +106,17 @@ class OTPService:
             return False
 
     def _send_via_msg91(self) -> bool:
+        """
+        Send OTP via MSG91 provider
+        Returns True/False only - never raises exceptions
+        """
         try:
-            # Use config (decouple or os.getenv fallback) - matches Django implementation
+            # Validate env keys before sending
             flow_id = config('MSG91_FLOW_ID') or config('msg91_flow_id')
             auth_key = config('MSG91_AUTH_KEY') or config('msg91_auth_key')
             
             if not flow_id or not auth_key:
-                logger.error(f"Msg91 config missing: flow_id={bool(flow_id)}, auth_key={bool(auth_key)}")
+                logger.warning(f"Msg91 config missing: flow_id={bool(flow_id)}, auth_key={bool(auth_key)}")
                 return False
             
             url = "https://api.msg91.com/api/v5/flow"
@@ -124,14 +131,14 @@ class OTPService:
             headers = {"authkey": auth_key}
 
             response = requests.post(url, json=payload, headers=headers, timeout=10)
-            logger.info(f"Msg91 OTP response: {response.status_code} {response.text}")
+            logger.info(f"Msg91 OTP response status: {response.status_code}")
             
             if response.status_code != 200:
-                logger.error(f"Msg91 API returned {response.status_code}: {response.text}")
+                logger.warning(f"Msg91 API returned status {response.status_code}")
                 return False
             
             return True
         except Exception as e:
-            logger.error(f"Msg91 OTP error: {str(e)}", exc_info=True)
+            logger.warning(f"Msg91 OTP error: {str(e)}")
             return False
 

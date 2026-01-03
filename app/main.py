@@ -11,7 +11,8 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from contextlib import asynccontextmanager
+# Lifespan DISABLED - OTP stability fix
+# from contextlib import asynccontextmanager
 from app.api.routes_signal import router as signal_router
 from app.api.routes_history import router as history_router
 from app.api.routes_ai_strategy import router as ai_strategy_router
@@ -44,8 +45,9 @@ from app.api.copy_trading.routes import router as copy_trading_router
 from app.api.routes_set_signal import router as set_signal_router
 from app.api.routes_readonly import router as readonly_router
 from app.api.routes_strategy_management import router as strategy_management_router
-from app.api.proxy.django_fallback import django_fallback
-# OBSERVABILITY DISABLED
+# Django fallback DISABLED - OTP stability fix
+# from app.api.proxy.django_fallback import django_fallback
+from app.middleware.api_observability import APIObservabilityMiddleware
 from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
@@ -130,7 +132,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete")
 
 
-app = FastAPI(title="CryptoArth Strategy Engine", lifespan=lifespan)
+app = FastAPI(title="CryptoArth Strategy Engine")
 
 # Security Headers Middleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -144,6 +146,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(APIObservabilityMiddleware)  # API observability - tracks metrics
 
 # Configure CORS - CRITICAL: Single unified list for all environments
 # CRITICAL: When allow_credentials=True, browsers BLOCK allow_origins=["*"]
@@ -277,10 +280,11 @@ def test_db():
     }
 
 
-@app.api_route("/auth/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def django_fallback_route(request: Request):
-    """
-    GLOBAL FALLBACK:
-    Any unknown /auth/* route is forwarded to Django backend.
-    """
-    return await django_fallback(request)
+# Django fallback route DISABLED - OTP stability fix
+# @app.api_route("/auth/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+# async def django_fallback_route(request: Request):
+#     """
+#     GLOBAL FALLBACK:
+#     Any unknown /auth/* route is forwarded to Django backend.
+#     """
+#     return await django_fallback(request)
