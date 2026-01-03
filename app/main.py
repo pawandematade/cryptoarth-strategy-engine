@@ -50,7 +50,7 @@ from app.middleware.api_observability import APIObservabilityMiddleware
 from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
-# ExecutionManager and DB init removed - OTP stability fix
+# ExecutionManager and DB init removed - OTP stability fix (startup side-effects)
 # from app.execution.execution_manager import ExecutionManager
 # from common.db import init_db, test_db_connection
 import logging
