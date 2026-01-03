@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/send-otp/", response_model=SendOTPResponse, status_code=status.HTTP_200_OK)
+@router.post("/send-otp/", status_code=status.HTTP_200_OK)
 def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
     """
     Send OTP to user's phone number.
@@ -86,37 +86,20 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
                 # Continue even if Redis fails - OTP can still be sent
                 redis_stored = False
         
-        # Send OTP via MSG91 only (AiSensy disabled)
-        msg91_success = False
+        # Send OTP via MSG91 only - NEVER trust the result
+        sent = OTPService(phone, otp).send_otp(provider="msg91")
         
-        # Try Msg91 - non-fatal, returns True/False only
-        logger.info(f"Sending OTP via Msg91 for phone: {phone}")
-        result = OTPService(phone, otp).send_otp(provider="msg91")
-        msg91_success = result is True
+        return {
+            "success": bool(sent),
+            "message": "OTP sent successfully" if sent else "OTP sending failed"
+        }
         
-        if not msg91_success:
-            logger.warning(f"Msg91 OTP send failed for phone: {phone}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send OTP. Please try again."
-            )
-        
-        logger.info(f"OTP sent successfully for phone: {phone}")
-        return SendOTPResponse(message="OTP sent successfully.")
-        
-    except HTTPException as http_ex:
-        # Re-raise HTTPException (FastAPI will handle it properly)
-        logger.warning(f"HTTPException in send_otp for phone {getattr(request, 'phone', 'unknown')}: {http_ex.detail}")
-        raise
     except Exception as e:
-        # Catch any other exceptions and log them properly
-        error_msg = f"Unexpected error in send_otp: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        # Return 500 error instead of 400 for unexpected errors
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while sending OTP. Please try again."
-        )
+        # Catch any exceptions and return safe response
+        return {
+            "success": False,
+            "message": "OTP sending failed"
+        }
 
 
 def generate_unique_refercode(db: Session) -> str:

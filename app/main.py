@@ -11,8 +11,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-# Lifespan DISABLED - OTP stability fix
-# from contextlib import asynccontextmanager
+# Lifespan removed - OTP stability fix
 from app.api.routes_signal import router as signal_router
 from app.api.routes_history import router as history_router
 from app.api.routes_ai_strategy import router as ai_strategy_router
@@ -51,86 +50,12 @@ from app.middleware.api_observability import APIObservabilityMiddleware
 from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from app.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
-from app.execution.execution_manager import ExecutionManager
-from common.db import init_db, test_db_connection
+# ExecutionManager and DB init removed - OTP stability fix
+# from app.execution.execution_manager import ExecutionManager
+# from common.db import init_db, test_db_connection
 import logging
 
 logger = logging.getLogger(__name__)
-
-# Global execution manager instance
-execution_manager: ExecutionManager = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for startup and shutdown events.
-    Manages database initialization and execution manager lifecycle.
-    """
-    global execution_manager
-    
-    # Startup: Initialize database (safe - won't crash if DB unavailable)
-    logger.info("=" * 60)
-    logger.info(f"Starting CryptoArth Strategy Engine (APP_ENV={APP_ENV})")
-    logger.info("=" * 60)
-    
-    # Test database connection
-    db_connected = test_db_connection()
-    
-    if db_connected:
-        # CRITICAL: Import all models BEFORE calling init_db() to register with Base.metadata
-        # This avoids circular import (models import Base from database.py)
-        # Import all models to ensure they're registered with Base.metadata
-        from app.models import (  # noqa: F401
-            User, Strategy, StrategyVersion, StrategyExecution, PaperTrade,
-            CreditConfig, UserCredits, CreditTransaction, StrategyUsage, PaymentTransaction,
-            CronMaster, CronExecutionLog,
-            StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades,
-            StrategyTrade
-        )
-        # Import legacy trading models (Phase-2)
-        from app.models_legacy_trading import (  # noqa: F401
-            SymbolMaster, BrokerModels, highLowstratergy, userStratergyPortfolio,
-            Position, OrderDetails, copysignal, tradeDetails, SignalMaster
-        )
-        logger.info("âœ… All models imported and registered with Base.metadata")
-        
-        # Initialize database tables (safe - returns False on error, doesn't raise)
-        db_initialized = init_db()
-        if not db_initialized:
-            logger.warning("âš ï¸  Database initialization failed, but continuing startup...")
-            logger.warning("   Some features may not work until database is available")
-    else:
-        logger.warning("âš ï¸  Database connection failed, but continuing startup...")
-        logger.warning("   Some features may not work until database is available")
-        logger.warning("   Make sure MySQL/MariaDB is running and database exists")
-    
-    # Startup: Initialize and start execution manager
-    logger.info("Starting Execution Manager...")
-    try:
-        execution_manager = ExecutionManager(
-            poll_interval_seconds=10.0,  # Poll DB every 10 seconds
-            tick_interval_seconds=5.0    # Generate ticks every 5 seconds
-        )
-        execution_manager.start()
-        logger.info("Execution Manager started")
-    except Exception as e:
-        logger.error(f"Failed to start Execution Manager: {e}")
-        logger.warning("Execution Manager will not be available")
-        execution_manager = None
-    
-    yield
-    
-    # Shutdown: Stop execution manager
-    logger.info("Stopping Execution Manager...")
-    if execution_manager:
-        try:
-            execution_manager.stop()
-            logger.info("Execution Manager stopped")
-        except Exception as e:
-            logger.error(f"Error stopping Execution Manager: {e}")
-    logger.info("Shutdown complete")
-
 
 app = FastAPI(title="CryptoArth Strategy Engine")
 
