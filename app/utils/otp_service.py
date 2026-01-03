@@ -5,11 +5,7 @@ Migrated from cryptoarth_backend/authenticate/utils/otp_service.py
 """
 import requests
 import logging
-import os
-from typing import Optional
-
-# Ensure environment variables are loaded
-from app.config import IS_PRODUCTION  # This triggers .env file loading
+from decouple import config
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +36,10 @@ class OTPService:
 
     def _send_via_aisensy(self) -> bool:
         try:
-            api_key = os.getenv("AISENSY_API_KEY") or os.getenv("aisensy_api_key")
-            campaign_name = os.getenv("AISENSY_CAMPAIGN_NAME") or os.getenv("aisensy_campaign_name")
-            user_name = os.getenv("AISENSY_USER_NAME") or os.getenv("aisensy_user_name")
+            # Use decouple.config like Django - matches working implementation exactly
+            api_key = config('AISENSY_API_KEY', default=None) or config('aisensy_api_key', default=None)
+            campaign_name = config('AISENSY_CAMPAIGN_NAME', default=None) or config('aisensy_campaign_name', default=None)
+            user_name = config('AISENSY_USER_NAME', default=None) or config('aisensy_user_name', default=None)
             
             if not api_key or not campaign_name or not user_name:
                 logger.error(f"AiSensy config missing: api_key={bool(api_key)}, campaign_name={bool(campaign_name)}, user_name={bool(user_name)}")
@@ -93,8 +90,9 @@ class OTPService:
 
     def _send_via_msg91(self) -> bool:
         try:
-            flow_id = os.getenv("MSG91_FLOW_ID") or os.getenv("msg91_flow_id")
-            auth_key = os.getenv("MSG91_AUTH_KEY") or os.getenv("msg91_auth_key")
+            # Use decouple.config like Django - matches working implementation exactly
+            flow_id = config('MSG91_FLOW_ID', default=None) or config('msg91_flow_id', default=None)
+            auth_key = config('MSG91_AUTH_KEY', default=None) or config('msg91_auth_key', default=None)
             
             if not flow_id or not auth_key:
                 logger.error(f"Msg91 config missing: flow_id={bool(flow_id)}, auth_key={bool(auth_key)}")
