@@ -53,14 +53,16 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
         
         # Basic phone number validation
         if not phone:
+            logger.warning(f"Send OTP request missing phone number")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Phone number is required."
             )
         
+        logger.info(f"Send OTP request received for phone: {phone}")
+        
         # Generate 6-digit random OTP
         otp = str(random.randint(100000, 999999))
-        
         created_at = datetime.utcnow()
         
         # Store OTP and timestamp in Redis cache for 5 minutes (300 seconds)
@@ -69,55 +71,78 @@ def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
             "otp": otp,
             "created_at": str(created_at)
         }
+        
+        # Redis handling - don't fail if Redis is unavailable
+        redis_stored = False
         if redis_client is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Redis not configured. OTP service unavailable."
-            )
-        try:
-            redis_client.setex(otp_key, 300, json.dumps(otp_data))  # 5 minutes TTL
-        except Exception as redis_error:
-            logger.error(f"Redis setex failed: {redis_error}", exc_info=True)
-            # Continue even if Redis fails - OTP can still be sent
-            # Redis failure shouldn't block OTP sending
+            logger.warning("Redis client not available - OTP will be sent but not cached")
+        else:
+            try:
+                redis_client.setex(otp_key, 300, json.dumps(otp_data))  # 5 minutes TTL
+                redis_stored = True
+                logger.debug(f"OTP stored in Redis for phone: {phone}")
+            except Exception as redis_error:
+                logger.error(f"Redis setex failed: {redis_error}", exc_info=True)
+                # Continue even if Redis fails - OTP can still be sent
+                redis_stored = False
         
         # Send OTP via both providers for redundancy
         msg91_success = False
         aisensy_success = False
+        msg91_error = None
+        aisensy_error = None
         
+        # Try Msg91 first
         try:
+            logger.info(f"Attempting to send OTP via Msg91 for phone: {phone}")
             result = OTPService(phone, otp).send_otp(provider="msg91")
             msg91_success = result is True
-            if not msg91_success:
-                logger.warning(f"Msg91 OTP send returned False - check provider response")
+            if msg91_success:
+                logger.info(f"Msg91 OTP sent successfully for phone: {phone}")
+            else:
+                logger.warning(f"Msg91 OTP send returned False for phone: {phone}")
         except Exception as e:
-            logger.error(f"Msg91 OTP send failed: {e}")
+            msg91_error = str(e)
+            logger.error(f"Msg91 OTP send exception for phone {phone}: {msg91_error}", exc_info=True)
         
+        # Try AiSensy
         try:
+            logger.info(f"Attempting to send OTP via AiSensy for phone: {phone}")
             result = OTPService(phone, otp).send_otp(provider="aisensy")
             aisensy_success = result is True
-            if not aisensy_success:
-                logger.warning(f"AiSensy OTP send returned False - check provider response")
+            if aisensy_success:
+                logger.info(f"AiSensy OTP sent successfully for phone: {phone}")
+            else:
+                logger.warning(f"AiSensy OTP send returned False for phone: {phone}")
         except Exception as e:
-            logger.error(f"AiSensy OTP send failed: {e}")
+            aisensy_error = str(e)
+            logger.error(f"AiSensy OTP send exception for phone {phone}: {aisensy_error}", exc_info=True)
         
         # Return success only if at least one provider succeeded
         if not msg91_success and not aisensy_success:
-            logger.error(f"Both OTP providers failed for phone {phone}")
+            error_msg = f"Both OTP providers failed. Msg91: {msg91_error or 'returned False'}, AiSensy: {aisensy_error or 'returned False'}"
+            logger.error(f"OTP sending failed for phone {phone}: {error_msg}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send OTP via all providers."
             )
         
+        # At least one provider succeeded
+        logger.info(f"OTP sent successfully for phone: {phone} (Msg91: {msg91_success}, AiSensy: {aisensy_success})")
         return SendOTPResponse(message="OTP sent successfully.")
         
-    except HTTPException:
+    except HTTPException as http_ex:
+        # Re-raise HTTPException (FastAPI will handle it properly)
+        logger.warning(f"HTTPException in send_otp for phone {getattr(request, 'phone', 'unknown')}: {http_ex.detail}")
         raise
     except Exception as e:
-        logger.error(f"Error sending OTP: {e}", exc_info=True)
+        # Catch any other exceptions and log them properly
+        error_msg = f"Unexpected error in send_otp: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        # Return 500 error instead of 400 for unexpected errors
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to send OTP. Error: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while sending OTP. Please try again."
         )
 
 
