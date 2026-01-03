@@ -41,7 +41,7 @@ ALLOWED_HOSTS = [
     "cryptoarth.in",
     "139.59.78.109"
 ]
-AUTH_USER_MODEL = 'auth.User'
+AUTH_USER_MODEL = 'authenticate.User'
 
 # Application definition
 
@@ -57,7 +57,7 @@ INSTALLED_APPS = [
     'rest_framework',
     "django_celery_beat",
     'corsheaders',
-    'django_backend.apps.auth',
+    'authenticate',
 ]
 
 MIDDLEWARE = [
