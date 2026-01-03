@@ -50,6 +50,31 @@ class SymbolMaster(Base):
         return f"<SymbolMaster(id={self.id}, symbol={self.symbol}, symbolid={self.symbolid})>"
 
 
+class Watchlist(Base):
+    """
+    User watchlist model (user's saved trading symbols)
+    Converted from legacy_digno/authenticate/models.py Watchlist
+    """
+    __tablename__ = "authenticate_watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    symbol_id = Column(Integer, ForeignKey("authenticate_symbolmaster.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="watchlists")
+    symbol = relationship("SymbolMaster", back_populates="watchlists")
+
+    # Unique constraint: user + symbol combination
+    __table_args__ = (
+        UniqueConstraint('user_id', 'symbol_id', name='unique_user_symbol_watchlist'),
+    )
+
+    def __repr__(self):
+        return f"<Watchlist(id={self.id}, user_id={self.user_id}, symbol_id={self.symbol_id})>"
+
+
 class BrokerModels(Base):
     """
     Broker connection models (stores encrypted API credentials)

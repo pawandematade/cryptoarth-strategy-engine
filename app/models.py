@@ -78,6 +78,7 @@ class User(Base):
     copysignals = relationship("copysignal", back_populates="owner", cascade="all, delete-orphan")
     failure_orders = relationship("customer_failorder", back_populates="owner", cascade="all, delete-orphan")
     allowed_strategies = relationship("highLowstratergy", secondary="authenticate_highlowstratergy_allowed_users", back_populates="allowed_users")
+    watchlists = relationship("Watchlist", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, external_user_id={self.external_user_id}, email={self.email})>"
