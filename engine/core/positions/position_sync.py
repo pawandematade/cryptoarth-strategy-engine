@@ -9,7 +9,7 @@ from order.brokers.delta.client import DeltaExchangeClient
 from order.orders.functions import get_live_price
 
 # SQLAlchemy models
-from engine.models_legacy_trading import Position, OrderDetails, tradeDetails, BrokerModels
+from models_legacy_trading import Position, OrderDetails, tradeDetails, BrokerModels
 
 def check_all_position(db: Session):
     """

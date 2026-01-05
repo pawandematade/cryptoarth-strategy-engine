@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 
 from common.config import INTERNAL_SERVICE_TOKEN
 from common.db import get_db
-from engine.core.services.payment_service import process_payment_success, create_razorpay_order, get_credit_plans
-from engine.api.user_dependencies import get_current_user_strict
-from engine.models import User, PaymentTransaction
+from core.services.payment_service import process_payment_success, create_razorpay_order, get_credit_plans
+from api.user_dependencies import get_current_user_strict
+from models import User, PaymentTransaction
 
 logger = logging.getLogger(__name__)
 

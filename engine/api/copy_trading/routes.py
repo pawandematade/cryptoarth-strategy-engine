@@ -12,8 +12,8 @@ import pytz
 
 from common.db import get_db
 from common.auth import get_current_user
-from engine.models import User
-from engine.models_legacy_trading import copysignal, highLowstratergy
+from models import User
+from models_legacy_trading import copysignal, highLowstratergy
 from order.orders.service import get_live_price
 
 logger = logging.getLogger(__name__)

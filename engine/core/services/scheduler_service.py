@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from common.db import SessionLocal
-from engine.models import StrategyExecution, ExecutionStatus, ExecutionMode
-from engine.core.services.signal_service import process_strategy_signal
+from models import StrategyExecution, ExecutionStatus, ExecutionMode
+from core.services.signal_service import process_strategy_signal
 
 logger = logging.getLogger(__name__)
 

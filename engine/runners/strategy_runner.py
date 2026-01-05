@@ -12,7 +12,7 @@ Supports:
 
 Usage:
     import pandas as pd
-    from engine.core.engine.strategy_runner import StrategyRunner
+    from core.engine.strategy_runner import StrategyRunner
     
     # Strategy JSON (single source of truth)
     strategy = {

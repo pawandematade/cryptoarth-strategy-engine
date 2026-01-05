@@ -24,7 +24,7 @@ from datetime import datetime, timezone, date
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from common.db import SessionLocal
-from engine.models import (
+from models import (
     StrategyBacktestSummary,
     StrategyBacktestDaily,
     StrategyBacktestTrades,

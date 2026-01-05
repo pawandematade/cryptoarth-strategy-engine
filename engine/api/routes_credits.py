@@ -7,14 +7,14 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import logging
 from sqlalchemy.orm import Session
-from engine.core.services.credit_service import (
+from core.services.credit_service import (
     get_user_credits,
     deduct_credits,
     add_credits
 )
-from engine.api.user_dependencies import get_current_user_strict
+from api.user_dependencies import get_current_user_strict
 from common.db import get_db
-from engine.models import User, UserCredits
+from models import User, UserCredits
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +362,7 @@ def admin_correct_credits(
             )
         
         # Get original transaction
-        from engine.models import CreditTransaction
+        from models import CreditTransaction
         original_txn = db.query(CreditTransaction).filter(
             CreditTransaction.id == request.original_transaction_id
         ).first()
@@ -385,7 +385,7 @@ def admin_correct_credits(
         business_user_id = original_txn.user_id
         
         # Get user mobile for correction transaction (optional, for logging)
-        from engine.models import User
+        from models import User
         user = db.query(User).filter(User.external_user_id == business_user_id).first()
         user_mobile = user.phone if user and user.phone else ""
         
@@ -496,7 +496,7 @@ def admin_credits_lookup(
         normalized_mobile = normalize_mobile(phone)
         
         # Find user by phone (check both formats for compatibility)
-        from engine.models import User, CreditTransaction, UserCredits
+        from models import User, CreditTransaction, UserCredits
         from sqlalchemy.orm import joinedload
         
         user = db.query(User).filter(
@@ -633,7 +633,7 @@ def admin_manual_credit_update(
         normalized_mobile = normalize_mobile(request.user_phone)
         
         # Find user by phone (check both formats for compatibility)
-        from engine.models import User
+        from models import User
         user = db.query(User).filter(
             (User.phone == normalized_mobile) | (User.phone == request.user_phone)
         ).first()
@@ -673,7 +673,7 @@ def admin_manual_credit_update(
         
         # Get the last transaction (the one we just created)
         # CRITICAL: Business tables store external_user_id in user_id column
-        from engine.models import CreditTransaction
+        from models import CreditTransaction
         last_transaction = db.query(CreditTransaction).filter(
             CreditTransaction.user_id == user.external_user_id
         ).order_by(CreditTransaction.created_at.desc()).first()
@@ -736,7 +736,7 @@ def admin_add_credits_by_mobile(
         normalized_mobile = normalize_mobile(request.mobile)
         
         # MANDATORY: Check user existence ONLY from users table (NOT credit-related tables)
-        from engine.models import User
+        from models import User
         # Use phone column (matches User model) - check both normalized and raw for compatibility
         user = db.query(User).filter(
             (User.phone == normalized_mobile) | (User.phone == request.mobile)
@@ -835,7 +835,7 @@ def admin_deduct_credits_by_mobile(
         normalized_mobile = normalize_mobile(request.mobile)
         
         # Find user (use normalized_mobile for DB query)
-        from engine.models import User
+        from models import User
         user = db.query(User).filter(
             (User.phone == normalized_mobile) | (User.phone == request.mobile)
         ).first()
@@ -952,7 +952,7 @@ def admin_get_all_credit_transactions(
         offset = max(0, offset)
         
         # Build query
-        from engine.models import CreditTransaction, User
+        from models import CreditTransaction, User
         from sqlalchemy.orm import joinedload
         
         # If user_phone is provided, validate user exists first
@@ -1090,7 +1090,7 @@ def get_credit_transactions(
         # Use user.external_user_id (canonical ID) NOT user.id (local ID)
         logger.debug(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
-        from engine.models import UserCredits
+        from models import UserCredits
         user_credits_query = db.query(UserCredits).filter(
             UserCredits.user_id == user.external_user_id
         )
@@ -1103,7 +1103,7 @@ def get_credit_transactions(
             current_balance = 0
         
         # Get credit transactions for user - Use external_user_id (canonical ID)
-        from engine.models import CreditTransaction
+        from models import CreditTransaction
         query = db.query(CreditTransaction).filter(
             CreditTransaction.user_id == user.external_user_id
         )

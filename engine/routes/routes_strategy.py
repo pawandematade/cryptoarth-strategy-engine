@@ -10,7 +10,7 @@ import logging
 import json
 
 from common.redis import redis_client
-from engine.strategies.loader import load_strategies
+from strategies.loader import load_strategies
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

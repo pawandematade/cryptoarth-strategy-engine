@@ -7,7 +7,7 @@ import requests
 from typing import Dict, Optional, Any, List
 from datetime import datetime, timedelta
 from common.config import DELTA_BASE_URL
-from engine.core.feed.delta_history import fetch_ohlcv
+from core.feed.delta_history import fetch_ohlcv
 
 logger = logging.getLogger(__name__)
 

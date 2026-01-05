@@ -13,8 +13,8 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from engine.models import StrategyExecution, ExecutionStatus, ExecutionMode
-from engine.core.services.paper_trade_service import (
+from models import StrategyExecution, ExecutionStatus, ExecutionMode
+from core.services.paper_trade_service import (
     calculate_lot_size,
     create_paper_trade,
     get_open_position,
@@ -322,7 +322,7 @@ def _process_live_signal(
     Returns:
         dict: Result
     """
-    from engine.core.services.webhook_service import send_strategy_signal
+    from core.services.webhook_service import send_strategy_signal
     
     # Prepare webhook payload
     payload = {

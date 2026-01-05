@@ -8,9 +8,9 @@ from typing import Optional
 import logging
 import requests
 from common.db import get_db
-from engine.models import User
+from models import User
 from common.config import AUTH_BACKEND_URL
-from engine.utils.jwt_helper import decode_token
+from utils.jwt_helper import decode_token
 import jwt
 
 logger = logging.getLogger(__name__)

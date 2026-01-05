@@ -14,7 +14,7 @@ import logging
 import requests
 
 from common.db import get_db
-from engine.core.services.strategy_edit_service import edit_strategy
+from core.services.strategy_edit_service import edit_strategy
 
 logger = logging.getLogger(__name__)
 

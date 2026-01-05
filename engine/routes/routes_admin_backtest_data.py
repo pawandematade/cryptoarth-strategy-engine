@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, validator
 from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
-from engine.core.services.backtest_candle_storage import (
+from core.services.backtest_candle_storage import (
     create_table_if_not_exists,
     insert_candles,
     get_candles,
@@ -18,7 +18,7 @@ from engine.core.services.backtest_candle_storage import (
     table_exists,
     delete_candles
 )
-from engine.core.feed.delta_history import fetch_ohlcv, _get_timeframe_seconds
+from core.feed.delta_history import fetch_ohlcv, _get_timeframe_seconds
 
 logger = logging.getLogger(__name__)
 

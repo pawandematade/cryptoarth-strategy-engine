@@ -15,14 +15,14 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, asc
 from common.db import get_db
-from engine.models import (
+from models import (
     Strategy,
     StrategyBacktestSummary,
     StrategyBacktestDaily,
     StrategyBacktestTrades,
     User
 )
-from engine.core.services.user_sync_service import get_or_sync_user
+from core.services.user_sync_service import get_or_sync_user
 import logging
 from datetime import datetime
 import requests

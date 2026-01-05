@@ -12,8 +12,8 @@ import pytz
 
 from common.db import get_db
 from common.auth import get_current_user
-from engine.models import User
-from engine.models_legacy_trading import Position, BrokerModels, SymbolMaster, OrderDetails, tradeDetails
+from models import User
+from models_legacy_trading import Position, BrokerModels, SymbolMaster, OrderDetails, tradeDetails
 from order.brokers.delta.client import DeltaExchangeClient
 from order.brokers.coindcx.client import coindcxclient
 from common.security import get_broker_credentials

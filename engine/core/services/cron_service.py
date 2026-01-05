@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from common.db import SessionLocal
-from engine.models import CronMaster, CronStatus, CronTriggeredBy, CronExecutionLog
+from models import CronMaster, CronStatus, CronTriggeredBy, CronExecutionLog
 
 logger = logging.getLogger(__name__)
 

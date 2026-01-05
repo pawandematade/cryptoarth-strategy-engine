@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from engine.models import StrategyTrade
+from models import StrategyTrade
 from common.db import get_db
 import logging
 

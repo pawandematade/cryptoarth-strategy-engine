@@ -5,7 +5,7 @@ Generates JWT tokens compatible with rest_framework_simplejwt format.
 import jwt
 from datetime import datetime, timedelta
 from typing import Dict
-from engine.config import SECRET_KEY
+from config import SECRET_KEY
 import logging
 
 logger = logging.getLogger(__name__)

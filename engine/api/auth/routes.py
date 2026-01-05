@@ -22,17 +22,17 @@ import string
 import json
 
 from common.db import get_db
-from engine.models import User
-from engine.api.auth.models import (
+from models import User
+from api.auth.models import (
     SendOTPRequest, SendOTPResponse,
     UserSignupRequest, UserSignupResponse, UserSignupErrorResponse,
     OTPLoginRequest, OTPLoginResponse, OTPLoginErrorResponse
 )
-from engine.utils.jwt_helper import decode_token, generate_tokens
-from engine.utils.otp_service import OTPService
+from utils.jwt_helper import decode_token, generate_tokens
+from utils.otp_service import OTPService
 import jwt  # PyJWT library (imported as jwt)
 from common.redis import redis_client
-from engine.config import AUTH_BACKEND_URL
+from config import AUTH_BACKEND_URL
 import requests
 
 logger = logging.getLogger(__name__)
@@ -43,53 +43,15 @@ router = APIRouter()
 @router.post("/send-otp/", status_code=status.HTTP_200_OK)
 def send_otp(request: SendOTPRequest, db: Session = Depends(get_db)):
     """
-    Send OTP to user's phone number.
-    Creates user if not exists, generates OTP, and sends via configured providers.
-    
-    Matches: cryptoarth_backend/authenticate/views.py SendOTPView
+    OTP sending is handled by Django (DIGNO) only.
+    FastAPI should not send OTPs - this is architecturally incorrect.
     """
-    try:
-        phone = request.phone
-        
-        # Basic phone number validation
-        if not phone:
-            logger.warning(f"Send OTP request missing phone number")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Phone number is required."
-            )
-        
-        logger.info(f"Send OTP request received for phone: {phone}")
-        
-        # Generate 6-digit random OTP
-        otp = str(random.randint(100000, 999999))
-        created_at = datetime.utcnow()
-        
-        # Store OTP and timestamp in Redis cache for 5 minutes (300 seconds)
-        otp_key = f"otp_{phone}"
-        otp_data = {
-            "otp": otp,
-            "created_at": str(created_at)
-        }
-        
-        # Redis handling - don't fail if Redis is unavailable
-        redis_stored = False
-        if redis_client is None:
-            logger.warning("Redis client not available - OTP will be sent but not cached")
-        else:
-            try:
-                redis_client.setex(otp_key, 300, json.dumps(otp_data))  # 5 minutes TTL
-                redis_stored = True
-                logger.debug(f"OTP stored in Redis for phone: {phone}")
-            except Exception as redis_error:
-                logger.error(f"Redis setex failed: {redis_error}", exc_info=True)
-                # Continue even if Redis fails - OTP can still be sent
-                redis_stored = False
-        
-        # Send OTP via MSG91 only - NEVER trust the result
-        sent = OTPService(phone, otp).send_otp(provider="msg91")
-        
-        return {
+    # Return a message indicating OTP should be sent via Django
+    return {
+        "message": "OTP service is handled by Django backend. Please use trade-api.cryptoarth.in",
+        "django_endpoint": "https://trade-api.cryptoarth.in/auth/send-otp/",
+        "status": "redirect_required"
+    }
             "success": bool(sent),
             "message": "OTP sent successfully" if sent else "OTP sending failed"
         }

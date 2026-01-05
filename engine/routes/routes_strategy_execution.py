@@ -14,7 +14,7 @@ import logging
 import requests
 
 from common.db import get_db
-from engine.core.services.strategy_execution_service import (
+from core.services.strategy_execution_service import (
     activate_strategy_execution,
     pause_strategy_execution,
     resume_strategy_execution,

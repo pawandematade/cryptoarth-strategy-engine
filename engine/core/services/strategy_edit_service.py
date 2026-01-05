@@ -14,9 +14,9 @@ from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
-from engine.models import Strategy, StrategyVersion, User, StrategyStatus
-from engine.core.services.user_sync_service import get_or_sync_user
-from engine.core.services.strategy_save_service import validate_strategy_payload
+from models import Strategy, StrategyVersion, User, StrategyStatus
+from core.services.user_sync_service import get_or_sync_user
+from core.services.strategy_save_service import validate_strategy_payload
 from common.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)

@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 import logging
 
 from common.db import get_db
-from engine.models import StrategyExecution, PaperTrade, Strategy
-from engine.core.services.user_sync_service import get_or_sync_user
-from engine.core.services.pdf_service import generate_paper_trade_pdf
+from models import StrategyExecution, PaperTrade, Strategy
+from core.services.user_sync_service import get_or_sync_user
+from core.services.pdf_service import generate_paper_trade_pdf
 
 logger = logging.getLogger(__name__)
 

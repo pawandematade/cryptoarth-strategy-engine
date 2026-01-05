@@ -7,7 +7,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from engine.models import (
+from models import (
     CreditConfig, UserCredits, CreditTransaction, StrategyUsage,
     User
 )
@@ -240,7 +240,7 @@ def deduct_credits(
         
         # If mobile not provided, get it from user
         if not mobile:
-            from engine.models import User
+            from models import User
             user = db.query(User).filter(User.id == user_id).first()
             if user and user.phone:
                 mobile = user.phone
@@ -312,7 +312,7 @@ def add_credits(
         user_credits = get_user_credits(db, user_id)
         if not user_credits:
             # Create user credits record with 0 credits (will add credits below)
-            from engine.models import User
+            from models import User
             user = db.query(User).filter(User.id == user_id).first()
             if not user:
                 return False, f"User {user_id} not found"
@@ -328,7 +328,7 @@ def add_credits(
         
         # If mobile not provided, get it from user
         if not mobile:
-            from engine.models import User
+            from models import User
             user = db.query(User).filter(User.id == user_id).first()
             if user and user.phone:
                 mobile = user.phone

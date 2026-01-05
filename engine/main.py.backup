@@ -12,46 +12,46 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 # Lifespan removed - OTP stability fix
-from api.routes_signal import router as signal_router
-from api.routes_history import router as history_router
-from api.routes_ai_strategy import router as ai_strategy_router
-from api.routes_secure_ai import router as secure_ai_router
-from api.routes_strategy import router as strategy_router
-from api.routes_strategy_performance import router as strategy_performance_router
-from api.routes_strategy_save import router as strategy_save_router
-from api.routes_strategy_edit import router as strategy_edit_router
-from api.routes_strategy_execution import router as strategy_execution_router
-from api.routes_strategy_list import router as strategy_list_router
-from api.routes_strategy_run import router as strategy_run_router
-from api.routes_paper_trades import router as paper_trades_router
-from api.routes_credits import router as credits_router
-from api.routes_payment import router as payment_router
-from api.routes_websocket import router as websocket_router
-from api.routes_backtest import router as backtest_router
-from api.routes_admin_backtest_data import router as admin_backtest_data_router
-from api.routes_admin_cron import router as admin_cron_router
-from api.routes_backtest_performance import router as backtest_performance_router
-from api.routes_health import router as health_router
-from api.routes_monitoring import router as monitoring_router
-from api.routes_reports import router as reports_router
-from api.routes_internal import router as internal_router
-from api.routes_copilot import router as copilot_router
-from api.auth.routes import router as auth_router
-from api.broker.routes import router as broker_router
-from api.orders.routes import router as orders_router
-from api.positions.routes import router as positions_router
-from api.copy_trading.routes import router as copy_trading_router
-from api.routes_set_signal import router as set_signal_router
-from api.routes_readonly import router as readonly_router
-from api.routes_strategy_management import router as strategy_management_router
+from engine.api.routes_signal import router as signal_router
+from engine.api.routes_history import router as history_router
+from engine.api.routes_ai_strategy import router as ai_strategy_router
+from engine.api.routes_secure_ai import router as secure_ai_router
+from engine.api.routes_strategy import router as strategy_router
+from engine.api.routes_strategy_performance import router as strategy_performance_router
+from engine.api.routes_strategy_save import router as strategy_save_router
+from engine.api.routes_strategy_edit import router as strategy_edit_router
+from engine.api.routes_strategy_execution import router as strategy_execution_router
+from engine.api.routes_strategy_list import router as strategy_list_router
+from engine.api.routes_strategy_run import router as strategy_run_router
+from engine.api.routes_paper_trades import router as paper_trades_router
+from engine.api.routes_credits import router as credits_router
+from engine.api.routes_payment import router as payment_router
+from engine.api.routes_websocket import router as websocket_router
+from engine.api.routes_backtest import router as backtest_router
+from engine.api.routes_admin_backtest_data import router as admin_backtest_data_router
+from engine.api.routes_admin_cron import router as admin_cron_router
+from engine.api.routes_backtest_performance import router as backtest_performance_router
+from engine.api.routes_health import router as health_router
+from engine.api.routes_monitoring import router as monitoring_router
+from engine.api.routes_reports import router as reports_router
+from engine.api.routes_internal import router as internal_router
+from engine.api.routes_copilot import router as copilot_router
+from engine.api.auth.routes import router as auth_router
+from engine.api.broker.routes import router as broker_router
+from engine.api.orders.routes import router as orders_router
+from engine.api.positions.routes import router as positions_router
+from engine.api.copy_trading.routes import router as copy_trading_router
+from engine.api.routes_set_signal import router as set_signal_router
+from engine.api.routes_readonly import router as readonly_router
+from engine.api.routes_strategy_management import router as strategy_management_router
 # Django fallback DISABLED - OTP stability fix
-# from api.proxy.django_fallback import django_fallback
-from middleware.api_observability import APIObservabilityMiddleware
+# from engine.api.proxy.django_fallback import django_fallback
+from engine.middleware.api_observability import APIObservabilityMiddleware
 from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
-from config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
+from engine.config import IS_PRODUCTION, FRONTEND_URL, BASE_API_URL, APP_ENV
 # ExecutionManager and DB init removed - OTP stability fix (startup side-effects)
-# from core.execution.execution_manager import ExecutionManager
+# from engine.core.execution.execution_manager import ExecutionManager
 # from common.db import init_db, test_db_connection
 import logging
 
@@ -184,7 +184,7 @@ def test_redis():
 def test_db():
     """Test database connection and return status"""
     from common.db import test_db_connection, DATABASE_URL
-    from config import APP_ENV
+    from engine.config import APP_ENV
     import os
     
     is_connected = test_db_connection()

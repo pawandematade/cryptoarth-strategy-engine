@@ -20,8 +20,8 @@ from datetime import datetime, date
 import random
 
 from common.db import get_db
-from engine.api.user_dependencies import get_current_user_strict
-from engine.models import User
+from api.user_dependencies import get_current_user_strict
+from models import User
 
 logger = logging.getLogger(__name__)
 

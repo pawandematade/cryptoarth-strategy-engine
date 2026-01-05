@@ -15,8 +15,8 @@ import json
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from engine.models import Strategy, StrategyVersion, StrategyStatus, User
-from engine.core.services.user_sync_service import get_or_sync_user
+from models import Strategy, StrategyVersion, StrategyStatus, User
+from core.services.user_sync_service import get_or_sync_user
 from common.config import AUTH_BACKEND_URL
 
 logger = logging.getLogger(__name__)

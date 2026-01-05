@@ -8,9 +8,9 @@ from fastapi import APIRouter, HTTPException, status, Header
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
-from engine.core.services.secure_strategy_service import generate_secure_strategy
+from core.services.secure_strategy_service import generate_secure_strategy
 from common.redis import redis_client
-from engine.core.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
+from core.services.credits_service import consume_credits, check_credits_available, get_user_id_from_header
 import json
 
 logger = logging.getLogger(__name__)

@@ -590,7 +590,7 @@ class StrategyTrade(Base):
 
 
 # Import legacy trading models (Phase-2) at end to avoid circular imports
-from engine.models_legacy_trading import (  # noqa: F401, E402
+from models_legacy_trading import (  # noqa: F401, E402
     SymbolMaster,
     BrokerModels,
     highLowstratergy,

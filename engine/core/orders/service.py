@@ -15,12 +15,12 @@ from datetime import datetime, time
 import pytz
 
 # SQLAlchemy models
-from engine.models_legacy_trading import (
+from models_legacy_trading import (
     SymbolMaster, Position, OrderDetails, tradeDetails,
     userStratergyPortfolio, highLowstratergy, BrokerModels,
     adminPosition, customer_failorder, latencycheck
 )
-from engine.models import User
+from models import User
 
 # Broker clients
 from order.brokers.coindcx.client import coindcxclient

@@ -13,7 +13,7 @@ import math
 from typing import Dict, Any, Optional
 from decimal import Decimal, ROUND_DOWN
 from sqlalchemy.orm import Session
-from engine.models import StrategyExecution, PaperTrade, ExecutionStatus
+from models import StrategyExecution, PaperTrade, ExecutionStatus
 
 logger = logging.getLogger(__name__)
 

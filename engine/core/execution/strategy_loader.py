@@ -5,8 +5,8 @@ Loads strategy payload from database for execution.
 import logging
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
-from engine.models import Strategy, StrategyVersion, StrategyExecution
-from engine.core.execution.execution_logger import log_error
+from models import Strategy, StrategyVersion, StrategyExecution
+from core.execution.execution_logger import log_error
 
 logger = logging.getLogger("execution_engine.strategy_loader")
 

@@ -5,7 +5,7 @@ Read-only validation jobs to detect data gaps and integrity issues
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from common.db import SessionLocal
-from engine.models import StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades
+from models import StrategyBacktestSummary, StrategyBacktestDaily, StrategyBacktestTrades
 from datetime import datetime, timedelta
 import logging
 

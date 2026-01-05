@@ -21,9 +21,9 @@ import logging
 from datetime import datetime
 
 from common.db import get_db
-from engine.api.user_dependencies import get_current_user, get_current_user_strict
-from engine.models import User
-from engine.utils.date_utils import get_todays_dates, convert_date_range_to_utc
+from api.user_dependencies import get_current_user, get_current_user_strict
+from models import User
+from utils.date_utils import get_todays_dates, convert_date_range_to_utc
 
 logger = logging.getLogger(__name__)
 

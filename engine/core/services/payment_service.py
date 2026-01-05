@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Dict, Optional, Any
 from fastapi import HTTPException
 from common.redis import redis_client
-from engine.models import PaymentTransaction
+from models import PaymentTransaction
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -411,7 +411,7 @@ def process_payment_success(
         
         # STEP 2: Get user details for customer info and mobile
         # CRITICAL: Query User to get name, email, and mobile for payment records
-        from engine.models import User
+        from models import User
         user = db.query(User).filter(User.external_user_id == user_id).first()
         
         # HARD FALLBACK: Customer details must NEVER be NULL if user exists
@@ -521,7 +521,7 @@ def process_payment_success(
             
             # STEP 5: Insert credit_transactions row (LEDGER)
             # Mobile is OPTIONAL - can be NULL
-            from engine.models import CreditTransaction
+            from models import CreditTransaction
             credit_tx = CreditTransaction(
                 user_id=user_id,
                 mobile=user_mobile,  # Mobile in 91XXXXXXXXXX format or NULL if not available
@@ -534,7 +534,7 @@ def process_payment_success(
             logger.info(f"Added credit_transaction: user_id={user_id}, credits={credits_added}, mobile={user_mobile}")
             
             # STEP 6: Update user_credits table (BALANCE TABLE)
-            from engine.models import UserCredits
+            from models import UserCredits
             
             # CRITICAL DB FIX: Mobile resolution for user_credits (mobile is NOT NULL)
             # Resolution order: user.phone → customer_mobile → empty string ""

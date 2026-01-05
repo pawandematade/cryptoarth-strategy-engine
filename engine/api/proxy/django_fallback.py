@@ -1,6 +1,6 @@
 from fastapi import Request, Response
 import requests
-from engine.config import AUTH_BACKEND_URL
+from config import AUTH_BACKEND_URL
 
 async def django_fallback(request: Request) -> Response:
     """

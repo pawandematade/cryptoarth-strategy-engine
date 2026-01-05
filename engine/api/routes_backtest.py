@@ -10,8 +10,8 @@ import logging
 import copy
 import pandas as pd
 from datetime import datetime, timedelta
-from engine.core.engine.backtest_engine import BacktestEngine
-from engine.core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
+from core.engine.backtest_engine import BacktestEngine
+from core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
 
 logger = logging.getLogger(__name__)
 

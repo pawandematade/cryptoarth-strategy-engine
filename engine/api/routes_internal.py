@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from sqlalchemy.orm import Session
 from common.db import get_db
-from engine.core.services.credit_service import initialize_user_credits, get_default_free_credits
-from engine.core.services.user_sync_service import sync_user_to_local_db
+from core.services.credit_service import initialize_user_credits, get_default_free_credits
+from core.services.user_sync_service import sync_user_to_local_db
 import logging
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def initialize_signup_credits(
     """
     # FREE CREDITS DISCONTINUED - Return 0 credits
     # Sync user to local DB (if not exists) but do NOT initialize credits
-    from engine.models import User
+    from models import User
     
     # Check if user already exists in local DB
     local_user = db.query(User).filter(

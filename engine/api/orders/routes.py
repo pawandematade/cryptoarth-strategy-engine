@@ -10,7 +10,7 @@ import logging
 
 from common.db import get_db
 from common.auth import get_current_user
-from engine.models import User
+from models import User
 from order.orders.service import process_entry_order, process_exit_order
 
 logger = logging.getLogger(__name__)

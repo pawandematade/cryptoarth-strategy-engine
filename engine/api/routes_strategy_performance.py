@@ -18,11 +18,11 @@ from datetime import datetime, timedelta
 import json
 import copy
 
-from engine.core.engine.backtest_engine import BacktestEngine
+from core.engine.backtest_engine import BacktestEngine
 from common.redis import redis_client
-from engine.strategies.loader import load_strategies
-from engine.core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
-from engine.core.services.backtest_logging_service import log_backtest_execution
+from strategies.loader import load_strategies
+from core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
+from core.services.backtest_logging_service import log_backtest_execution
 from common.db import get_db
 from sqlalchemy.orm import Session
 
@@ -762,7 +762,7 @@ def _get_strategy_performance_internal(strategy_id: int, backtest_settings: Opti
             # MUST log every backtest execution for History tab
             try:
                 from common.db import SessionLocal
-                from engine.models import Strategy, StrategyVersion
+                from models import Strategy, StrategyVersion
                 backtest_db = SessionLocal()
                 try:
                     # Get strategy from database to find latest version

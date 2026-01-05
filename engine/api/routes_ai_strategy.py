@@ -8,25 +8,25 @@ import copy
 import pandas as pd
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from engine.core.services.openai_service import generate_strategy
-from engine.core.services.backtest_service import run_backtest
-from engine.core.services.prompt_builder import build_prompt
-from engine.core.services.input_validator import (
+from core.services.openai_service import generate_strategy
+from core.services.backtest_service import run_backtest
+from core.services.prompt_builder import build_prompt
+from core.services.input_validator import (
     validate_input,
     detect_contradictions,
     sanitize_prompt
 )
 from common.redis import redis_client
-from engine.core.services.credit_service import (
+from core.services.credit_service import (
     check_credits_available,
     deduct_credits,
     get_user_credits
 )
-from engine.core.services.user_sync_service import get_or_sync_user
-from engine.core.engine.backtest_engine import BacktestEngine
-from engine.core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
+from core.services.user_sync_service import get_or_sync_user
+from core.engine.backtest_engine import BacktestEngine
+from core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
 from common.db import get_db
-from engine.core.services.strategy_save_service import save_strategy
+from core.services.strategy_save_service import save_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -438,7 +438,7 @@ def generate_ai_strategy(
         if not strategy:
             logger.error("❌ Strategy generation returned None. Check OpenAI service logs.")
             # Check if client is initialized, try to reinitialize if needed
-            from engine.core.services.openai_service import client, initialize_client
+            from core.services.openai_service import client, initialize_client
             if not client:
                 # Try to reinitialize the client (in case API key was added after server start)
                 logger.warning("OpenAI client not initialized. Attempting to reinitialize...")

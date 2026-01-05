@@ -3,7 +3,7 @@ import time
 import websocket
 from threading import Thread
 from common.redis import redis_client
-from engine.config import DELTA_BASE_URL
+from config import DELTA_BASE_URL
 import logging
 
 # Configure logging

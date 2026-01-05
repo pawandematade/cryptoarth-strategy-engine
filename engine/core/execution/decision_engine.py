@@ -4,7 +4,7 @@ Evaluates strategy logic and returns trading decisions (dry-run only).
 """
 import logging
 from typing import Dict, Any, Optional, Literal
-from engine.core.execution.execution_logger import log_decision, log_error
+from core.execution.execution_logger import log_decision, log_error
 
 logger = logging.getLogger("execution_engine.decision_engine")
 

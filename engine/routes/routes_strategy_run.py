@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 import logging
 
 from common.db import get_db
-from engine.models import Strategy, StrategyVersion, StrategyExecution, ExecutionMode, ExecutionStatus
-from engine.core.services.user_sync_service import get_or_sync_user
+from models import Strategy, StrategyVersion, StrategyExecution, ExecutionMode, ExecutionStatus
+from core.services.user_sync_service import get_or_sync_user
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def create_strategy_run(
             # If strategy is draft, automatically activate it (for backward compatibility)
             if status_str_lower == "draft":
                 logger.info(f"Auto-activating draft strategy: strategy_id={strategy.id}")
-                from engine.models import StrategyStatus
+                from models import StrategyStatus
                 strategy.status = StrategyStatus.ACTIVE.value
                 db.commit()
                 db.refresh(strategy)

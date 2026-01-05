@@ -9,7 +9,7 @@ from common.db import test_db_connection, SessionLocal
 from common.redis import redis_client
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import text
-from engine.models import CronMaster, CronExecutionLog
+from models import CronMaster, CronExecutionLog
 from sqlalchemy.orm import Session
 import logging
 import shutil

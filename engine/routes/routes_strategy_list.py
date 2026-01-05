@@ -20,8 +20,8 @@ from collections import defaultdict
 import logging
 
 from common.db import get_db
-from engine.models import Strategy, StrategyVersion, StrategyExecution, User
-from engine.api.user_dependencies import get_current_user_strict
+from models import Strategy, StrategyVersion, StrategyExecution, User
+from api.user_dependencies import get_current_user_strict
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def get_strategies(
         logger.error(f"JWT USER ID = {user.id}, EXTERNAL USER ID = {user.external_user_id}")
         
         # Import StrategyStatus enum for proper filtering
-        from engine.models import StrategyStatus
+        from models import StrategyStatus
         
         # CRITICAL: Templates are GLOBAL and must not be user-scoped
         if strategy_type == "template":
@@ -215,7 +215,7 @@ def get_strategy_by_id(
         # User strategies must enforce ownership check
         if strategy.is_template == True:
             # Template strategy: Only allow access if ACTIVE
-            from engine.models import StrategyStatus
+            from models import StrategyStatus
             if strategy.status != StrategyStatus.ACTIVE:
                 raise HTTPException(
                     status_code=404,

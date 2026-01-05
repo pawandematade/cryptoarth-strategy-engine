@@ -15,14 +15,14 @@ MUST be idempotent (re-run should not duplicate data).
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
-from engine.core.services.backtest_candle_storage import (
+from core.services.backtest_candle_storage import (
     get_candles,
     insert_candles,
     create_table_if_not_exists,
     get_table_name,
     get_last_candle
 )
-from engine.core.feed.delta_history import fetch_ohlcv
+from core.feed.delta_history import fetch_ohlcv
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ def run_daily_backtest_cron(symbol: str, timeframe: str = DEFAULT_TIMEFRAME) -> 
     if last_candle_time:
         # Start from last candle + 1 interval to avoid duplicates
         # For 1h timeframe, add 3600 seconds
-        from engine.core.feed.delta_history import _get_timeframe_seconds
+        from core.feed.delta_history import _get_timeframe_seconds
         interval_seconds = _get_timeframe_seconds(timeframe)
         if interval_seconds > 0:
             start_time = last_candle_time + interval_seconds

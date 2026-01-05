@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
-from engine.models import Strategy, StrategyVersion, StrategyExecution, ExecutionStatus
+from models import Strategy, StrategyVersion, StrategyExecution, ExecutionStatus
 
 logger = logging.getLogger(__name__)
 

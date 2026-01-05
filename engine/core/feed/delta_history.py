@@ -3,7 +3,7 @@ import logging
 import time
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
-from engine.config import DELTA_BASE_URL
+from config import DELTA_BASE_URL
 
 logger = logging.getLogger(__name__)
 

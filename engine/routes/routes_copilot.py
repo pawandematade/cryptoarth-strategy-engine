@@ -18,24 +18,24 @@ import logging
 import json
 
 from common.db import get_db
-from engine.core.services.copilot_service import (
+from core.services.copilot_service import (
     process_copilot_message,
     save_copilot_session,
     load_copilot_session,
     delete_copilot_session,
     create_copilot_session
 )
-from engine.core.services.openai_service import generate_strategy
+from core.services.openai_service import generate_strategy
 # Note: We'll use BacktestEngine directly for Copilot flow to match existing pattern
-from engine.core.services.prompt_builder import build_prompt
-from engine.core.services.credit_service import (
+from core.services.prompt_builder import build_prompt
+from core.services.credit_service import (
     check_credits_available,
     deduct_credits
 )
-from engine.core.services.user_sync_service import get_or_sync_user
-from engine.core.engine.backtest_engine import BacktestEngine
-from engine.core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
-from engine.core.services.strategy_save_service import save_strategy
+from core.services.user_sync_service import get_or_sync_user
+from core.engine.backtest_engine import BacktestEngine
+from core.feed.delta_history import fetch_ohlcv, get_default_lookback_days
+from core.services.strategy_save_service import save_strategy
 from datetime import datetime, timedelta
 import copy
 import pandas as pd
@@ -419,7 +419,7 @@ def copilot_backtest(
                 strategy_copy['meta'] = meta
             
             # Get lookback_days
-            from engine.core.feed.delta_history import get_default_lookback_days
+            from core.feed.delta_history import get_default_lookback_days
             lookback_days = strategy_copy.get('lookback_days')
             if lookback_days is None:
                 lookback_days = get_default_lookback_days(timeframe)

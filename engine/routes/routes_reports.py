@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, extract, and_, or_
 from sqlalchemy.sql import text
 from common.db import get_db
-from engine.models import StrategyTrade
+from models import StrategyTrade
 from decimal import Decimal
 import logging
 from datetime import datetime

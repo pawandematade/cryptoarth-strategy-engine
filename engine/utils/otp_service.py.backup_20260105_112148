@@ -1,0 +1,23 @@
+
+# ============================================================================
+# OTP SERVICE DISABLED - Authentication handled by Django (DIGNO) only
+# ============================================================================
+# This file is kept for compatibility but OTP sending is disabled.
+# All authentication and OTP is handled by Django backend.
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+class OTPService:
+    """Dummy OTP service - Authentication handled by Django"""
+    
+    def __init__(self, phone: str, otp: str):
+        logger.warning("OTP Service called in FastAPI - This should not happen!")
+        logger.warning("All OTP should be handled by Django backend")
+        self.phone = phone
+        self.otp = otp
+    
+    def send_otp(self, provider="msg91") -> bool:
+        logger.error("OTP sending attempted in FastAPI! Redirect to Django.")
+        return False

@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from order.orders.service import get_live_price
 
 # SQLAlchemy models
-from engine.models_legacy_trading import copysignal
+from models_legacy_trading import copysignal
 
 # Redis cache (if needed)
 from common.redis import redis_client

@@ -6,9 +6,9 @@ import logging
 import requests
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
-from engine.models import User
+from models import User
 from common.config import AUTH_BACKEND_URL
-from engine.core.services.credit_service import initialize_user_credits
+from core.services.credit_service import initialize_user_credits
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

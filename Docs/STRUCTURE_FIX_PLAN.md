@@ -251,7 +251,7 @@ from engine.models import User  # or from common.models if shared
 **Example Changes:**
 ```python
 # Before
-from authenticate.models import User
+from django_backend.apps.auth.models import User
 from authenticate.utils.otp_service import OTPService
 
 # After

@@ -6,7 +6,7 @@ import logging
 from io import BytesIO
 from typing import List
 from datetime import datetime
-from engine.models import StrategyExecution, PaperTrade, Strategy
+from models import StrategyExecution, PaperTrade, Strategy
 from typing import List
 
 logger = logging.getLogger(__name__)

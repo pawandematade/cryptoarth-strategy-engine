@@ -10,8 +10,8 @@ import logging
 
 from common.db import get_db
 from common.auth import get_current_user
-from engine.models import User
-from engine.models_legacy_trading import BrokerModels
+from models import User
+from models_legacy_trading import BrokerModels
 from order.brokers.delta.client import DeltaExchangeClient
 from order.brokers.coindcx.client import coindcxclient
 from common.security import set_broker_credentials, get_broker_credentials

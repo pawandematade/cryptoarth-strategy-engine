@@ -1,7 +1,7 @@
 import time
 import logging
 from common.redis import redis_client
-from engine.strategies.loader import load_strategies
+from strategies.loader import load_strategies
 
 # Configure logging
 logging.basicConfig(

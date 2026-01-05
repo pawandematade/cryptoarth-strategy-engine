@@ -9,7 +9,7 @@ Pure deterministic execution - no side effects.
 
 import pandas as pd
 from typing import Dict, List, Optional, Any
-from engine.core.engine.strategy_runner import StrategyRunner
+from core.engine.strategy_runner import StrategyRunner
 
 
 class BacktestEngine:
