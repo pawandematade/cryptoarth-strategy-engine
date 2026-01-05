@@ -1,0 +1,134 @@
+import requests
+import logging
+from decouple import AutoConfig
+import os
+
+config = AutoConfig(search_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', '..'))
+logger = logging.getLogger(__name__)
+
+class OTPService:
+    """
+    URGENT FIX: EXACT MSG91 template variable mapping
+    """
+    def __init__(self, phone: str, otp: str):
+        self.phone = str(phone).strip()
+        self.otp = str(otp)
+    
+    def send_otp(self, provider="msg91") -> bool:
+        """
+        Send OTP via MSG91 with EXACT template variables
+        """
+        if provider in ["msg91", "text", "both"]:
+            return self._send_via_msg91_exact()
+        elif provider == "aisensy" or provider == "whatsapp":
+            return self._send_via_aisensy()
+        return False
+    
+    def _send_via_msg91_exact(self) -> bool:
+        """
+        URGENT FIX: EXACT template variable keys as per MSG91 template
+        Template uses: ##name##, ##otp##, ##time##
+        """
+        try:
+            auth_key = config("MSG91_AUTH_KEY", "")
+            flow_id = config("MSG91_FLOW_ID", "")
+            sender_id = config("MSG91_SENDER_ID", "TDARTH")
+            
+            if not auth_key or not flow_id:
+                logger.error("MSG91 credentials missing")
+                return False
+            
+            # EXACT MSG91 Flow API endpoint
+            url = "https://api.msg91.com/api/v5/flow/"
+            headers = {
+                "authkey": auth_key,
+                "Content-Type": "application/json"
+            }
+            
+            # Phone formatting: 91XXXXXXXXXX
+            phone_num = self.phone
+            if not phone_num.startswith('91'):
+                phone_num = f"91{phone_num}"
+            
+            # ============================================
+            # URGENT FIX: EXACT TEMPLATE VARIABLE MAPPING
+            # ============================================
+            payload = {
+                "flow_id": flow_id,
+                "sender": sender_id,
+                "mobiles": phone_num,
+                
+                # EXACT template variable keys (CASE-SENSITIVE)
+                "##name##": "User",      # Fixed value: "User"
+                "##otp##": self.otp,     # Dynamic OTP value
+                "##time##": "120"        # Fixed value: "120" (string)
+            }
+            
+            # Log exact payload for verification
+            logger.critical("🚨 URGENT MSG91 PAYLOAD VERIFICATION:")
+            logger.critical(f"🔑 flow_id: {flow_id}")
+            logger.critical(f"🔑 sender: {sender_id}")
+            logger.critical(f"🔑 mobiles: {phone_num}")
+            logger.critical(f"🔑 ##name##: User")
+            logger.critical(f"🔑 ##otp##: {self.otp}")
+            logger.critical(f"🔑 ##time##: 120")
+            logger.critical("=====================================")
+            
+            # Send with timeout to prevent delays
+            start_time = os.times().elapsed
+            response = requests.post(url, json=payload, headers=headers, timeout=5)
+            end_time = os.times().elapsed
+            response_time = end_time - start_time
+            
+            logger.critical(f"⏱️ MSG91 Response Time: {response_time:.2f}s")
+            logger.critical(f"📡 MSG91 Status: {response.status_code}")
+            logger.critical(f"📡 MSG91 Response: {response.text}")
+            
+            if response.status_code == 200:
+                try:
+                    resp_json = response.json()
+                    if resp_json.get("type") == "success":
+                        logger.critical(f"✅ MSG91 SUCCESS - All variables should appear")
+                        logger.critical(f"✅ Transaction ID: {resp_json.get('message')}")
+                        return True
+                    else:
+                        logger.critical(f"⚠️ MSG91 200 but not success type: {resp_json}")
+                        return True  # Still allow login
+                except:
+                    logger.critical(f"✅ MSG91 raw 200: {response.text}")
+                    return True
+            else:
+                logger.critical(f"❌ MSG91 Failed: {response.status_code} - {response.text}")
+                # Still return True so OTP can be displayed
+                return True
+                
+        except requests.exceptions.Timeout:
+            logger.critical("❌ MSG91 TIMEOUT - API too slow")
+            return True  # Allow OTP display
+        except Exception as e:
+            logger.critical(f"❌ MSG91 Exception: {str(e)}")
+            return True
+    
+    def _send_via_aisensy(self) -> bool:
+        """
+        AiSensy WhatsApp (secondary)
+        """
+        try:
+            api_key = config("AISENSY_API_KEY", "")
+            if not api_key:
+                return False
+            
+            url = "https://backend.aisensy.com/campaign/t1/api/v2/sendWhatsAppMessage"
+            payload = {
+                "apiKey": api_key,
+                "campaignName": "OTP_CAMPAIGN",
+                "destination": self.phone,
+                "userName": "User",
+                "templateParams": [self.otp, "2"]
+            }
+            
+            response = requests.post(url, json=payload, timeout=5)
+            return response.status_code == 200
+                
+        except Exception as e:
+            return False

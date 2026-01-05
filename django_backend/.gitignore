@@ -1,0 +1,28 @@
+# Python
+*.pyc
+__pycache__/
+
+# Virtual environments
+venv/
+../venv/
+
+# Environment files
+.env
+.env.*
+*.conf
+
+# Backups & temp files
+*.backup
+*.bak
+*.sql
+backup/
+backups/
+django_backend.backup/
+
+# Logs
+nohup.out
+
+# Test / debug
+test_*.py
+debug_*.py
+*.sh

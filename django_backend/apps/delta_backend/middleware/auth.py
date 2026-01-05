@@ -3,7 +3,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from django.core.cache import cache
 from django.contrib.auth import get_user_model
 
-from authenticate.models import User
+from django_backend.apps.auth.models import User
 
 class CachedJWTAuthentication(JWTAuthentication):
     CACHE_TIMEOUT = 60 * 15  # 15 minutes

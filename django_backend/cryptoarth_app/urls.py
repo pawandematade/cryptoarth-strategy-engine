@@ -12,5 +12,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', home, name='home'),
     path('health/', health_check, name='health_check'),
-    path('auth/', include('apps.delta_backend.auth_app.urls')),
+    path('auth/', include('cryptoarth_app.auth.urls')),
 ]

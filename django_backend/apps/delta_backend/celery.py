@@ -87,7 +87,7 @@ from celery import current_app
 
 @shared_task
 def check_all_position():
-    from authenticate.models import Position
+    from django_backend.apps.auth.models import Position
     from concurrent.futures import ThreadPoolExecutor, wait
     from django.db import connection
     
@@ -125,10 +125,10 @@ def convert_symbol(symbol):
     return base_currency1
 
 def process_position(user):
-    from authenticate.utils.coindcx import coindcxclient
-    from authenticate.models import OrderDetails,tradeDetails
-    from authenticate.utils.functions import get_live_price
-    from authenticate.utils.deltaexchange import DeltaExchangeClient
+    from django_backend.apps.auth.utils.coindcx import coindcxclient
+    from django_backend.apps.auth.models import OrderDetails,tradeDetails
+    from django_backend.apps.auth.utils.functions import get_live_price
+    from django_backend.apps.auth.utils.deltaexchange import DeltaExchangeClient
     from django.db import connection
     
     apikey,apisecret = user.broker.get_api_credentials()
@@ -203,7 +203,7 @@ def process_position(user):
 
 @shared_task
 def check_copy_tp():
-    from authenticate.models import copysignal
+    from django_backend.apps.auth.models import copysignal
     from concurrent.futures import ThreadPoolExecutor
 
     # copysignal.objects.filter(status = "Active", side = "BUY").update(status = "Processing")
@@ -215,7 +215,7 @@ def check_copy_tp():
 
 @shared_task
 def check_copy_sell_tp():
-    from authenticate.models import copysignal
+    from django_backend.apps.auth.models import copysignal
     from concurrent.futures import ThreadPoolExecutor
 
     # copysignal.objects.filter(status = "Active", side = "SELL").update(status = "Processing")
@@ -227,7 +227,7 @@ def check_copy_sell_tp():
 
 @shared_task
 def check_copy_limit():
-    from authenticate.models import copysignal
+    from django_backend.apps.auth.models import copysignal
     from concurrent.futures import ThreadPoolExecutor
     # copysignal.objects.filter(status = "Pending", side = "BUY", typeq = "limit").update(status = "Processing")
     userdata = copysignal.objects.filter(status = "Pending", side = "buy", typeq = "limit")
@@ -238,7 +238,7 @@ def check_copy_limit():
 
 @shared_task
 def check_copy_limit1():
-    from authenticate.models import copysignal
+    from django_backend.apps.auth.models import copysignal
     from concurrent.futures import ThreadPoolExecutor
     # copysignal.objects.filter(status = "Pending", side = "BUY", typeq = "limit").update(status = "Processing")
     userdata = copysignal.objects.filter(status = "Pending", side = "buy", typeq = "sllimit")
@@ -249,7 +249,7 @@ def check_copy_limit1():
 
 @shared_task
 def check_copy_sell_limit():
-    from authenticate.models import copysignal
+    from django_backend.apps.auth.models import copysignal
     from concurrent.futures import ThreadPoolExecutor
     userdata = copysignal.objects.filter(status = "Pending", side = "sell", typeq = "limit")
     tokens_set = set(userdata.values_list("symbol", flat=True))
@@ -259,7 +259,7 @@ def check_copy_sell_limit():
 
 @shared_task
 def check_copy_sell_limit1():
-    from authenticate.models import copysignal
+    from django_backend.apps.auth.models import copysignal
     from concurrent.futures import ThreadPoolExecutor
     userdata = copysignal.objects.filter(status = "Pending", side = "sell", typeq = "sllimit")
     tokens_set = set(userdata.values_list("symbol", flat=True))
@@ -278,8 +278,8 @@ def process_token_tp12(token):
     from django.core.cache import cache
     from django.db.models import Q,F
     from concurrent.futures import ThreadPoolExecutor
-    from authenticate.models import copysignal
-    from authenticate.utils.functions import get_live_price
+    from django_backend.apps.auth.models import copysignal
+    from django_backend.apps.auth.utils.functions import get_live_price
     
     price =  float(get_live_price(token))
 
@@ -299,8 +299,8 @@ def process_token_sell_tp23(token):
     from django.core.cache import cache
     from django.db.models import Q,F
     from concurrent.futures import ThreadPoolExecutor
-    from authenticate.models import copysignal
-    from authenticate.utils.functions import get_live_price
+    from django_backend.apps.auth.models import copysignal
+    from django_backend.apps.auth.utils.functions import get_live_price
     
     price =  float(get_live_price(token))
 
@@ -317,8 +317,8 @@ def process_token_sell_tp23(token):
 def process_buy_limit(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
-    from authenticate.models import copysignal
-    from authenticate.utils.functions import get_live_price
+    from django_backend.apps.auth.models import copysignal
+    from django_backend.apps.auth.utils.functions import get_live_price
     
     price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "buy", typeq = "limit",symbol = token,entry__gt =price).update(status = "Processing")
@@ -331,8 +331,8 @@ def process_buy_limit(token):
 def process_buy_limit1(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
-    from authenticate.models import copysignal
-    from authenticate.utils.functions import get_live_price
+    from django_backend.apps.auth.models import copysignal
+    from django_backend.apps.auth.utils.functions import get_live_price
     
     price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "buy", typeq = "sllimit",symbol = token,entry__lt =price).update(status = "Processing")
@@ -343,8 +343,8 @@ def process_buy_limit1(token):
 def process_sell_limit(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
-    from authenticate.models import copysignal
-    from authenticate.utils.functions import get_live_price
+    from django_backend.apps.auth.models import copysignal
+    from django_backend.apps.auth.utils.functions import get_live_price
     
     price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "sell", typeq = "limit",symbol = token , entry__lt =price).update(status = "Processing")
@@ -357,8 +357,8 @@ def process_sell_limit(token):
 def process_sell_limit1(token):
     from django.core.cache import cache
     from concurrent.futures import ThreadPoolExecutor
-    from authenticate.models import copysignal
-    from authenticate.utils.functions import get_live_price
+    from django_backend.apps.auth.models import copysignal
+    from django_backend.apps.auth.utils.functions import get_live_price
     
     price =  float(get_live_price(token))
     copysignal.objects.filter(status = "Pending", side = "sell", typeq = "sllimit",symbol = token , entry__gt =price).update(status = "Processing")

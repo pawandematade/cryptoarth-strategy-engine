@@ -6,7 +6,7 @@ def home(request):
     return JsonResponse({"status": "ok", "service": "CryptoArth API"})
 
 def health_check(request):
-    return JsonResponse({"status": "healthy"})
+    return JsonResponse({"status": "healthy"}, status=200)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
