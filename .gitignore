@@ -60,3 +60,4 @@ htmlcov/
 
 __pycache__/
 *.pyc
+simple_django/
